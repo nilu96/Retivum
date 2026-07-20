@@ -7,6 +7,8 @@ export type InterfaceType = 'websocket' | 'rnode' | 'tcp' | 'udp';
 export type RNodeConnectionType = 'ble' | 'serial';
 export type InterfaceMode = 'full' | 'pointToPoint' | 'accessPoint' | 'roaming' | 'boundary' | 'gateway';
 
+export const AUTHORIZED_SERIAL_PORT_ID = 'authorized-serial-port';
+
 export const interfaceModes: readonly InterfaceMode[] = [
   'full',
   'pointToPoint',
@@ -497,11 +499,13 @@ export function udpAddress(config: UdpInterfaceConfig): string {
   return `${listenHost}:${config.connection.listenPort} → ${forwardHost}:${config.connection.forwardPort}`;
 }
 
-export function interfaceDescription(config: InterfaceConfig): string {
+export function interfaceDescription(config: InterfaceConfig, authorizedSerialPortName?: string): string {
   if (config.type === 'websocket') return websocketUrl(config);
   if (config.type === 'tcp') return tcpAddress(config);
   if (config.type === 'udp') return udpAddress(config);
-  const device = config.connection.deviceName ?? config.connection.deviceId;
+  const device = config.connection.deviceId === AUTHORIZED_SERIAL_PORT_ID
+    ? authorizedSerialPortName ?? config.connection.deviceId
+    : config.connection.deviceName ?? config.connection.deviceId;
   return `${config.connection.type.toUpperCase()}${device ? ` · ${device}` : ''} · ${config.radio.frequency} Hz`;
 }
 

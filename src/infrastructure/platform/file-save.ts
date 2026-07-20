@@ -5,10 +5,21 @@ interface RetivumImageSharePlugin {
     data: string;
     name: string;
     mimeType: string;
+    saveLabel?: string;
+    shareLabel?: string;
+    cancelLabel?: string;
+    shareTitle?: string;
   }): Promise<{ activityType?: string; completed: boolean }>;
 }
 
 export type ChatFileContentKind = 'image' | 'audio' | 'file';
+
+export interface NativeImageActionLabels {
+  save: string;
+  share: string;
+  cancel: string;
+  shareTitle: string;
+}
 
 const nativeImageShare = registerPlugin<RetivumImageSharePlugin>('RetivumImageShare');
 
@@ -17,6 +28,7 @@ export async function saveChatFile(
   mimeType: string,
   data: Uint8Array,
   contentKind?: ChatFileContentKind,
+  nativeImageLabels?: NativeImageActionLabels,
 ): Promise<boolean> {
   const safeName = name.replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, '_').slice(0, 255) || 'attachment.bin';
   try {
@@ -26,7 +38,17 @@ export async function saveChatFile(
         || (contentKind === undefined && mimeType.toLowerCase().startsWith('image/'));
       if ((Capacitor.getPlatform() === 'ios' || Capacitor.getPlatform() === 'android') && isImage) {
         try {
-          await nativeImageShare.shareImage({ data: base64Data, name: safeName, mimeType });
+          await nativeImageShare.shareImage({
+            data: base64Data,
+            name: safeName,
+            mimeType,
+            ...(nativeImageLabels ? {
+              saveLabel: nativeImageLabels.save,
+              shareLabel: nativeImageLabels.share,
+              cancelLabel: nativeImageLabels.cancel,
+              shareTitle: nativeImageLabels.shareTitle,
+            } : {}),
+          });
           return true;
         } catch (error) {
           if (nativeErrorCode(error) !== 'UNSUPPORTED_IMAGE_ENCODING') throw error;

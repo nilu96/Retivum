@@ -54,7 +54,12 @@
     if (saving) return;
     saving = true;
     try {
-      if (!await saveChatFile(attachment.name, attachment.mimeType, attachment.data, attachment.kind)) {
+      if (!await saveChatFile(attachment.name, attachment.mimeType, attachment.data, attachment.kind, {
+        save: $t('chat.attachment.saveImageAction'),
+        share: $t('chat.attachment.shareImageAction'),
+        cancel: $t('common.cancel'),
+        shareTitle: $t('chat.attachment.shareImageTitle'),
+      })) {
         toast.error('chat.attachment.saveError');
       }
     } finally {
