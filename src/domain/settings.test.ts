@@ -4,7 +4,6 @@ import {
   createRNodeInterfaceDraft,
   createTcpInterfaceDraft,
   createUdpInterfaceDraft,
-  interfaceRequiresReannounce,
   interfaceModes,
   interfaceShouldAnnounceWhenOnline,
   lxmfInboundSourceAllowed,
@@ -79,23 +78,34 @@ describe('platform interface configuration', () => {
     }
   });
 
-  it('requires a reconnect announce only for session-oriented interfaces', () => {
-    expect(interfaceRequiresReannounce('websocket')).toBe(true);
-    expect(interfaceRequiresReannounce('tcp')).toBe(true);
-    expect(interfaceRequiresReannounce('rnode')).toBe(false);
-    expect(interfaceRequiresReannounce('udp')).toBe(false);
+  it('enables reconnect announcements for new and migrated interfaces', () => {
+    expect(createWebSocketInterfaceDraft().reannounceOnReconnect).toBe(true);
+    expect(createTcpInterfaceDraft().reannounceOnReconnect).toBe(true);
+    expect(createRNodeInterfaceDraft('ble').reannounceOnReconnect).toBe(true);
+    expect(createUdpInterfaceDraft().reannounceOnReconnect).toBe(true);
+
+    expect(normalizeInterfaceConfig({
+      ...createRNodeInterfaceDraft('ble', 'legacy-rnode'),
+      schemaVersion: 2,
+      reannounceOnReconnect: undefined,
+    })?.reannounceOnReconnect).toBe(true);
+    expect(normalizeInterfaceConfig({
+      ...createUdpInterfaceDraft('legacy-udp'),
+      schemaVersion: 1,
+      reannounceOnReconnect: undefined,
+    })?.reannounceOnReconnect).toBe(true);
+
+    expect(normalizeInterfaceConfig({
+      ...createWebSocketInterfaceDraft('configured-websocket'),
+      reannounceOnReconnect: false,
+    })?.reannounceOnReconnect).toBe(false);
   });
 
-  it('announces every interface once, then follows its reconnect policy', () => {
-    expect(interfaceShouldAnnounceWhenOnline('websocket', true)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline('tcp', true)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline('rnode', true)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline('udp', true)).toBe(true);
-
-    expect(interfaceShouldAnnounceWhenOnline('websocket', false)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline('tcp', false)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline('rnode', false)).toBe(false);
-    expect(interfaceShouldAnnounceWhenOnline('udp', false)).toBe(false);
+  it('announces every interface once, then follows the saved instance setting', () => {
+    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: false }, true)).toBe(true);
+    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: true }, true)).toBe(true);
+    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: false }, false)).toBe(false);
+    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: true }, false)).toBe(true);
   });
 
   it('normalizes and validates RNode radio and device settings', () => {

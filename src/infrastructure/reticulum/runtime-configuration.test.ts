@@ -50,11 +50,12 @@ describe('requiresReticulumRuntimeRebuild', () => {
 
     const websocket: WebSocketInterfaceConfig = {
       id: 'interface-1',
-      schemaVersion: 2,
+      schemaVersion: 3,
       type: 'websocket',
       name: 'Home relay',
       enabled: true,
       mode: 'full',
+      reannounceOnReconnect: true,
       connection: { scheme: 'ws', host: 'localhost', port: 8765, path: '/' },
     };
     expect(requiresReticulumRuntimeRebuild(current, { ...current, interfaces: [websocket] })).toBe(true);

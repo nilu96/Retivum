@@ -92,7 +92,12 @@
           <span><strong>{$t('interface.editor.enabled')}</strong></span>
           <input type="checkbox" role="switch" bind:checked={draft.enabled} />
         </label>
-        <InterfaceAdvancedSettings mode={draft.mode} onchange={(mode) => { draft.mode = mode; }} />
+        <InterfaceAdvancedSettings
+          mode={draft.mode}
+          reannounceOnReconnect={draft.reannounceOnReconnect}
+          onchange={(mode) => { draft.mode = mode; }}
+          onreannouncechange={(enabled) => { draft.reannounceOnReconnect = enabled; }}
+        />
       </div>
       <footer>
         <button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button>

@@ -32,7 +32,6 @@ import {
   propagationIsActive,
   resolveLxmfDeliveryPlan,
   type InterfaceConfig,
-  type InterfaceType,
   type WebSocketInterfaceConfig,
 } from '../domain/settings';
 import type {
@@ -131,7 +130,7 @@ const activationStorageWaiters = new Map<string, (ok: boolean) => void>();
 interface InterfaceDriver {
   state: InterfaceRuntimeState;
   readonly stableId: string;
-  readonly type: InterfaceType;
+  readonly reannounceOnReconnect: boolean;
   hasRuntimeId(runtimeId: number | undefined): boolean;
   attach(owner: ReticulumNode): void;
   connect(): void;
@@ -1408,12 +1407,12 @@ function tryAutomaticPropagationSync(): boolean {
 }
 
 function handleInterfaceOnline(driver: InterfaceDriver, firstOnline: boolean): void {
-  if (interfaceShouldAnnounceWhenOnline(driver.type, firstOnline)) {
+  if (interfaceShouldAnnounceWhenOnline(driver, firstOnline)) {
     // Every interface announces once after it is attached to this runtime.
-    // Later online transitions only reannounce for session-oriented transports
-    // such as TCP and WebSocket. The announce is always targeted to the single
-    // interface that became online, so bringing several interfaces up cannot
-    // multiply announcements across all interfaces.
+    // Later online transitions follow this interface instance's persisted
+    // reconnect policy. The announce is always targeted to the single interface
+    // that became online, so bringing several interfaces up cannot multiply
+    // announcements across all interfaces.
     announceLxmf('automatic', new Set([driver.stableId]));
   }
   // Interface-online announcements do not move the regular broadcast
@@ -2556,8 +2555,8 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     return this.config.id;
   }
 
-  get type(): InterfaceType {
-    return this.config.type;
+  get reannounceOnReconnect(): boolean {
+    return this.config.reannounceOnReconnect;
   }
 
   hasRuntimeId(runtimeId: number | undefined): boolean {
@@ -2727,8 +2726,8 @@ class WebSocketDriver {
     return this.config.id;
   }
 
-  get type(): InterfaceType {
-    return this.config.type;
+  get reannounceOnReconnect(): boolean {
+    return this.config.reannounceOnReconnect;
   }
 
   hasRuntimeId(runtimeId: number | undefined): boolean {

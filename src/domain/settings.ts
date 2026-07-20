@@ -18,28 +18,11 @@ export const interfaceModes: readonly InterfaceMode[] = [
   'gateway',
 ] as const;
 
-export interface InterfaceTypeBehavior {
-  /**
-   * Whether an interface needs another destination announce after its first
-   * online transition in the current runtime. Every interface announces on
-   * its first online transition regardless of this value.
-   */
-  reannounceOnReconnect: boolean;
-}
-
-export const interfaceTypeBehaviors: Readonly<Record<InterfaceType, InterfaceTypeBehavior>> = {
-  websocket: { reannounceOnReconnect: true },
-  tcp: { reannounceOnReconnect: true },
-  rnode: { reannounceOnReconnect: false },
-  udp: { reannounceOnReconnect: false },
-};
-
-export function interfaceRequiresReannounce(type: InterfaceType): boolean {
-  return interfaceTypeBehaviors[type].reannounceOnReconnect;
-}
-
-export function interfaceShouldAnnounceWhenOnline(type: InterfaceType, firstOnline: boolean): boolean {
-  return firstOnline || interfaceRequiresReannounce(type);
+export function interfaceShouldAnnounceWhenOnline(
+  config: Pick<InterfaceConfig, 'reannounceOnReconnect'>,
+  firstOnline: boolean,
+): boolean {
+  return firstOnline || config.reannounceOnReconnect;
 }
 
 export interface LxmfPreferences {
@@ -62,11 +45,12 @@ export interface AppPreferences {
 
 export interface WebSocketInterfaceConfig {
   id: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
   type: 'websocket';
   name: string;
   enabled: boolean;
   mode: InterfaceMode;
+  reannounceOnReconnect: boolean;
   connection: {
     scheme: WebSocketScheme;
     host: string;
@@ -77,11 +61,12 @@ export interface WebSocketInterfaceConfig {
 
 export interface RNodeInterfaceConfig {
   id: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
   type: 'rnode';
   name: string;
   enabled: boolean;
   mode: InterfaceMode;
+  reannounceOnReconnect: boolean;
   connection: {
     type: RNodeConnectionType;
     deviceId?: string;
@@ -102,11 +87,12 @@ export interface RNodeInterfaceConfig {
 
 export interface TcpInterfaceConfig {
   id: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
   type: 'tcp';
   name: string;
   enabled: boolean;
   mode: InterfaceMode;
+  reannounceOnReconnect: boolean;
   connection: {
     host: string;
     port: number;
@@ -115,11 +101,12 @@ export interface TcpInterfaceConfig {
 
 export interface UdpInterfaceConfig {
   id: string;
-  schemaVersion: 1;
+  schemaVersion: 2;
   type: 'udp';
   name: string;
   enabled: boolean;
   mode: InterfaceMode;
+  reannounceOnReconnect: boolean;
   connection: {
     listenHost: string;
     listenPort: number;
@@ -245,11 +232,12 @@ export function normalizeAutoAnnounceInterval(value: unknown, legacyEnabled?: bo
 export function createWebSocketInterfaceDraft(id: string = crypto.randomUUID()): WebSocketInterfaceConfig {
   return {
     id,
-    schemaVersion: 2,
+    schemaVersion: 3,
     type: 'websocket',
     name: '',
     enabled: true,
     mode: 'full',
+    reannounceOnReconnect: true,
     connection: {
       scheme: 'ws',
       host: 'localhost',
@@ -265,11 +253,12 @@ export function createRNodeInterfaceDraft(
 ): RNodeInterfaceConfig {
   return {
     id,
-    schemaVersion: 2,
+    schemaVersion: 3,
     type: 'rnode',
     name: '',
     enabled: true,
     mode: 'full',
+    reannounceOnReconnect: true,
     connection: { type: connectionType },
     radio: {
       frequency: 869_525_000,
@@ -286,11 +275,12 @@ export function createRNodeInterfaceDraft(
 export function createTcpInterfaceDraft(id: string = crypto.randomUUID()): TcpInterfaceConfig {
   return {
     id,
-    schemaVersion: 1,
+    schemaVersion: 2,
     type: 'tcp',
     name: '',
     enabled: true,
     mode: 'full',
+    reannounceOnReconnect: true,
     connection: { host: 'localhost', port: 4242 },
   };
 }
@@ -298,11 +288,12 @@ export function createTcpInterfaceDraft(id: string = crypto.randomUUID()): TcpIn
 export function createUdpInterfaceDraft(id: string = crypto.randomUUID()): UdpInterfaceConfig {
   return {
     id,
-    schemaVersion: 1,
+    schemaVersion: 2,
     type: 'udp',
     name: '',
     enabled: true,
     mode: 'full',
+    reannounceOnReconnect: true,
     connection: {
       listenHost: '0.0.0.0',
       listenPort: 4242,
@@ -320,6 +311,7 @@ export function normalizeWebSocketInterfaceConfig(value: unknown): WebSocketInte
     name?: unknown;
     enabled?: unknown;
     mode?: unknown;
+    reannounceOnReconnect?: unknown;
     connection?: {
       scheme?: unknown;
       host?: unknown;
@@ -333,6 +325,9 @@ export function normalizeWebSocketInterfaceConfig(value: unknown): WebSocketInte
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
+  normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
+    ? source.reannounceOnReconnect
+    : true;
   normalized.connection.scheme = source.connection?.scheme === 'wss' ? 'wss' : 'ws';
   normalized.connection.host = typeof source.connection?.host === 'string' ? source.connection.host : '';
   normalized.connection.port = typeof source.connection?.port === 'number' ? source.connection.port : undefined;
@@ -350,6 +345,9 @@ export function normalizeRNodeInterfaceConfig(value: unknown): RNodeInterfaceCon
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
+  normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
+    ? source.reannounceOnReconnect
+    : true;
   normalized.connection.deviceId = typeof source.connection?.deviceId === 'string' ? source.connection.deviceId : undefined;
   normalized.connection.deviceName = typeof source.connection?.deviceName === 'string' ? source.connection.deviceName : undefined;
   normalized.connection.usbVendorId = finiteInteger(source.connection?.usbVendorId);
@@ -372,6 +370,9 @@ export function normalizeTcpInterfaceConfig(value: unknown): TcpInterfaceConfig 
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
+  normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
+    ? source.reannounceOnReconnect
+    : true;
   normalized.connection.host = typeof source.connection?.host === 'string' ? source.connection.host : '';
   normalized.connection.port = finiteNumber(source.connection?.port) ?? normalized.connection.port;
   return normalized;
@@ -385,6 +386,9 @@ export function normalizeUdpInterfaceConfig(value: unknown): UdpInterfaceConfig 
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
+  normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
+    ? source.reannounceOnReconnect
+    : true;
   normalized.connection.listenHost = typeof source.connection?.listenHost === 'string'
     ? source.connection.listenHost
     : normalized.connection.listenHost;

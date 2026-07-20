@@ -42,7 +42,12 @@
       <div class="endpoint-preview">{tcpAddress(draft)}</div>
       <div class="interface-editor-final-settings">
         <label class="toggle-row"><span><strong>{$t('interface.editor.enabled')}</strong></span><input type="checkbox" role="switch" bind:checked={draft.enabled} /></label>
-        <InterfaceAdvancedSettings mode={draft.mode} onchange={(mode) => { draft.mode = mode; }} />
+        <InterfaceAdvancedSettings
+          mode={draft.mode}
+          reannounceOnReconnect={draft.reannounceOnReconnect}
+          onchange={(mode) => { draft.mode = mode; }}
+          onreannouncechange={(enabled) => { draft.reannounceOnReconnect = enabled; }}
+        />
       </div>
       <footer><button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button><button class="button primary" type="submit" disabled={saving}>{saving ? $t('common.loading') : $t('common.save')}</button></footer>
     </form>

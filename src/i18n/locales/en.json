@@ -412,6 +412,8 @@
   "interface.editor.enabled": "Enable after saving",
   "interface.editor.advanced.show": "Show advanced settings",
   "interface.editor.advanced.hide": "Hide advanced settings",
+  "interface.editor.reannounceOnReconnect": "Announce after reconnecting",
+  "interface.editor.reannounceOnReconnect.help": "Send a new LXMF destination announce through this interface whenever it reconnects. The first connection always announces.",
   "interface.editor.mode": "Interface mode",
   "interface.editor.mode.notice": "Non-Full modes are intended for specific Reticulum topologies. Their forwarding behavior is most relevant when this device is a transport node.",
   "interface.editor.mode.full": "Full",

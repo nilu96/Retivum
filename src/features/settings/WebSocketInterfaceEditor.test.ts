@@ -30,8 +30,13 @@ describe('WebSocketInterfaceEditor', () => {
     expect(screen.getByRole('button', { name: 'Hide advanced settings' })).toHaveAttribute('aria-expanded', 'true');
 
     await fireEvent.change(screen.getByRole('combobox', { name: /Interface mode/ }), { target: { value: 'gateway' } });
+    await fireEvent.click(screen.getByRole('switch', { name: /Announce after reconnecting/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(onsave).toHaveBeenCalledWith(expect.objectContaining({ id: 'relay-mode', mode: 'gateway' }));
+    expect(onsave).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'relay-mode',
+      mode: 'gateway',
+      reannounceOnReconnect: false,
+    }));
   });
 });

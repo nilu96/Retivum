@@ -776,7 +776,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .interface-advanced-toggle:hover { color: var(--text); }
 .interface-advanced-toggle svg { flex: none; transition: rotate .15s ease; }
 .interface-advanced-toggle.expanded svg { rotate: 180deg; }
-.interface-advanced-content { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.interface-advanced-content { display: grid; gap: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
+.interface-advanced-group { display: grid; gap: 8px; min-width: 0; }
 .interface-advanced-content .field small { color: var(--text-subtle); font-size: .68rem; line-height: 1.4; }
 .interface-mode-notice { margin: 0; color: var(--text-subtle); font-size: .68rem; line-height: 1.45; }
 .validation-summary { padding: 10px 12px; border: 1px solid var(--danger); border-radius: 9px; background: var(--danger-soft); }

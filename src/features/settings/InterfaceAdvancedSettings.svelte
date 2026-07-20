@@ -5,10 +5,14 @@
 
   let {
     mode,
+    reannounceOnReconnect,
     onchange,
+    onreannouncechange,
   }: {
     mode: InterfaceMode;
+    reannounceOnReconnect: boolean;
     onchange: (mode: InterfaceMode) => void;
+    onreannouncechange: (enabled: boolean) => void;
   } = $props();
 
   let expanded = $state(false);
@@ -48,16 +52,32 @@
 
   {#if expanded}
     <div id="interface-advanced-content" class="interface-advanced-content">
-      <label class="field full-width">
-        <span>{$t('interface.editor.mode')}</span>
-        <select value={mode} onchange={(event) => onchange(event.currentTarget.value as InterfaceMode)}>
-          {#each interfaceModes as interfaceMode}
-            <option value={interfaceMode}>{$t(labels[interfaceMode])}</option>
-          {/each}
-        </select>
-        <small>{$t(descriptions[mode])}</small>
-      </label>
-      <p class="interface-mode-notice">{$t('interface.editor.mode.notice')}</p>
+      <div class="interface-advanced-group">
+        <label class="toggle-row">
+          <span>
+            <strong>{$t('interface.editor.reannounceOnReconnect')}</strong>
+            <small>{$t('interface.editor.reannounceOnReconnect.help')}</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={reannounceOnReconnect}
+            onchange={(event) => onreannouncechange(event.currentTarget.checked)}
+          />
+        </label>
+      </div>
+      <div class="interface-advanced-group">
+        <label class="field full-width">
+          <span>{$t('interface.editor.mode')}</span>
+          <select value={mode} onchange={(event) => onchange(event.currentTarget.value as InterfaceMode)}>
+            {#each interfaceModes as interfaceMode}
+              <option value={interfaceMode}>{$t(labels[interfaceMode])}</option>
+            {/each}
+          </select>
+          <small>{$t(descriptions[mode])}</small>
+        </label>
+        <p class="interface-mode-notice">{$t('interface.editor.mode.notice')}</p>
+      </div>
     </div>
   {/if}
 </section>
