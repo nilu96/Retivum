@@ -578,6 +578,12 @@
       && event.currentTarget.form?.requestSubmit();
   }
 
+  function preserveComposerFocus(event: PointerEvent): void {
+    if (document.activeElement !== composerTextarea) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('.conversation-detail button')) event.preventDefault();
+  }
+
   function resizeComposer(event?: Event): void {
     const textarea = event?.currentTarget instanceof HTMLTextAreaElement
       ? event.currentTarget
@@ -755,6 +761,8 @@
     recording = false;
   }
 </script>
+
+<svelte:window onpointerdown={preserveComposerFocus} />
 
 <div
   class="chat-workspace"

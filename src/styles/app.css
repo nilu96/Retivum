@@ -851,7 +851,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   }
   .app-shell:has(.chat-workspace.conversation-selected) .mobile-identity-actions {
     display: flex;
-    inset-block-end: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 78px);
+    inset-block-end: calc(env(safe-area-inset-bottom, 0px) + 78px);
   }
   .app-shell:has(.chat-workspace.conversation-selected.message-feed-scrollable) .mobile-identity-actions {
     inset-block-start: calc(env(safe-area-inset-top, 0px) + 72px);
@@ -866,6 +866,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .app-shell select { font-size: 16px !important; }
   .app-shell.chat-route { height: 100dvh; min-height: 0; overflow: hidden; }
   .app-shell.chat-route main { height: calc(100dvh - env(safe-area-inset-top, 0px) - var(--bottom-nav-height) - env(safe-area-inset-bottom, 0px)); min-height: 0; overflow: hidden; }
+  .app-shell.chat-route:has(.chat-workspace.conversation-selected) { padding-block-end: env(safe-area-inset-bottom, 0px); }
+  .app-shell.chat-route:has(.chat-workspace.conversation-selected) main { height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
+  .app-shell:has(.chat-workspace.conversation-selected) .bottom-navigation { display: none; }
   .chat-workspace { display: block; height: 100%; min-height: 0; overflow: hidden; }
   .chat-overview { height: 100%; min-height: 0; border: 0; }
   .chat-header { padding: 23px 17px 17px; }

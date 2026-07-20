@@ -191,10 +191,17 @@ describe('ChatView', () => {
     feed.scrollTop = 100;
     await fireEvent.scroll(feed);
     const scrollButton = await screen.findByRole('button', { name: 'Scroll to latest message' });
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    composer.focus();
+    const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+    scrollButton.dispatchEvent(pointerDown);
+    expect(pointerDown).toHaveProperty('defaultPrevented', true);
+    expect(composer).toHaveFocus();
     await fireEvent.click(scrollButton);
 
     await waitFor(() => expect(feed.scrollTop).toBe(1200));
     expect(screen.queryByRole('button', { name: 'Scroll to latest message' })).not.toBeInTheDocument();
+    expect(composer).toHaveFocus();
   });
 
   it('scrolls to a newly received message in the open conversation', async () => {
@@ -845,12 +852,20 @@ describe('ChatView', () => {
     await waitFor(() => expect(feed.scrollTop).toBe(400));
     feed.scrollTop = 0;
     feedHeight = 1400;
-    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hello Bob' } });
-    await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    await fireEvent.input(composer, { target: { value: 'Hello Bob' } });
+    composer.focus();
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
+    const pointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+    sendButton.dispatchEvent(pointerDown);
+    expect(pointerDown).toHaveProperty('defaultPrevented', true);
+    expect(composer).toHaveFocus();
+    await fireEvent.click(sendButton);
 
     expect(send).toHaveBeenCalledWith(destinationHash, 'Hello Bob', '', []);
     await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue(''));
     await waitFor(() => expect(feed.scrollTop).toBe(1400));
+    expect(composer).toHaveFocus();
   });
 
   it('dismisses the attachment menu outside and exposes one shared file chooser', async () => {
