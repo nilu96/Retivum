@@ -1,0 +1,11 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Retivum</string>
+    <string name="title_activity_main">Retivum</string>
+    <string name="package_name">de.nilu96.retivum</string>
+    <string name="custom_url_scheme">de.nilu96.retivum</string>
+    <string name="image_share_save">Save image</string>
+    <string name="image_share_share">Share…</string>
+    <string name="image_share_cancel">Cancel</string>
+    <string name="image_share_chooser_title">Share image</string>
+</resources>

@@ -1,0 +1,80 @@
+{
+  "name": "retivum",
+  "version": "0.1.0",
+  "main": "electron/main.mjs",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "build": {
+    "appId": "de.nilu96.retivum",
+    "productName": "Retivum",
+    "directories": {
+      "buildResources": "electron/assets"
+    },
+    "mac": {
+      "icon": "icon.icns",
+      "hardenedRuntime": true,
+      "entitlements": "electron/entitlements.mac.plist",
+      "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Retivum uses the microphone when you record an audio message.",
+        "NSCameraUsageDescription": "Retivum uses the camera when you scan an LXMA contact QR code."
+      }
+    },
+    "win": {
+      "icon": "icon.ico"
+    },
+    "linux": {
+      "icon": "icon.png"
+    }
+  },
+  "scripts": {
+    "predev": "npm run icons:generate",
+    "dev": "vite",
+    "icons:generate": "node scripts/generate-icons.mjs",
+    "prebuild": "npm run icons:generate",
+    "build": "vite build",
+    "native:sync": "npm run build && cap sync",
+    "android:open": "npm run native:sync && cap open android",
+    "ios:open": "npm run native:sync && cap open ios",
+    "desktop:run": "npm run build && electron electron/main.mjs",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "postinstall": "node scripts/prepare-capacitor-udp-socket.mjs"
+  },
+  "dependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
+    "@capacitor/android": "8.4.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "8.4.2",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/ios": "8.4.2",
+    "@capacitor/screen-orientation": "8.0.1",
+    "@capacitor/share": "^8.0.1",
+    "@capgo/capacitor-bluetooth-low-energy": "8.2.0",
+    "@devioarts/capacitor-tcpclient": "0.2.1",
+    "@zxing/browser": "^0.2.1",
+    "capacitor-udp-socket": "7.0.0",
+    "micron-parser": "^1.0.3",
+    "qrcode": "1.5.4",
+    "svelte": "5.56.5"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.4.2",
+    "@sveltejs/vite-plugin-svelte": "7.2.0",
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/svelte": "5.4.2",
+    "@types/node": "26.1.1",
+    "@types/qrcode": "1.5.5",
+    "electron": "43.1.1",
+    "fake-indexeddb": "6.2.5",
+    "jsdom": "29.1.1",
+    "sharp": "^0.34.5",
+    "svelte-check": "4.7.3",
+    "typescript": "6.0.3",
+    "vite": "8.1.5",
+    "vitest": "4.1.10"
+  }
+}

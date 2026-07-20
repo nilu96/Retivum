@@ -1,0 +1,917 @@
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  chatAnnounces,
+  blockedChatDestinations,
+  chatContacts,
+  chatMessages,
+  markChatMessagesRead,
+  noteUnreadChatMessage,
+} from '../../infrastructure/reticulum/chat-state';
+import {
+  chatInboundTransfers,
+  destinationPathStatuses,
+  propagationSyncActive,
+  reticulumRuntime,
+} from '../../infrastructure/reticulum/runtime';
+import ToastViewport from '../../lib/components/ToastViewport.svelte';
+import { clearToasts } from '../../lib/notifications/toasts';
+import ChatView from './ChatView.svelte';
+
+describe('ChatView', () => {
+  beforeEach(() => {
+    chatAnnounces.set([]);
+    chatContacts.set([]);
+    chatMessages.set([]);
+    blockedChatDestinations.set([]);
+    destinationPathStatuses.set({});
+    chatInboundTransfers.set([]);
+    propagationSyncActive.set(false);
+    markChatMessagesRead();
+    clearToasts();
+    vi.restoreAllMocks();
+  });
+
+  it('switches between the localized overview scopes', async () => {
+    render(ChatView);
+
+    expect(screen.getByRole('heading', { name: 'No conversations yet' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('tab', { name: 'Contacts' }));
+    expect(screen.getByRole('heading', { name: 'No contacts saved' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search contacts')).toBeInTheDocument();
+  });
+
+  it('syncs from the preferred or best discovered propagation node independently of sending preferences', async () => {
+    const sync = vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 2, duplicates: 1 });
+    render(ChatView);
+    render(ToastViewport);
+
+    const syncButton = await screen.findByRole('button', { name: 'Sync messages from the preferred or best available propagation node' });
+    expect(syncButton).toBeEnabled();
+    await fireEvent.click(syncButton);
+
+    expect(sync).toHaveBeenCalledOnce();
+    expect(await screen.findByText('Sync complete. 2 new messages.')).toBeInTheDocument();
+  });
+
+  it('keeps showing an active propagation sync after the chat view is remounted', async () => {
+    propagationSyncActive.set(true);
+    const firstView = render(ChatView);
+
+    const firstButton = await screen.findByRole('button', { name: 'Syncing messages from propagation node' });
+    expect(firstButton).toBeDisabled();
+    expect(firstButton).toHaveClass('syncing');
+
+    firstView.unmount();
+    render(ChatView);
+
+    const remountedButton = await screen.findByRole('button', { name: 'Syncing messages from propagation node' });
+    expect(remountedButton).toBeDisabled();
+    expect(remountedButton).toHaveClass('syncing');
+  });
+
+  it('provides propagation sync beside the contact action in an open mobile conversation', async () => {
+    const destinationHash = '7'.repeat(32);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: 'b'.repeat(32),
+      publicKey: 'c'.repeat(128),
+      displayName: 'Mobile peer',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const sync = vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 0, duplicates: 0 });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Mobile peer/ }));
+    const mobileSync = document.querySelector<HTMLButtonElement>('.mobile-conversation-sync-button');
+    expect(mobileSync).not.toBeNull();
+    expect(mobileSync).toBeEnabled();
+    if (mobileSync) await fireEvent.click(mobileSync);
+
+    expect(sync).toHaveBeenCalledOnce();
+  });
+
+  it('shows heard LXMF destinations and received messages', async () => {
+    const sourceHash = 'a'.repeat(32);
+    chatAnnounces.set([{
+      id: `identity:${sourceHash}`,
+      identityId: 'identity',
+      destinationHash: sourceHash,
+      identityHash: 'b'.repeat(32),
+      publicKey: 'c'.repeat(128),
+      displayName: 'Alice',
+      hops: 3,
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatMessages.set([{
+      id: 'identity:message',
+      identityId: 'identity',
+      messageId: 'message',
+      sourceHash,
+      destinationHash: 'd'.repeat(32),
+      title: 'Greeting',
+      content: 'Hello from LXMF',
+      verification: 'verified',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    destinationPathStatuses.set({
+      [sourceHash]: { destinationHash: sourceHash, hasPath: true, hops: 3 },
+    });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    expect(screen.getByText('Alice')).toBeInTheDocument();
+    expect(screen.getByText(sourceHash)).toBeInTheDocument();
+    expect(screen.getByLabelText('Known path: 3 hops')).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Chats' }));
+    expect(screen.getByText('Hello from LXMF')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: /Alice.*Hello from LXMF/ }));
+
+    expect(screen.getByRole('log', { name: 'Conversation messages' })).toBeInTheDocument();
+    expect(screen.getByText('Greeting')).toBeInTheDocument();
+    expect(screen.getAllByText('Hello from LXMF')).toHaveLength(2);
+    expect(screen.getByText('Verification: verified')).toBeInTheDocument();
+  });
+
+  it('scrolls to the latest message when a conversation is opened', async () => {
+    const sourceHash = '9'.repeat(32);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1200);
+    chatMessages.set([{
+      id: 'identity:older-message',
+      identityId: 'identity',
+      messageId: 'older-message',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Older message',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: 'identity:latest-message',
+      identityId: 'identity',
+      messageId: 'latest-message',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Latest message',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Latest message/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+
+    await waitFor(() => expect(feed.scrollTop).toBe(1200));
+  });
+
+  it('offers to scroll to the latest message when the open conversation is not at the bottom', async () => {
+    const sourceHash = '9'.repeat(32);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1200);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    chatMessages.set([{
+      id: 'identity:scroll-control-message',
+      identityId: 'identity',
+      messageId: 'scroll-control-message',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Scrollable conversation',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Scrollable conversation/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(1200));
+    expect(screen.queryByRole('button', { name: 'Scroll to latest message' })).not.toBeInTheDocument();
+
+    feed.scrollTop = 100;
+    await fireEvent.scroll(feed);
+    const scrollButton = await screen.findByRole('button', { name: 'Scroll to latest message' });
+    await fireEvent.click(scrollButton);
+
+    await waitFor(() => expect(feed.scrollTop).toBe(1200));
+    expect(screen.queryByRole('button', { name: 'Scroll to latest message' })).not.toBeInTheDocument();
+  });
+
+  it('scrolls to a newly received message in the open conversation', async () => {
+    const sourceHash = 'a'.repeat(32);
+    let feedHeight = 500;
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    const firstMessage = {
+      id: 'identity:first-incoming',
+      identityId: 'identity',
+      messageId: 'first-incoming',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'First incoming',
+      direction: 'incoming' as const,
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    };
+    chatMessages.set([firstMessage]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /First incoming/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(500));
+    feed.scrollTop = 0;
+    feedHeight = 1300;
+
+    chatMessages.set([firstMessage, {
+      ...firstMessage,
+      id: 'identity:new-incoming',
+      messageId: 'new-incoming',
+      content: 'New incoming',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+
+    await waitFor(() => expect(feed.scrollTop).toBe(1300));
+  });
+
+  it('keeps the conversation at the bottom while image attachments finish layout', async () => {
+    const sourceHash = 'b'.repeat(32);
+    let feedHeight = 500;
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    chatMessages.set([{
+      id: 'identity:image-message',
+      identityId: 'identity',
+      messageId: 'image-message',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Image attached',
+      attachments: [{
+        kind: 'image',
+        name: 'photo.png',
+        mimeType: 'image/png',
+        data: new Uint8Array([1, 2, 3]),
+      }, {
+        kind: 'image',
+        name: 'second-photo.png',
+        mimeType: 'image/png',
+        data: new Uint8Array([4, 5, 6]),
+      }],
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Image attached/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(500));
+
+    feedHeight = 1400;
+    await fireEvent.load(screen.getByRole('img', { name: 'photo.png' }));
+    await waitFor(() => expect(feed.scrollTop).toBe(1400));
+
+    feedHeight = 1900;
+    await fireEvent.load(screen.getByRole('img', { name: 'second-photo.png' }));
+    await waitFor(() => expect(feed.scrollTop).toBe(1900));
+  });
+
+  it('opens image attachments in a large accessible viewer', async () => {
+    const sourceHash = 'c'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:preview-image',
+      identityId: 'identity',
+      messageId: 'preview-image',
+      sourceHash,
+      destinationHash: 'd'.repeat(32),
+      title: '',
+      content: 'Photo attached',
+      attachments: [{
+        kind: 'image',
+        name: 'landscape.png',
+        mimeType: 'image/png',
+        data: new Uint8Array([1, 2, 3]),
+      }],
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Photo attached/ }));
+    const previewButton = screen.getByRole('button', { name: 'View landscape.png full size' });
+    await fireEvent.click(previewButton);
+
+    const viewer = await screen.findByRole('dialog', { name: 'Image preview: landscape.png' });
+    const closeButton = viewer.querySelector<HTMLButtonElement>('.message-image-viewer-close');
+    expect(viewer).toBeInTheDocument();
+    expect(closeButton).not.toBeNull();
+    if (closeButton) await waitFor(() => expect(closeButton).toHaveFocus());
+
+    await fireEvent.keyDown(viewer, { key: 'Escape' });
+    expect(screen.queryByRole('dialog', { name: 'Image preview: landscape.png' })).not.toBeInTheDocument();
+    await waitFor(() => expect(previewButton).toHaveFocus());
+  });
+
+  it('shows delivery attempts and propagation-node acceptance', async () => {
+    const destinationHash = '3'.repeat(32);
+    const outbound = {
+      id: 'identity:outbound-status',
+      identityId: 'identity',
+      messageId: 'outbound-status',
+      sourceHash: '2'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Status message',
+      direction: 'outgoing' as const,
+      status: 'sending' as const,
+      attempts: 2,
+      maxAttempts: 5,
+      method: 'direct',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    };
+    chatMessages.set([outbound]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Status message/ }));
+    expect(screen.getByText('Sending — attempt 2/5')).toBeInTheDocument();
+
+    chatMessages.set([{ ...outbound, status: 'sent', method: 'propagated' }]);
+    expect(await screen.findByText('Sent to propagation node')).toBeInTheDocument();
+  });
+
+  it('shows attachment upload and inbound resource progress with sizes', async () => {
+    const destinationHash = '3'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:attachment-progress',
+      identityId: 'identity',
+      messageId: 'attachment-progress',
+      sourceHash: '2'.repeat(32),
+      destinationHash,
+      title: '',
+      content: '',
+      attachments: [{
+        kind: 'file',
+        name: 'payload.bin',
+        mimeType: 'application/octet-stream',
+        data: new Uint8Array(2048),
+      }],
+      direction: 'outgoing',
+      status: 'sending',
+      progress: 0.42,
+      attempts: 1,
+      maxAttempts: 3,
+      method: 'direct',
+      representation: 'directResource',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /payload.bin/ }));
+    expect(screen.getByText('Uploading attachments')).toBeInTheDocument();
+    expect(screen.getByText('42% · 2.0 KiB')).toBeInTheDocument();
+
+    chatInboundTransfers.set([{
+      id: 'incoming-resource',
+      destinationHash,
+      progress: 0.5,
+      dataSize: 4096,
+      transferSize: 4352,
+    }]);
+    expect(await screen.findByText('Receiving LXMF message')).toBeInTheDocument();
+    expect(screen.getByText('50% · 4.0 KiB')).toBeInTheDocument();
+
+    const otherDestination = '4'.repeat(32);
+    chatMessages.update((items) => [...items, {
+      id: 'identity:other-chat',
+      identityId: 'identity',
+      messageId: 'other-chat',
+      sourceHash: otherDestination,
+      destinationHash: '2'.repeat(32),
+      title: '',
+      content: 'Other conversation',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:02:00.000Z',
+    }]);
+    await fireEvent.click(await screen.findByRole('button', { name: /Other conversation/ }));
+    await waitFor(() => {
+      expect(screen.queryByText('Receiving LXMF message')).not.toBeInTheDocument();
+    });
+  });
+
+  it('retries a failed outbound message from its context menu', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:failed-message',
+      identityId: 'identity',
+      messageId: 'failed-message',
+      sourceHash: '3'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Please retry this',
+      direction: 'outgoing',
+      status: 'failed',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const retry = vi.spyOn(reticulumRuntime, 'retryChatMessage').mockResolvedValue({ ok: true });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Please retry this/ }));
+    await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Please retry this'), {
+      clientX: 100,
+      clientY: 100,
+    });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Retry sending' }));
+
+    expect(retry).toHaveBeenCalledWith('failed-message');
+  });
+
+  it('aborts a sending message without deleting it and then offers retry', async () => {
+    const destinationHash = '6'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:abort-message',
+      identityId: 'identity',
+      messageId: 'abort-message',
+      sourceHash: '5'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Abort this message',
+      direction: 'outgoing',
+      status: 'sending',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const abort = vi.spyOn(reticulumRuntime, 'abortChatMessage').mockImplementation(async () => {
+      chatMessages.update((items) => items.map((message) => (
+        message.messageId === 'abort-message' ? { ...message, status: 'failed' as const } : message
+      )));
+      return true;
+    });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Abort this message/ }));
+    const bubble = screen.getByLabelText('Open actions for message: Abort this message');
+    await fireEvent.contextMenu(bubble, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Abort sending' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Retry sending' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Abort sending' }));
+
+    expect(abort).toHaveBeenCalledWith('abort-message');
+    expect(screen.getAllByText('Abort this message').length).toBeGreaterThan(0);
+    await fireEvent.contextMenu(bubble, { clientX: 100, clientY: 100 });
+    expect(screen.queryByRole('menuitem', { name: 'Abort sending' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Retry sending' })).toBeInTheDocument();
+  });
+
+  it('deletes a sending message from its context menu', async () => {
+    const destinationHash = '6'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:sending-message',
+      identityId: 'identity',
+      messageId: 'sending-message',
+      sourceHash: '5'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Cancel this message',
+      direction: 'outgoing',
+      status: 'sending',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const remove = vi.spyOn(reticulumRuntime, 'deleteChatMessage').mockResolvedValue(true);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Cancel this message/ }));
+    await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Cancel this message'), {
+      clientX: 100,
+      clientY: 100,
+    });
+    expect(screen.queryByRole('menuitem', { name: 'Retry sending' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete message' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Delete message?');
+    expect(remove).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete message' }));
+
+    expect(remove).toHaveBeenCalledWith('sending-message');
+  });
+
+  it('opens message actions after a touch long press', async () => {
+    const sourceHash = '8'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:touch-message',
+      identityId: 'identity',
+      messageId: 'touch-message',
+      sourceHash,
+      destinationHash: '9'.repeat(32),
+      title: '',
+      content: 'Hold this message',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+    await fireEvent.click(screen.getByRole('button', { name: /Hold this message/ }));
+    const bubble = screen.getByLabelText('Open actions for message: Hold this message');
+
+    vi.useFakeTimers();
+    try {
+      await fireEvent.pointerDown(bubble, {
+        pointerType: 'touch',
+        pointerId: 1,
+        button: 0,
+        clientX: 80,
+        clientY: 120,
+      });
+      await vi.advanceTimersByTimeAsync(550);
+      const menu = screen.getByRole('menu', { name: 'Message actions' });
+      expect(menu).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Delete message' })).toBeInTheDocument();
+      await fireEvent.pointerUp(bubble, { pointerType: 'touch', pointerId: 1, button: 0 });
+      await fireEvent.contextMenu(bubble, { clientX: 20, clientY: 30 });
+      expect(menu).toHaveStyle({ left: '80px', top: '120px' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('deletes a complete chat from its right-click menu', async () => {
+    const destinationHash = 'd'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:conversation-message',
+      identityId: 'identity',
+      messageId: 'conversation-message',
+      sourceHash: destinationHash,
+      destinationHash: 'e'.repeat(32),
+      title: '',
+      content: 'Delete this conversation',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const remove = vi.spyOn(reticulumRuntime, 'deleteChatConversation').mockResolvedValue(true);
+    render(ChatView);
+
+    const row = screen.getByRole('button', { name: /Delete this conversation/ });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menu', { name: 'Chat actions' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete conversation' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(`Delete the chat with “${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}”?`);
+    expect(remove).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete conversation' }));
+
+    expect(remove).toHaveBeenCalledWith(destinationHash);
+  });
+
+  it('blocks a chat from its context menu and makes the open chat read-only', async () => {
+    const destinationHash = 'b'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:block-conversation',
+      identityId: 'identity',
+      messageId: 'block-conversation',
+      sourceHash: destinationHash,
+      destinationHash: 'e'.repeat(32),
+      title: '',
+      content: 'Block this conversation',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const block = vi.spyOn(reticulumRuntime, 'blockChatDestination').mockImplementation(async () => {
+      blockedChatDestinations.set([{
+        id: `identity:${destinationHash}`,
+        identityId: 'identity',
+        destinationHash,
+        blockedAt: '2026-07-16T10:02:00.000Z',
+      }]);
+      return true;
+    });
+    render(ChatView);
+
+    const row = screen.getByRole('button', { name: /Block this conversation/ });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Block destination' }));
+    expect(block).toHaveBeenCalledWith(destinationHash);
+    expect(await screen.findByLabelText('Blocked destination')).toBeInTheDocument();
+
+    await fireEvent.click(row);
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Unblock destination' })).toBeInTheDocument();
+  });
+
+  it('can dismiss message deletion without deleting it', async () => {
+    const destinationHash = '2'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:keep-message',
+      identityId: 'identity',
+      messageId: 'keep-message',
+      sourceHash: destinationHash,
+      destinationHash: '3'.repeat(32),
+      title: '',
+      content: 'Keep this message',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const remove = vi.spyOn(reticulumRuntime, 'deleteChatMessage').mockResolvedValue(true);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Keep this message/ }));
+    await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Keep this message'));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete message' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(remove).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
+
+  it('opens chat actions after a touch long press', async () => {
+    const destinationHash = 'f'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:touch-conversation',
+      identityId: 'identity',
+      messageId: 'touch-conversation',
+      sourceHash: destinationHash,
+      destinationHash: '1'.repeat(32),
+      title: '',
+      content: 'Hold this chat',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+    const row = screen.getByRole('button', { name: /Hold this chat/ });
+
+    vi.useFakeTimers();
+    try {
+      await fireEvent.pointerDown(row, {
+        pointerType: 'touch',
+        pointerId: 2,
+        button: 0,
+        clientX: 80,
+        clientY: 120,
+      });
+      expect(row).toHaveClass('touch-active');
+      await vi.advanceTimersByTimeAsync(550);
+      const menu = screen.getByRole('menu', { name: 'Chat actions' });
+      expect(menu).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeInTheDocument();
+      await fireEvent.pointerUp(row, { pointerType: 'touch', pointerId: 2, button: 0 });
+      expect(row).not.toHaveClass('touch-active');
+      await fireEvent.contextMenu(row, { clientX: 20, clientY: 30 });
+      expect(menu).toHaveStyle({ left: '80px', top: '120px' });
+      await fireEvent.click(screen.getByRole('button', { name: 'Close chat actions' }));
+      expect(screen.queryByRole('menu', { name: 'Chat actions' })).not.toBeInTheDocument();
+      await fireEvent.click(row);
+      expect(document.querySelector('.chat-workspace')).toHaveClass('conversation-selected');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows touch feedback for contact and announce rows', async () => {
+    const contactDestination = '6'.repeat(32);
+    const announceDestination = '7'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${contactDestination}`,
+      identityId: 'identity',
+      destinationHash: contactDestination,
+      name: 'Touch contact',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatAnnounces.set([{
+      id: `identity:${announceDestination}`,
+      identityId: 'identity',
+      destinationHash: announceDestination,
+      identityHash: '8'.repeat(32),
+      publicKey: '9'.repeat(128),
+      displayName: 'Touch announce',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Contacts' }));
+    const contactRow = screen.getByText('Touch contact').closest('button');
+    expect(contactRow).not.toBeNull();
+    if (contactRow) {
+      await fireEvent.pointerDown(contactRow, { pointerType: 'touch', pointerId: 3, button: 0 });
+      expect(contactRow).toHaveClass('touch-active');
+      await fireEvent.pointerUp(contactRow, { pointerType: 'touch', pointerId: 3, button: 0 });
+      expect(contactRow).not.toHaveClass('touch-active');
+    }
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    const announceRow = screen.getByText('Touch announce').closest('button');
+    expect(announceRow).not.toBeNull();
+    if (announceRow) {
+      await fireEvent.pointerDown(announceRow, { pointerType: 'touch', pointerId: 4, button: 0 });
+      expect(announceRow).toHaveClass('touch-active');
+      await fireEvent.pointerUp(announceRow, { pointerType: 'touch', pointerId: 4, button: 0 });
+      expect(announceRow).not.toHaveClass('touch-active');
+    }
+  });
+
+  it('shows per-chat unread messages and clears them when that chat is opened', async () => {
+    const sourceHash = '6'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:unread-1',
+      identityId: 'identity',
+      messageId: 'unread-1',
+      sourceHash,
+      destinationHash: '5'.repeat(32),
+      title: '',
+      content: 'First unread',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: 'identity:unread-2',
+      identityId: 'identity',
+      messageId: 'unread-2',
+      sourceHash,
+      destinationHash: '5'.repeat(32),
+      title: '',
+      content: 'Second unread',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    noteUnreadChatMessage(sourceHash);
+    noteUnreadChatMessage(sourceHash);
+    render(ChatView);
+
+    const conversation = screen.getByRole('button', { name: /Second unread/ });
+    expect(conversation).toHaveTextContent('2');
+    expect(screen.getByLabelText('2 unread messages')).toBeInTheDocument();
+
+    await fireEvent.click(conversation);
+    await waitFor(() => expect(screen.queryByLabelText('2 unread messages')).not.toBeInTheDocument());
+  });
+
+  it('reacts to announces and messages received after the view is mounted', async () => {
+    const sourceHash = 'e'.repeat(32);
+    render(ChatView);
+
+    expect(screen.getByRole('heading', { name: 'No conversations yet' })).toBeInTheDocument();
+
+    chatAnnounces.set([{
+      id: `identity:${sourceHash}`,
+      identityId: 'identity',
+      destinationHash: sourceHash,
+      identityHash: 'f'.repeat(32),
+      publicKey: 'a'.repeat(128),
+      displayName: 'Live Alice',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatMessages.set([{
+      id: 'identity:live-message',
+      identityId: 'identity',
+      messageId: 'live-message',
+      sourceHash,
+      destinationHash: 'b'.repeat(32),
+      title: 'Live greeting',
+      content: 'Arrived after mount',
+      verification: 'verified',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+
+    await waitFor(() => expect(screen.getByText('Arrived after mount')).toBeInTheDocument());
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    expect(screen.getByText('Live Alice')).toBeInTheDocument();
+    expect(screen.getByText(sourceHash)).toBeInTheDocument();
+  });
+
+  it('prefills a contact name from the selected announce and saves a custom name', async () => {
+    const destinationHash = '1'.repeat(32);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: '2'.repeat(32),
+      publicKey: '3'.repeat(128),
+      displayName: 'Announced Alice',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const saveContact = vi.spyOn(reticulumRuntime, 'saveChatContact').mockResolvedValue(true);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Announced Alice/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+
+    const name = screen.getByRole('textbox', { name: /^Contact name/ });
+    expect(name).toHaveValue('Announced Alice');
+    await fireEvent.input(name, { target: { value: 'My Alice' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(saveContact).toHaveBeenCalledWith(destinationHash, 'My Alice');
+  });
+
+  it('deletes a contact from the Contacts list', async () => {
+    const destinationHash = '7'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Local Alice',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const deleteContact = vi.spyOn(reticulumRuntime, 'deleteChatContact').mockResolvedValue(true);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Contacts' }));
+    expect(screen.getByRole('heading', { name: 'Choose a conversation' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('textbox', { name: /^Contact name/ })).toHaveValue('Local Alice');
+    expect(screen.getByRole('heading', { name: 'Choose a conversation' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Delete contact Local Alice' }));
+
+    expect(deleteContact).toHaveBeenCalledWith(`identity:${destinationHash}`);
+  });
+
+  it('queues an outbound message from an announced destination conversation', async () => {
+    const destinationHash = '4'.repeat(32);
+    let feedHeight = 400;
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: '5'.repeat(32),
+      publicKey: '6'.repeat(128),
+      displayName: 'Bob',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const send = vi.spyOn(reticulumRuntime, 'sendChatMessage').mockResolvedValue({ ok: true });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Bob/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(400));
+    feed.scrollTop = 0;
+    feedHeight = 1400;
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), { target: { value: 'Hello Bob' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    expect(send).toHaveBeenCalledWith(destinationHash, 'Hello Bob', '', []);
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue(''));
+    await waitFor(() => expect(feed.scrollTop).toBe(1400));
+  });
+
+  it('dismisses the attachment menu outside and exposes one shared file chooser', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: '5'.repeat(32),
+      publicKey: '6'.repeat(128),
+      displayName: 'Bob',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Bob/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    expect(screen.getByRole('button', { name: 'Choose files' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Choose photo' })).not.toBeInTheDocument();
+
+    await fireEvent.pointerDown(document.body);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Choose files' })).not.toBeInTheDocument());
+  });
+
+  it('allows an attachment-only message to be selected and sent', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: '5'.repeat(32),
+      publicKey: '6'.repeat(128),
+      displayName: 'Bob',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const send = vi.spyOn(reticulumRuntime, 'sendChatMessage').mockResolvedValue({ ok: true });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Bob/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    expect(screen.getByRole('button', { name: 'Choose files' })).toBeInTheDocument();
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]:not([accept])');
+    const file = new File(['attachment'], 'notes.txt', { type: 'text/plain' });
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: async () => new TextEncoder().encode('attachment').buffer,
+    });
+    expect(input).not.toBeNull();
+    if (input) await fireEvent.change(input, { target: { files: [file] } });
+
+    expect(await screen.findByText('notes.txt')).toBeInTheDocument();
+    const sendButton = screen.getByRole('button', { name: 'Send message' });
+    expect(sendButton).toBeEnabled();
+    await fireEvent.click(sendButton);
+
+    expect(send).toHaveBeenCalledWith(destinationHash, '', '', [expect.objectContaining({
+      kind: 'file',
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+    })]);
+  });
+});

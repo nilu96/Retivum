@@ -1,0 +1,25 @@
+node_modules/
+dist/
+.vite/
+coverage/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Native build products and local signing material
+/build/
+android/.gradle/
+android/.kotlin/
+android/app/build/
+android/local.properties
+ios/App/Pods/
+ios/App/build/
+electron/dist/
+electron/release/
+*.jks
+*.keystore
+*.p8
+*.p12
+*.mobileprovision
