@@ -5,6 +5,7 @@
   import { parseIdentityFile, type IdentitySummary } from '../../domain/identity';
   import {
     defaultAppPreferences,
+    AUTHORIZED_SERIAL_PORT_ID,
     interfaceDescription,
     normalizeDestinationHash,
     propagationIsActive,
@@ -71,6 +72,15 @@
   const visibleBlockedDestinationEntries = $derived(
     blockedDestinationsExpanded ? blockedDestinationEntries : blockedDestinationEntries.slice(0, 2),
   );
+
+  function localizedInterfaceDescription(config: InterfaceConfig): string {
+    return interfaceDescription(
+      config,
+      config.type === 'rnode' && config.connection.deviceId === AUTHORIZED_SERIAL_PORT_ID
+        ? $t('interface.editor.rnode.device.authorizedSerial')
+        : undefined,
+    );
+  }
 
   onMount(async () => {
     try {
@@ -456,7 +466,7 @@
           {#each interfaces as item (item.id)}
             <article class="interface-row">
               <span class:online={$interfaceStatuses[item.id] === 'online'} class="interface-state"></span>
-              <div><strong>{item.name}</strong><code>{interfaceDescription(item)}</code></div>
+              <div><strong>{item.name}</strong><code>{localizedInterfaceDescription(item)}</code></div>
               <span class:success={$interfaceStatuses[item.id] === 'online'} class="badge">
                 {$t(
                   !item.enabled

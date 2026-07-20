@@ -37,7 +37,7 @@ final class RetivumImageSharePlugin: CAPInstancePlugin, CAPBridgedPlugin {
                 preferredStyle: .actionSheet
             )
             actionController.addAction(UIAlertAction(
-                title: NSLocalizedString(
+                title: call.getString("saveLabel") ?? NSLocalizedString(
                     "imageShare.save",
                     value: "Save Image",
                     comment: "Save a received image to the photo library"
@@ -47,7 +47,7 @@ final class RetivumImageSharePlugin: CAPInstancePlugin, CAPBridgedPlugin {
                 self.saveImage(image, call: call)
             })
             actionController.addAction(UIAlertAction(
-                title: NSLocalizedString(
+                title: call.getString("shareLabel") ?? NSLocalizedString(
                     "imageShare.share",
                     value: "Share…",
                     comment: "Open the system share sheet for a received image"
@@ -59,7 +59,8 @@ final class RetivumImageSharePlugin: CAPInstancePlugin, CAPBridgedPlugin {
                 }
             })
             actionController.addAction(UIAlertAction(
-                title: NSLocalizedString("common.cancel", value: "Cancel", comment: "Cancel an action"),
+                title: call.getString("cancelLabel")
+                    ?? NSLocalizedString("common.cancel", value: "Cancel", comment: "Cancel an action"),
                 style: .cancel
             ) { _ in
                 call.resolve(["activityType": "", "completed": false])

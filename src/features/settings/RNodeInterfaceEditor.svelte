@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     createRNodeInterfaceDraft,
+    AUTHORIZED_SERIAL_PORT_ID,
     rnodeBandwidths,
     validateRNodeInterface,
     type InterfaceConfig,
@@ -89,6 +90,13 @@
       saving = false;
     }
   }
+
+  function selectedDeviceName(): string {
+    if (draft.connection.deviceId === AUTHORIZED_SERIAL_PORT_ID) {
+      return $t('interface.editor.rnode.device.authorizedSerial');
+    }
+    return draft.connection.deviceName ?? $t('interface.editor.rnode.device.none');
+  }
 </script>
 
 <ModalDialog titleId="rnode-editor-title" onclose={oncancel}>
@@ -125,7 +133,7 @@
                 ? $t('interface.editor.rnode.device.pairing')
                 : $t('interface.editor.rnode.device.select')}
           </button>
-          <small>{draft.connection.deviceName ?? $t('interface.editor.rnode.device.none')}</small>
+          <small>{selectedDeviceName()}</small>
         </div>
       </div>
       <div class="field-grid interface-editor-grid rnode-radio-grid">

@@ -41,8 +41,8 @@ public class RetivumImageSharePlugin extends Plugin {
 
         getBridge().executeOnMainThread(() -> {
             CharSequence[] actions = {
-                getContext().getString(R.string.image_share_save),
-                getContext().getString(R.string.image_share_share)
+                call.getString("saveLabel", getContext().getString(R.string.image_share_save)),
+                call.getString("shareLabel", getContext().getString(R.string.image_share_share))
             };
             AlertDialog dialog = new AlertDialog.Builder(getActivity())
                 .setItems(actions, (ignored, selected) -> {
@@ -52,7 +52,10 @@ public class RetivumImageSharePlugin extends Plugin {
                         shareImage(call, data);
                     }
                 })
-                .setNegativeButton(R.string.image_share_cancel, (ignored, selected) -> resolve(call, "", false))
+                .setNegativeButton(
+                    call.getString("cancelLabel", getContext().getString(R.string.image_share_cancel)),
+                    (ignored, selected) -> resolve(call, "", false)
+                )
                 .setOnCancelListener(ignored -> resolve(call, "", false))
                 .create();
             dialog.show();
@@ -181,7 +184,10 @@ public class RetivumImageSharePlugin extends Plugin {
                 share.putExtra(Intent.EXTRA_STREAM, uri);
                 share.setClipData(ClipData.newRawUri("", uri));
                 share.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                Intent chooser = Intent.createChooser(share, getContext().getString(R.string.image_share_chooser_title));
+                Intent chooser = Intent.createChooser(
+                    share,
+                    call.getString("shareTitle", getContext().getString(R.string.image_share_chooser_title))
+                );
                 getBridge().executeOnMainThread(() -> {
                     getActivity().startActivity(chooser);
                     resolve(call, "share", true);

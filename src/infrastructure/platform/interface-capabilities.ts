@@ -1,5 +1,10 @@
 import { Capacitor } from '@capacitor/core';
-import type { InterfaceConfig, InterfaceType, RNodeConnectionType } from '../../domain/settings';
+import {
+  AUTHORIZED_SERIAL_PORT_ID,
+  type InterfaceConfig,
+  type InterfaceType,
+  type RNodeConnectionType,
+} from '../../domain/settings';
 import { authorizeNativeRNodeDevice } from './byte-connections';
 import { rememberBluetoothDevice } from './bluetooth-devices';
 import { selectNativeRNodeDevice } from './native-bluetooth-selection';
@@ -56,7 +61,7 @@ export function interfaceIsSupported(config: InterfaceConfig, capabilities = det
 
 export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
   deviceId?: string;
-  deviceName: string;
+  deviceName?: string;
   usbVendorId?: number;
   usbProductId?: number;
 }> {
@@ -81,8 +86,8 @@ export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
     .map((value) => value!.toString(16).padStart(4, '0'))
     .join(':');
   return {
-    deviceId: identifier || 'authorized-serial-port',
-    deviceName: identifier ? `USB ${identifier}` : 'Authorized serial port',
+    deviceId: identifier || AUTHORIZED_SERIAL_PORT_ID,
+    ...(identifier ? { deviceName: `USB ${identifier}` } : {}),
     usbVendorId: info.usbVendorId,
     usbProductId: info.usbProductId,
   };

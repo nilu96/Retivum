@@ -48,6 +48,31 @@ describe('saveChatFile', () => {
     expect(platformMocks.shareFile).not.toHaveBeenCalled();
   });
 
+  it('forwards localized image action labels to the native chooser', async () => {
+    await expect(saveChatFile(
+      'photo.jpg',
+      'image/jpeg',
+      new Uint8Array([1, 2, 3]),
+      'image',
+      {
+        save: 'Save image',
+        share: 'Share…',
+        cancel: 'Cancel',
+        shareTitle: 'Share image',
+      },
+    )).resolves.toBe(true);
+
+    expect(platformMocks.shareImage).toHaveBeenCalledWith({
+      data: 'AQID',
+      name: 'photo.jpg',
+      mimeType: 'image/jpeg',
+      saveLabel: 'Save image',
+      shareLabel: 'Share…',
+      cancelLabel: 'Cancel',
+      shareTitle: 'Share image',
+    });
+  });
+
   it('retains generic native sharing for non-image attachments', async () => {
     await expect(saveChatFile('notes.txt', 'text/plain', new Uint8Array([1, 2, 3]))).resolves.toBe(true);
 

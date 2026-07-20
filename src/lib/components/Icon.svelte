@@ -146,11 +146,12 @@
     <rect x="3" y="14" width="7" height="7" rx="1" />
     <path d="M14 14h3v3h-3zm4 4h3v3h-3zm0-4h3m-7 4v3h3" />
   {:else if name === 'qr-scan'}
-    <path d="M8 3H6a3 3 0 0 0-3 3v2M16 3h2a3 3 0 0 1 3 3v2M21 16v2a3 3 0 0 1-3 3h-2M8 21H6a3 3 0 0 1-3-3v-2" />
-    <rect x="7.5" y="7.5" width="4" height="4" rx=".4" />
-    <rect x="13.5" y="7.5" width="3" height="3" rx=".4" />
-    <rect x="7.5" y="13.5" width="3" height="3" rx=".4" />
-    <path d="M13.5 13.5h2v2h-2zm3 3h1.5m-4.5 0V18" />
+    <path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3" />
+    <rect x="6" y="6" width="4.5" height="4.5" rx=".35" />
+    <rect x="13.5" y="6" width="4.5" height="4.5" rx=".35" />
+    <rect x="6" y="13.5" width="4.5" height="4.5" rx=".35" />
+    <rect x="13.5" y="13.5" width="4.5" height="4.5" rx=".35" />
+    <rect x="14.95" y="14.95" width="1.6" height="1.6" rx=".15" fill="currentColor" stroke="none" />
   {:else if name === 'copy'}
     <rect x="8" y="8" width="12" height="12" rx="2" />
     <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
