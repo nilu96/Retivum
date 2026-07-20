@@ -2814,12 +2814,18 @@ class WebSocketDriver {
   }
 
   private async receive(socket: WebSocket, generation: number, data: unknown): Promise<void> {
+    let bytes: Uint8Array | undefined;
     try {
-      const bytes = await messageBytes(data);
+      bytes = await messageBytes(data);
       if (!bytes || bytes.byteLength === 0 || !this.isCurrent(socket, generation) || !node || this.runtimeId === undefined) return;
       receiveReticulumFrame(this.runtimeId, bytes);
-    } catch {
-      this.setState('error', 'WEBSOCKET_FRAME_INVALID');
+    } catch (error) {
+      if (!this.isCurrent(socket, generation)) return;
+      log('warning', 'websocket', 'WEBSOCKET_FRAME_INVALID', {
+        interfaceId: this.config.id,
+        ...(bytes ? { bytes: bytes.byteLength } : {}),
+        message: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
