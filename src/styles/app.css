@@ -556,7 +556,7 @@ main { min-width: 0; min-height: 0; overflow: auto; }
 .badge.success { color: var(--accent-strong); background: var(--accent-soft); }
 .badge.experimental { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); }
 .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
-.toggle-row.roomy { margin: 0 20px 18px 70px; padding: 14px; border-radius: 11px; background: var(--surface-2); }
+.toggle-row.roomy { margin: 0 20px 18px 70px; padding: 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-2); }
 .toggle-row span { display: flex; flex-direction: column; font-size: .82rem; }
 .toggle-row small { margin-block-start: 4px; color: var(--text-subtle); line-height: 1.4; }
 input[role='switch'] { position: relative; width: 40px; height: 22px; flex: none; margin: 0; appearance: none; border: 1px solid var(--border-strong); border-radius: 99px; background: var(--surface-3); }
