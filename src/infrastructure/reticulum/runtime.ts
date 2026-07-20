@@ -35,7 +35,7 @@ import type {
   NomadPageLoadUpdate,
   NomadRequestData,
 } from '../../domain/nomadnet';
-import { nomadRequestPath, parseNomadAddress, upsertNomadAnnounce } from '../../domain/nomadnet';
+import { formatNomadAddress, nomadRequestPath, parseNomadAddress, upsertNomadAnnounce } from '../../domain/nomadnet';
 import { normalizeDestinationHash, type AppPreferences, type InterfaceConfig } from '../../domain/settings';
 import { t } from '../../i18n';
 import { BrowserIdentityRepository } from '../database/identity-repository';
@@ -587,16 +587,18 @@ class ReticulumRuntimeController {
     }
   }
 
-  async addNomadBookmark(address: string, label?: string): Promise<boolean> {
+  async addNomadBookmark(address: string, label?: string, identifyBeforeLoad = false): Promise<boolean> {
     const parsed = parseNomadAddress(address);
     const identity = get(activeIdentity);
     if (!parsed || !identity) return false;
 
     const bookmark: NomadBookmark = {
-      id: `${identity.id}:${parsed.destinationHash}:${parsed.path}`,
+      id: `${identity.id}:${formatNomadAddress(parsed.destinationHash, parsed.path, parsed.requestData)}`,
       identityId: identity.id,
       destinationHash: parsed.destinationHash,
       path: parsed.path,
+      requestData: { ...parsed.requestData },
+      identifyBeforeLoad,
       label: label?.trim() || undefined,
       createdAt: new Date().toISOString(),
     };
@@ -612,6 +614,7 @@ class ReticulumRuntimeController {
     requestData: NomadRequestData = {},
     onUpdate?: (update: NomadPageLoadUpdate) => void,
     freshLink = false,
+    identifyBeforeLoad = false,
   ): Promise<NomadPage | undefined> {
     const identity = get(activeIdentity);
     const normalizedDestination = normalizeDestinationHash(destinationHash);
@@ -639,6 +642,7 @@ class ReticulumRuntimeController {
         requestData,
         publicKey,
         ...(freshLink ? { freshLink: true } : {}),
+        ...(identifyBeforeLoad ? { identifyBeforeLoad: true } : {}),
       });
     });
   }
@@ -672,11 +676,16 @@ class ReticulumRuntimeController {
     nomadBookmarks.update((items) => items.filter((item) => item.id !== id));
   }
 
-  async updateNomadBookmarkName(id: string, name: string): Promise<boolean> {
+  async updateNomadBookmark(id: string, name: string, identifyBeforeLoad: boolean): Promise<boolean> {
     const identity = get(activeIdentity);
     const existing = get(nomadBookmarks).find((item) => item.id === id && item.identityId === identity?.id);
     if (!existing) return false;
-    const updated: NomadBookmark = { ...existing, label: name.trim() || undefined };
+    const updated: NomadBookmark = {
+      ...existing,
+      requestData: { ...(existing.requestData ?? {}) },
+      identifyBeforeLoad,
+      label: name.trim() || undefined,
+    };
     await this.nomadRepository.saveBookmark(updated);
     nomadBookmarks.update((items) => items.map((item) => item.id === id ? updated : item));
     return true;

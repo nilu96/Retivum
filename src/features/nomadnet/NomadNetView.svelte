@@ -2,6 +2,7 @@
   import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
     NOMAD_DEFAULT_PAGE_PATH,
+    formatNomadAddress,
     nomadRequestPath,
     parseNomadAddress,
     resolveNomadLink,
@@ -25,16 +26,19 @@
   import NomadBookmarkEditor from './NomadBookmarkEditor.svelte';
   import { toast } from '../../lib/notifications/toasts';
 
+  type LoadedNomadPage = NomadPage & { identifyBeforeLoad?: boolean };
+
   let address = $state('');
   let scope = $state<'announces' | 'bookmarks'>('announces');
   let query = $state('');
   let directoryExpanded = $state(true);
-  let loadedPage = $state<NomadPage>();
+  let loadedPage = $state<LoadedNomadPage>();
   let loadingPage = $state(false);
   let pendingPageRequest = $state<{
     destinationHash: string;
     path: string;
     requestData: NomadRequestData;
+    identifyBeforeLoad: boolean;
   }>();
   let sharingIdentity = $state(false);
   let pageError = $state<'load' | 'link'>();
@@ -42,17 +46,19 @@
   let loadingStage = $state<NomadPageLoadStage | 'preparing'>('preparing');
   let loadingProgress = $state<number>();
   let loadingDataSize = $state<number>();
-  let navigationHistory = $state<NomadPage[]>([]);
+  let navigationHistory = $state<LoadedNomadPage[]>([]);
   let navigationSequence = 0;
   const maximumNavigationHistoryEntries = 32;
   const identityReloadDelayMs = 500;
   let bookmarkEditor = $state<{
     address: string;
     currentName: string;
+    currentIdentifyBeforeLoad: boolean;
     bookmarkId?: string;
   }>();
 
   const parsedAddress = $derived(parseNomadAddress(address));
+  const currentPageTarget = $derived(pendingPageRequest ?? loadedPage);
   const canGoHome = $derived(Boolean(
     (pendingPageRequest ?? loadedPage)
       && nomadRequestPath((pendingPageRequest ?? loadedPage)?.path ?? '/') !== NOMAD_DEFAULT_PAGE_PATH,
@@ -60,7 +66,8 @@
   const currentBookmark = $derived(parsedAddress
     ? $nomadBookmarks.find((item) =>
       item.destinationHash === parsedAddress.destinationHash
-        && nomadRequestPath(item.path) === nomadRequestPath(parsedAddress.path),
+        && nomadRequestPath(item.path) === nomadRequestPath(parsedAddress.path)
+        && sameRequestData(item.requestData ?? {}, parsedAddress.requestData),
     )
     : undefined);
   const normalizedQuery = $derived(query.trim().toLowerCase());
@@ -69,7 +76,11 @@
   );
   const filteredBookmarks = $derived(
     $nomadBookmarks.filter((item) =>
-      [item.label, item.destinationHash, item.path].some((value) => value?.toLowerCase().includes(normalizedQuery)),
+      [
+        item.label,
+        item.destinationHash,
+        formatNomadAddress(item.destinationHash, item.path, item.requestData ?? {}),
+      ].some((value) => value?.toLowerCase().includes(normalizedQuery)),
     ),
   );
   const visibleDestinationCount = $derived(
@@ -82,21 +93,52 @@
     { id: 'bookmarks', label: 'nomadnet.scope.bookmarks', searchName: 'nomadnet.scope.bookmarks.searchName' },
   ];
 
+  function isCurrentPage(
+    destinationHash: string,
+    path: string,
+    requestData: NomadRequestData = {},
+  ): boolean {
+    return currentPageTarget?.destinationHash === destinationHash
+      && nomadRequestPath(currentPageTarget.path) === nomadRequestPath(path)
+      && sameRequestData(currentPageTarget.requestData ?? {}, requestData);
+  }
+
+  function isCurrentDestination(destinationHash: string): boolean {
+    return currentPageTarget?.destinationHash === destinationHash;
+  }
+
+  function bookmarkForPage(
+    destinationHash: string,
+    path: string,
+    requestData: NomadRequestData = {},
+  ): NomadBookmark | undefined {
+    return $nomadBookmarks.find((item) =>
+      item.destinationHash === destinationHash
+        && nomadRequestPath(item.path) === nomadRequestPath(path)
+        && sameRequestData(item.requestData ?? {}, requestData));
+  }
+
   async function openDestination(
     destinationHash: string,
     path = '/',
     mode: 'push' | 'replace' = 'push',
     requestData: NomadRequestData = {},
     freshLink = false,
+    identifyBeforeLoad = false,
   ): Promise<boolean> {
     const requestPath = nomadRequestPath(path);
     // Values read back from Svelte state can be proxies, which cannot be sent
     // through Worker.postMessage. Keep the runtime boundary cloneable.
     const plainRequestData = { ...requestData };
-    address = nomadAddress(destinationHash, requestPath, plainRequestData);
+    address = formatNomadAddress(destinationHash, requestPath, plainRequestData);
     const previousPage = loadedPage;
     const sequence = ++navigationSequence;
-    pendingPageRequest = { destinationHash, path: requestPath, requestData: plainRequestData };
+    pendingPageRequest = {
+      destinationHash,
+      path: requestPath,
+      requestData: plainRequestData,
+      identifyBeforeLoad,
+    };
     loadingPage = true;
     loadingStage = 'preparing';
     loadingProgress = undefined;
@@ -106,13 +148,31 @@
     try {
       const onUpdate = (update: NomadPageLoadUpdate) => handlePageLoadUpdate(sequence, update);
       const nextPage = freshLink
-        ? await reticulumRuntime.requestNomadPage(
-            destinationHash,
-            requestPath,
-            plainRequestData,
-            onUpdate,
-            true,
-          )
+        ? identifyBeforeLoad
+          ? await reticulumRuntime.requestNomadPage(
+              destinationHash,
+              requestPath,
+              plainRequestData,
+              onUpdate,
+              true,
+              true,
+            )
+          : await reticulumRuntime.requestNomadPage(
+              destinationHash,
+              requestPath,
+              plainRequestData,
+              onUpdate,
+              true,
+            )
+        : identifyBeforeLoad
+          ? await reticulumRuntime.requestNomadPage(
+              destinationHash,
+              requestPath,
+              plainRequestData,
+              onUpdate,
+              false,
+              true,
+            )
         : await reticulumRuntime.requestNomadPage(
             destinationHash,
             requestPath,
@@ -139,8 +199,8 @@
         }].slice(-maximumNavigationHistoryEntries);
       }
       directoryExpanded = false;
-      loadedPage = { ...nextPage, requestData: nextRequestData };
-      address = nomadAddress(nextPage.destinationHash, nomadRequestPath(nextPage.path), nextRequestData);
+      loadedPage = { ...nextPage, requestData: nextRequestData, identifyBeforeLoad };
+      address = formatNomadAddress(nextPage.destinationHash, nextPage.path, nextRequestData);
       return true;
     } catch {
       if (sequence === navigationSequence) {
@@ -156,14 +216,33 @@
     }
   }
 
-  function openDirectoryDestination(destinationHash: string, path = '/'): void {
+  function openDirectoryDestination(
+    destinationHash: string,
+    path = '/',
+    requestData: NomadRequestData = {},
+  ): void {
     directoryExpanded = false;
-    void openDestination(destinationHash, path);
+    const bookmark = bookmarkForPage(destinationHash, path, requestData);
+    void openDestination(
+      destinationHash,
+      path,
+      'push',
+      requestData,
+      false,
+      bookmark?.identifyBeforeLoad === true,
+    );
   }
 
   function submitAddress(event: SubmitEvent): void {
     event.preventDefault();
-    if (parsedAddress) void openDestination(parsedAddress.destinationHash, parsedAddress.path, 'push', parsedAddress.requestData);
+    if (parsedAddress) void openDestination(
+      parsedAddress.destinationHash,
+      parsedAddress.path,
+      'push',
+      parsedAddress.requestData,
+      false,
+      currentBookmark?.identifyBeforeLoad === true,
+    );
   }
 
   function openPageLink(target: string, submittedFields: NomadRequestData): void {
@@ -177,11 +256,18 @@
     void openDestination(next.destinationHash, next.path, 'push', {
       ...next.requestData,
       ...submittedFields,
-    });
+    }, false, next.destinationHash === loadedPage.destinationHash && loadedPage.identifyBeforeLoad === true);
   }
 
   function retryPage(): void {
-    if (parsedAddress) void openDestination(parsedAddress.destinationHash, parsedAddress.path, 'push', parsedAddress.requestData);
+    if (parsedAddress) void openDestination(
+      parsedAddress.destinationHash,
+      parsedAddress.path,
+      'push',
+      parsedAddress.requestData,
+      false,
+      currentBookmark?.identifyBeforeLoad === true,
+    );
   }
 
   function reloadPage(): void {
@@ -189,6 +275,7 @@
       destinationHash: loadedPage.destinationHash,
       path: loadedPage.path,
       requestData: loadedPage.requestData,
+      identifyBeforeLoad: loadedPage.identifyBeforeLoad === true,
     } : undefined);
     if (!target) return;
     void openDestination(
@@ -197,6 +284,7 @@
       'replace',
       target.requestData,
       true,
+      target.identifyBeforeLoad === true,
     );
   }
 
@@ -213,6 +301,8 @@
         identifiedPage.path,
         'replace',
         { ...(identifiedPage.requestData ?? {}) },
+        false,
+        identifiedPage.identifyBeforeLoad === true,
       ).catch(() => false);
       const [identified, reloaded] = await Promise.all([identityResult, reloadResult]);
       if (!identified) {
@@ -244,7 +334,7 @@
       ...previous,
       requestData: { ...(previous.requestData ?? {}) },
     };
-    address = nomadAddress(previous.destinationHash, nomadRequestPath(previous.path), previous.requestData ?? {});
+    address = formatNomadAddress(previous.destinationHash, previous.path, previous.requestData ?? {});
   }
 
   function cancelPendingLoadAndRestorePage(): boolean {
@@ -256,19 +346,12 @@
     pageError = undefined;
     pageErrorCode = undefined;
     directoryExpanded = false;
-    address = nomadAddress(
+    address = formatNomadAddress(
       loadedPage.destinationHash,
-      nomadRequestPath(loadedPage.path),
+      loadedPage.path,
       loadedPage.requestData ?? {},
     );
     return true;
-  }
-
-  function nomadAddress(destinationHash: string, path: string, requestData: NomadRequestData): string {
-    const variables = Object.entries(requestData)
-      .filter(([key]) => key.startsWith('var_'))
-      .map(([key, value]) => `${key.slice(4)}=${value}`);
-    return `${destinationHash}:${path}${variables.length ? `\`${variables.join('|')}` : ''}`;
   }
 
   function sameRequestData(left: NomadRequestData, right: NomadRequestData): boolean {
@@ -323,6 +406,7 @@
       return 'nomadnet.page.error.path';
     }
     if (code === 'NOMAD_LINK_ESTABLISHMENT_FAILED') return 'nomadnet.page.error.linkEstablishment';
+    if (code === 'NOMAD_IDENTITY_SHARE_FAILED') return 'nomadnet.page.error.identify';
     if (code === 'NOMAD_PAGE_LOAD_TIMEOUT') return 'nomadnet.page.error.deadline';
     if (code === 'NOMAD_LINK_FAILED' || code === 'NOMAD_LINK_CLOSED') return 'nomadnet.page.error.link';
     if (code === 'NOMAD_REQUEST_FAILED' || code === 'NOMAD_REQUEST_TIMEOUT') return 'nomadnet.page.error.request';
@@ -347,7 +431,14 @@
       && cancelPendingLoadAndRestorePage()
     ) return;
     if (pendingPageRequest) reticulumRuntime.cancelNomadPage(pendingPageRequest.destinationHash);
-    void openDestination(target.destinationHash, NOMAD_DEFAULT_PAGE_PATH);
+    void openDestination(
+      target.destinationHash,
+      NOMAD_DEFAULT_PAGE_PATH,
+      'push',
+      {},
+      false,
+      target.identifyBeforeLoad === true,
+    );
   }
 
   function bookmarkCurrent(): void {
@@ -356,24 +447,30 @@
       item.destinationHash === parsedAddress.destinationHash
     ))?.displayName;
     bookmarkEditor = {
-      address: `${parsedAddress.destinationHash}:${parsedAddress.path}`,
+      address: formatNomadAddress(
+        parsedAddress.destinationHash,
+        parsedAddress.path,
+        parsedAddress.requestData,
+      ),
       currentName: announcedName ?? '',
+      currentIdentifyBeforeLoad: false,
     };
   }
 
   function editBookmark(bookmark: NomadBookmark): void {
     bookmarkEditor = {
-      address: `${bookmark.destinationHash}:${bookmark.path}`,
+      address: formatNomadAddress(bookmark.destinationHash, bookmark.path, bookmark.requestData ?? {}),
       currentName: bookmark.label ?? '',
+      currentIdentifyBeforeLoad: bookmark.identifyBeforeLoad === true,
       bookmarkId: bookmark.id,
     };
   }
 
-  async function saveBookmarkName(name: string): Promise<boolean> {
+  async function saveBookmark(name: string, identifyBeforeLoad: boolean): Promise<boolean> {
     if (!bookmarkEditor) return false;
     const saved = bookmarkEditor.bookmarkId
-      ? await reticulumRuntime.updateNomadBookmarkName(bookmarkEditor.bookmarkId, name)
-      : await reticulumRuntime.addNomadBookmark(bookmarkEditor.address, name);
+      ? await reticulumRuntime.updateNomadBookmark(bookmarkEditor.bookmarkId, name, identifyBeforeLoad)
+      : await reticulumRuntime.addNomadBookmark(bookmarkEditor.address, name, identifyBeforeLoad);
     if (saved) scope = 'bookmarks';
     return saved;
   }
@@ -491,7 +588,13 @@
         {#if scope === 'announces' && filteredAnnounces.length}
           <div class="nomad-destination-list">
             {#each filteredAnnounces as announce (announce.id)}
-              <button class="nomad-destination" onclick={() => openDirectoryDestination(announce.destinationHash)}>
+              {@const current = isCurrentDestination(announce.destinationHash)}
+              <button
+                class="nomad-destination"
+                class:active={current}
+                aria-current={current ? 'page' : undefined}
+                onclick={() => openDirectoryDestination(announce.destinationHash)}
+              >
                 <span class="destination-mark"><Icon name="network" size={17} /></span>
                 <span>
                   {#if announce.displayName}<strong>{announce.displayName}</strong>{/if}
@@ -508,13 +611,22 @@
         {:else if scope === 'bookmarks' && filteredBookmarks.length}
           <div class="nomad-destination-list">
             {#each filteredBookmarks as bookmark (bookmark.id)}
-              <div class="nomad-bookmark-row">
-                <button class="nomad-destination" onclick={() => openDirectoryDestination(bookmark.destinationHash, bookmark.path)}>
+              {@const current = isCurrentPage(bookmark.destinationHash, bookmark.path, bookmark.requestData ?? {})}
+              <div class="nomad-bookmark-row" class:active={current}>
+                <button
+                  class="nomad-destination"
+                  aria-current={current ? 'page' : undefined}
+                  onclick={() => openDirectoryDestination(
+                    bookmark.destinationHash,
+                    bookmark.path,
+                    bookmark.requestData ?? {},
+                  )}
+                >
                   <span class="destination-mark"><Icon name="bookmark" size={17} /></span>
                   <span>
                     {#if bookmark.label}<strong>{bookmark.label}</strong>{/if}
                     <code>{bookmark.destinationHash}</code>
-                    <small>{bookmark.path}</small>
+                    <small>{formatNomadAddress(bookmark.destinationHash, bookmark.path, bookmark.requestData ?? {}).slice(bookmark.destinationHash.length + 1)}</small>
                   </span>
                   <span class="directory-row-route">
                     <PathStatus status={$destinationPathStatuses[bookmark.destinationHash]} />
@@ -586,8 +698,9 @@
   <NomadBookmarkEditor
     address={bookmarkEditor.address}
     currentName={bookmarkEditor.currentName}
+    currentIdentifyBeforeLoad={bookmarkEditor.currentIdentifyBeforeLoad}
     mode={bookmarkEditor.bookmarkId ? 'edit' : 'add'}
     oncancel={() => { bookmarkEditor = undefined; }}
-    onsave={saveBookmarkName}
+    onsave={saveBookmark}
   />
 {/if}

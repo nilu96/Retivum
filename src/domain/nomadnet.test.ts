@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NOMAD_DEFAULT_PAGE_PATH,
   encodeNomadRequestData,
+  formatNomadAddress,
   nomadLinkFragment,
   nomadPageLoadDeadlineMs,
   nomadRequestPath,
@@ -88,6 +89,12 @@ describe('parseNomadAddress', () => {
   it('maps an empty node path to the NomadNet index page', () => {
     expect(nomadRequestPath('/')).toBe(NOMAD_DEFAULT_PAGE_PATH);
     expect(nomadRequestPath('/page/docs.mu')).toBe('/page/docs.mu');
+  });
+
+  it('formats request parameters as part of a complete NomadNet address', () => {
+    expect(formatNomadAddress(hash, '/page/stack.mu', { var_c: 'heap', var_view: 'full' })).toBe(
+      `${hash.toLowerCase()}:/page/stack.mu\`c=heap|view=full`,
+    );
   });
 
   it('resolves same-node and cross-node Micron links', () => {

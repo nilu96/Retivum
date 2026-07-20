@@ -84,8 +84,21 @@ export interface NomadBookmark {
   identityId: string;
   destinationHash: string;
   path: string;
+  requestData?: NomadRequestData;
+  identifyBeforeLoad?: boolean;
   label?: string;
   createdAt: string;
+}
+
+export function formatNomadAddress(
+  destinationHash: string,
+  path: string,
+  requestData: NomadRequestData = {},
+): string {
+  const variables = Object.entries(requestData)
+    .filter(([key]) => key.startsWith('var_'))
+    .map(([key, value]) => `${key.slice(4)}=${value}`);
+  return `${destinationHash.toLowerCase()}:${nomadRequestPath(path)}${variables.length ? `\`${variables.join('|')}` : ''}`;
 }
 
 export function parseNomadAddress(

@@ -46,20 +46,108 @@ describe('NomadNetView', () => {
       id: 'identity:bookmark',
       identityId: 'identity',
       destinationHash: bookmarkedHash,
-      path: '/page/index.mu',
+      path: '/page/stack.mu',
+      requestData: { var_c: 'heap' },
+      identifyBeforeLoad: true,
       label: 'Saved node',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
-    vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
     render(NomadNetView);
 
-    await fireEvent.click(screen.getByRole('button', { name: /Announced node/ }));
+    const announcedPage = screen.getByRole('button', { name: /Announced node/ });
+    await fireEvent.click(announcedPage);
+    expect(announcedPage).toHaveClass('active');
+    expect(announcedPage).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Show announced destinations (1)' })).toHaveAttribute('aria-expanded', 'false');
 
     await fireEvent.click(screen.getByRole('button', { name: 'Show announced destinations (1)' }));
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
-    await fireEvent.click(screen.getByRole('button', { name: /Saved node/ }));
+    const bookmarkedPage = screen.getByRole('button', { name: /Saved node/ });
+    await fireEvent.click(bookmarkedPage);
+    expect(bookmarkedPage.closest('.nomad-bookmark-row')).toHaveClass('active');
+    expect(bookmarkedPage).toHaveAttribute('aria-current', 'page');
+    expect(bookmarkedPage).toHaveTextContent('/page/stack.mu`c=heap');
+    expect(requestPage).toHaveBeenLastCalledWith(
+      bookmarkedHash,
+      '/page/stack.mu',
+      { var_c: 'heap' },
+      expect.any(Function),
+      false,
+      true,
+    );
     expect(screen.getByRole('button', { name: 'Show bookmarks (1)' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('uses the exact bookmark identification policy when opening an announced page', async () => {
+    const destinationHash = '3'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      displayName: 'Identified node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    nomadBookmarks.set([{
+      id: 'identity:identified-home',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/index.mu',
+      requestData: {},
+      identifyBeforeLoad: true,
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Identified node/ }));
+
+    expect(requestPage).toHaveBeenCalledWith(
+      destinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+      false,
+      true,
+    );
+  });
+
+  it('keeps an announced destination active on its subpages while bookmarks remain path-specific', async () => {
+    const destinationHash = '4'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      displayName: 'Subpage node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    nomadBookmarks.set([{
+      id: 'identity:home',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/index.mu',
+      label: 'Home bookmark',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: 'identity:details',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/details.mu',
+      label: 'Details bookmark',
+      createdAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
+    render(NomadNetView);
+
+    await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
+      target: { value: `${destinationHash}:/page/details.mu` },
+    });
+    await fireEvent.submit(screen.getByPlaceholderText('destination:/page/path').closest('form')!);
+
+    expect(screen.getByRole('button', { name: /Subpage node/ })).toHaveAttribute('aria-current', 'page');
+    await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
+    expect(screen.getByRole('button', { name: /Home bookmark/ })).not.toHaveAttribute('aria-current');
+    expect(screen.getByRole('button', { name: /Details bookmark/ })).toHaveAttribute('aria-current', 'page');
   });
 
   it('asks for a name when bookmarking the current address', async () => {
@@ -84,7 +172,7 @@ describe('NomadNetView', () => {
     render(NomadNetView);
 
     await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
-      target: { value: `${destinationHash}:/start` },
+      target: { value: `${destinationHash}:/start\`c=heap` },
     });
     await fireEvent.click(screen.getByRole('button', { name: 'Bookmark current address' }));
     const bookmarkName = screen.getByRole('textbox', { name: 'Bookmark name' });
@@ -92,9 +180,14 @@ describe('NomadNetView', () => {
     await fireEvent.input(bookmarkName, {
       target: { value: '  Community node  ' },
     });
+    await fireEvent.click(screen.getByRole('switch', { name: /Identify before loading/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(`${destinationHash}:/start`, 'Community node'));
+    await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
+      `${destinationHash}:/start\`c=heap`,
+      'Community node',
+      true,
+    ));
   });
 
   it('renames an existing bookmark', async () => {
@@ -107,17 +200,18 @@ describe('NomadNetView', () => {
       label: 'Old name',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
-    const updateName = vi.spyOn(reticulumRuntime, 'updateNomadBookmarkName').mockResolvedValue(true);
+    const updateBookmark = vi.spyOn(reticulumRuntime, 'updateNomadBookmark').mockResolvedValue(true);
     render(NomadNetView);
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const input = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(input).toHaveValue('Old name');
+    expect(screen.getByRole('switch', { name: /Identify before loading/ })).not.toBeChecked();
     await fireEvent.input(input, { target: { value: 'New name' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(updateName).toHaveBeenCalledWith('identity:bookmark', 'New name'));
+    await waitFor(() => expect(updateBookmark).toHaveBeenCalledWith('identity:bookmark', 'New name', false));
   });
 
   it('disables the bookmark action when the selected destination is already bookmarked', async () => {

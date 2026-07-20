@@ -91,6 +91,7 @@ export type RuntimeCommand =
       requestData: NomadRequestData;
       publicKey: string;
       freshLink?: boolean;
+      identifyBeforeLoad?: boolean;
     }
   | {
       type: 'identifyNomadLink';

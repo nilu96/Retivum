@@ -93,6 +93,7 @@ interface NomadPageJob {
   path: string;
   requestData: NomadRequestData;
   publicKey: string;
+  identifyBeforeLoad: boolean;
   recoveryAttempts: number;
   startedAt: number;
   linkId?: string;
@@ -997,6 +998,7 @@ function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomad
     path: nomadRequestPath(command.path),
     requestData: { ...(command.requestData ?? {}) },
     publicKey,
+    identifyBeforeLoad: command.identifyBeforeLoad === true,
     recoveryAttempts: 0,
     startedAt: Date.now(),
   };
@@ -1141,6 +1143,19 @@ function beginNomadLink(job: NomadPageJob): void {
 function sendNomadRequest(link: NomadLinkState, job: NomadPageJob): void {
   if (!node) return failNomadJob(job, 'NOMAD_RUNTIME_UNAVAILABLE');
   clearNomadJobTimer(job);
+  if (job.identifyBeforeLoad) {
+    try {
+      processOutput(node.identifyLink(link.linkId) as WasmOutput);
+      link.lastUsedAt = Date.now();
+      log('info', 'wasm', 'NOMAD_BOOKMARK_IDENTITY_SHARED', {
+        destinationHash: job.destinationHash,
+        linkId: bytesToHex(link.linkId),
+      });
+    } catch {
+      failNomadJob(job, 'NOMAD_IDENTITY_SHARE_FAILED');
+      return;
+    }
+  }
   try {
     // Let Reticulum derive the request timeout from the established link RTT,
     // matching Python Link.request(timeout=None). Fixed short timeouts reject

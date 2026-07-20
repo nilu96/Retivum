@@ -7,29 +7,33 @@
   let {
     address,
     currentName = '',
+    currentIdentifyBeforeLoad = false,
     mode = 'add',
     oncancel,
     onsave,
   }: {
     address: string;
     currentName?: string;
+    currentIdentifyBeforeLoad?: boolean;
     mode?: 'add' | 'edit';
     oncancel: () => void;
-    onsave: (name: string) => Promise<boolean>;
+    onsave: (name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
   } = $props();
 
   let name = $state('');
+  let identifyBeforeLoad = $state(false);
   let saving = $state(false);
 
   $effect.pre(() => {
     name = currentName;
+    identifyBeforeLoad = currentIdentifyBeforeLoad;
   });
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     saving = true;
     try {
-      if (await onsave(name.trim())) oncancel();
+      if (await onsave(name.trim(), identifyBeforeLoad)) oncancel();
       else toast.error('nomadnet.bookmark.saveError');
     } catch {
       toast.error('nomadnet.bookmark.saveError');
@@ -64,6 +68,13 @@
           autocomplete="off"
         />
         <small>{$t('nomadnet.bookmark.name.help')}</small>
+      </label>
+      <label class="toggle-row bookmark-identify-option">
+        <span>
+          <strong>{$t('nomadnet.bookmark.identifyBeforeLoad')}</strong>
+          <small>{$t('nomadnet.bookmark.identifyBeforeLoad.help')}</small>
+        </span>
+        <input type="checkbox" role="switch" bind:checked={identifyBeforeLoad} />
       </label>
       <footer>
         <button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button>
