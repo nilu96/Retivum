@@ -48,13 +48,14 @@
 <AppShell current={$route}>
   {#if $route === 'chat'}
     <ChatView />
-  {:else if $route === 'nomadnet'}
-    <NomadNetView />
   {:else if $route === 'logs'}
     <ReticulumLogsView />
-  {:else}
+  {:else if $route === 'settings'}
     <SettingsView />
   {/if}
+  <div class="persistent-route-view" hidden={$route !== 'nomadnet'}>
+    <NomadNetView />
+  </div>
 </AppShell>
 
 {#if $desktopDeviceSelection}
