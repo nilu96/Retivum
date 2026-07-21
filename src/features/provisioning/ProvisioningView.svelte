@@ -66,7 +66,7 @@
     if (node.bookmarked) return node.label ?? '';
     return node.label
       ?? announcedNodeName(node)
-      ?? $t('provisioning.node.unknown');
+      ?? '';
   }
 
   function announcedNodeName(node: ProvisioningNode): string | undefined {
@@ -382,19 +382,19 @@
       <button
         class="icon-button"
         type="button"
-        aria-label={$t('provisioning.refresh')}
-        title={$t('provisioning.refresh')}
-        disabled={!selectedNode || busy}
-        onclick={reloadDevice}
-      ><Icon name="sync" size={19} /></button>
-      <button
-        class="icon-button"
-        type="button"
         aria-label={$t(loadingDevice ? 'provisioning.connection.cancel' : 'provisioning.connection.disconnect')}
         title={$t(loadingDevice ? 'provisioning.connection.cancel' : 'provisioning.connection.disconnect')}
         disabled={!selectedNode || (busy && !loadingDevice)}
         onclick={disconnectDevice}
       ><Icon name="close" size={19} /></button>
+      <button
+        class="icon-button"
+        type="button"
+        aria-label={$t('provisioning.refresh')}
+        title={$t('provisioning.refresh')}
+        disabled={!selectedNode || busy}
+        onclick={reloadDevice}
+      ><Icon name="sync" size={19} /></button>
     </div>
     <label>
       <span class="sr-only">{$t('provisioning.destination.label')}</span>
@@ -471,7 +471,7 @@
                 >
                   <span class="destination-mark"><Icon name="network" size={17} /></span>
                   <span>
-                    <strong>{nodeName(node)}</strong>
+                    {#if nodeName(node)}<strong>{nodeName(node)}</strong>{/if}
                     <code>{node.destinationHash}</code>
                     <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.heardAt)) })}</small>
                   </span>

@@ -549,7 +549,6 @@
   "provisioning.select.description": "Choose an announced management destination to establish an authenticated link.",
   "provisioning.load.empty.title": "Device configuration unavailable",
   "provisioning.load.empty.description": "Try loading this device again when a path is available.",
-  "provisioning.node.unknown": "microReticulum device",
   "provisioning.node.lastHeard": "Last heard {date}",
   "provisioning.load.failed": "The device configuration could not be loaded.",
   "provisioning.save.success": "The device configuration was saved.",

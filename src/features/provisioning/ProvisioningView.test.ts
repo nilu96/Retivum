@@ -50,15 +50,15 @@ describe('ProvisioningView', () => {
     expect(connect).toBeDisabled();
   });
 
-  it('orders reload and disconnect immediately before the destination input', () => {
+  it('orders disconnect and reload immediately before the destination input', () => {
     render(ProvisioningView);
 
     const actions = screen.getByRole('group', { name: 'Provisioning connection actions' });
     const inputLabel = screen.getByPlaceholderText('Management destination hash').closest('label');
     const actionButtons = actions.querySelectorAll('button');
 
-    expect(actionButtons[0]).toBe(screen.getByRole('button', { name: 'Reload device configuration' }));
-    expect(actionButtons[1]).toBe(screen.getByRole('button', { name: 'Disconnect and return to destinations' }));
+    expect(actionButtons[0]).toBe(screen.getByRole('button', { name: 'Disconnect and return to destinations' }));
+    expect(actionButtons[1]).toBe(screen.getByRole('button', { name: 'Reload device configuration' }));
     expect(actions.nextElementSibling).toBe(inputLabel);
   });
 
@@ -206,6 +206,15 @@ describe('ProvisioningView', () => {
 
   it('leaves the title empty for an unnamed management bookmark', () => {
     provisioningNodes.set([{ ...announcedNode, bookmarked: true }]);
+    render(ProvisioningView);
+
+    const row = screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) });
+    expect(row).not.toHaveTextContent('microReticulum device');
+    expect(row.querySelector('strong')).not.toBeInTheDocument();
+  });
+
+  it('leaves the title empty for an unnamed management announce', () => {
+    provisioningNodes.set([announcedNode]);
     render(ProvisioningView);
 
     const row = screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) });
