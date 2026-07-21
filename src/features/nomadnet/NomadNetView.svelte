@@ -21,6 +21,7 @@
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
+  import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
   import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
@@ -55,6 +56,7 @@
   let pendingPageRequest = $state<NomadPageRequest>();
   let failedPageRequest = $state<NomadPageRequest>();
   let sharingIdentity = $state(false);
+  let identityShareConfirmationOpen = $state(false);
   let pageError = $state<'load' | 'link'>();
   let pageErrorCode = $state<string>();
   let loadingStage = $state<NomadPageLoadStage | 'preparing'>('preparing');
@@ -406,6 +408,11 @@
     }
   }
 
+  function confirmIdentityShare(): void {
+    identityShareConfirmationOpen = false;
+    void shareIdentity();
+  }
+
   function goBack(): void {
     if (cancelPendingPageLoad()) return;
     if (pageError === 'load' && failedPageRequest && loadedPage) {
@@ -599,7 +606,7 @@
         aria-label={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
         title={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
         disabled={!loadedPage || loadingPage || sharingIdentity}
-        onclick={shareIdentity}
+        onclick={() => { identityShareConfirmationOpen = true; }}
       ><Icon name="fingerprint" size={19} /></button>
       <button
         class="icon-button"
@@ -823,6 +830,18 @@
     mode={bookmarkEditor.bookmarkId ? 'edit' : 'add'}
     oncancel={() => { bookmarkEditor = undefined; }}
     onsave={saveBookmark}
+  />
+{/if}
+
+{#if identityShareConfirmationOpen}
+  <ConfirmationDialog
+    titleId="nomad-identity-share-title"
+    title={$t('nomadnet.page.identityShareDialog.title')}
+    description={$t('nomadnet.page.identityShareDialog.description')}
+    icon="fingerprint"
+    confirmLabel={$t('nomadnet.page.identityShareDialog.confirm')}
+    oncancel={() => { identityShareConfirmationOpen = false; }}
+    onconfirm={confirmIdentityShare}
   />
 {/if}
 

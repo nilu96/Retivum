@@ -793,6 +793,17 @@ describe('NomadNetView', () => {
     expect(share).toBeEnabled();
 
     await fireEvent.click(share);
+    expect(screen.getByRole('alertdialog')).toHaveTextContent(
+      'Are you sure you want to identify yourself to this NomadNetwork Node? The page will reload after your identity has been sent.',
+    );
+    expect(identify).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(identify).not.toHaveBeenCalled();
+
+    await fireEvent.click(share);
+    await fireEvent.click(screen.getByRole('button', { name: 'Share identity' }));
     expect(identify).toHaveBeenCalledWith(destinationHash);
     expect(await screen.findByText('Identified page')).toBeInTheDocument();
     expect(requestPage).toHaveBeenNthCalledWith(
