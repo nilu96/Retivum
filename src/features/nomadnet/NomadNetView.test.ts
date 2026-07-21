@@ -79,6 +79,20 @@ describe('NomadNetView', () => {
     expect(screen.getByRole('button', { name: 'Show bookmarks (1)' })).toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('collapses the mobile directory immediately after opening an address', async () => {
+    const destinationHash = '3'.repeat(32);
+    vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
+    render(NomadNetView);
+
+    await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
+      target: { value: `${destinationHash}:/page/index.mu` },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
+
+    expect(screen.getByRole('button', { name: 'Show announced destinations (0)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+  });
+
   it('uses the exact bookmark identification policy when opening an announced page', async () => {
     const destinationHash = '3'.repeat(32);
     nomadAnnounces.set([{
@@ -677,7 +691,7 @@ describe('NomadNetView', () => {
     finishDetails?.(undefined);
   });
 
-  it('allows Home to cancel loading and restore an already cached home page', async () => {
+  it('shows a cancel action in the Home slot while loading and restores the cached page', async () => {
     const destinationHash = '3'.repeat(32);
     nomadAnnounces.set([{
       id: `identity:${destinationHash}`,
@@ -706,15 +720,42 @@ describe('NomadNetView', () => {
 
     await fireEvent.click(screen.getByRole('link', { name: 'Open slow page' }));
     expect(screen.getByText('Loading NomadNet page')).toBeInTheDocument();
-    expect(home).toBeEnabled();
+    const cancelLoading = screen.getByRole('button', { name: 'Cancel page loading' });
+    expect(cancelLoading).toBeEnabled();
 
-    await fireEvent.click(home);
+    await fireEvent.click(cancelLoading);
     expect(cancelPage).toHaveBeenCalledWith(destinationHash);
     expect(screen.getByText('Cached home page')).toBeInTheDocument();
     expect(screen.queryByText('Loading NomadNet page')).not.toBeInTheDocument();
-    expect(home).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open announced home page' })).toBeDisabled();
     expect(requestPage).toHaveBeenCalledTimes(2);
     finishSlowPage?.(undefined);
+  });
+
+  it('cancels an initial page load from the Home slot', async () => {
+    const destinationHash = '5'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    let finishLoad: ((page: NomadPage | undefined) => void) | undefined;
+    vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockImplementation(() => new Promise((resolve) => { finishLoad = resolve; }));
+    const cancelPage = vi.spyOn(reticulumRuntime, 'cancelNomadPage');
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(destinationHash) }));
+    const cancelLoading = screen.getByRole('button', { name: 'Cancel page loading' });
+    expect(cancelLoading).toBeEnabled();
+
+    await fireEvent.click(cancelLoading);
+    expect(cancelPage).toHaveBeenCalledWith(destinationHash);
+    expect(screen.queryByText('Loading NomadNet page')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Enter a NomadNet address' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open announced home page' })).toBeDisabled();
+    finishLoad?.(undefined);
   });
 
   it('shares the active identity over the NomadNet link and reloads the page', async () => {

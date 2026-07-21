@@ -318,14 +318,17 @@
 
   function submitAddress(event: SubmitEvent): void {
     event.preventDefault();
-    if (parsedAddress) void openDestination(
-      parsedAddress.destinationHash,
-      parsedAddress.path,
-      'push',
-      parsedAddress.requestData,
-      false,
-      currentBookmark?.identifyBeforeLoad === true,
-    );
+    if (parsedAddress) {
+      directoryExpanded = false;
+      void openDestination(
+        parsedAddress.destinationHash,
+        parsedAddress.path,
+        'push',
+        parsedAddress.requestData,
+        false,
+        currentBookmark?.identifyBeforeLoad === true,
+      );
+    }
   }
 
   function openPageLink(target: string, submittedFields: NomadRequestData): void {
@@ -404,7 +407,7 @@
   }
 
   function goBack(): void {
-    if (cancelPendingLoadAndRestorePage()) return;
+    if (cancelPendingPageLoad()) return;
     if (pageError === 'load' && failedPageRequest && loadedPage) {
       failedPageRequest = undefined;
       pageError = undefined;
@@ -434,8 +437,8 @@
     address = formatNomadAddress(previous.destinationHash, previous.path, previous.requestData ?? {});
   }
 
-  function cancelPendingLoadAndRestorePage(): boolean {
-    if (!loadingPage || !pendingPageRequest || !loadedPage) return false;
+  function cancelPendingPageLoad(): boolean {
+    if (!loadingPage || !pendingPageRequest) return false;
     reticulumRuntime.cancelNomadPage(pendingPageRequest.destinationHash);
     navigationSequence += 1;
     pendingPageRequest = undefined;
@@ -443,11 +446,13 @@
     pageError = undefined;
     pageErrorCode = undefined;
     directoryExpanded = false;
-    address = formatNomadAddress(
-      loadedPage.destinationHash,
-      loadedPage.path,
-      loadedPage.requestData ?? {},
-    );
+    if (loadedPage) {
+      address = formatNomadAddress(
+        loadedPage.destinationHash,
+        loadedPage.path,
+        loadedPage.requestData ?? {},
+      );
+    }
     return true;
   }
 
@@ -521,12 +526,6 @@
   function goHome(): void {
     const target = pendingPageRequest ?? failedPageRequest ?? loadedPage;
     if (!target || !canGoHome) return;
-    if (
-      pendingPageRequest
-      && loadedPage?.destinationHash === target.destinationHash
-      && nomadRequestPath(loadedPage.path) === NOMAD_DEFAULT_PAGE_PATH
-      && cancelPendingLoadAndRestorePage()
-    ) return;
     if (pendingPageRequest) reticulumRuntime.cancelNomadPage(pendingPageRequest.destinationHash);
     void openDestination(
       target.destinationHash,
@@ -536,6 +535,14 @@
       false,
       target.identifyBeforeLoad === true,
     );
+  }
+
+  function homeOrCancel(): void {
+    if (loadingPage) {
+      cancelPendingPageLoad();
+      return;
+    }
+    goHome();
   }
 
   function bookmarkCurrent(): void {
@@ -625,11 +632,11 @@
       <button
         class="icon-button"
         type="button"
-        aria-label={$t('nomadnet.page.home')}
-        title={$t('nomadnet.page.home')}
-        disabled={!canGoHome}
-        onclick={goHome}
-      ><Icon name="home" size={19} /></button>
+        aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
+        title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
+        disabled={!loadingPage && !canGoHome}
+        onclick={homeOrCancel}
+      ><Icon name={loadingPage ? 'close' : 'home'} size={19} /></button>
     </div>
     <label>
       <span class="sr-only">{$t('nomadnet.address.label')}</span>

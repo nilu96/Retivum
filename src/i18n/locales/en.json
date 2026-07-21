@@ -241,6 +241,7 @@
   "nomadnet.page.loading.progressSize": "Transfer progress: {percent}% of approximately {size}",
   "nomadnet.page.back": "Back one page",
   "nomadnet.page.home": "Open announced home page",
+  "nomadnet.page.cancelLoading": "Cancel page loading",
   "nomadnet.page.reload": "Reload page",
   "nomadnet.page.shareIdentity": "Share identity with this page",
   "nomadnet.page.sharingIdentity": "Sharing identity…",
