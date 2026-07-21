@@ -164,6 +164,7 @@ class ReticulumRuntimeController {
     destinationHash: string;
     fullDestinationName: string;
     probeSizeBytes: number;
+    cleanup?: () => void;
   }>();
   private readonly pathDropWaiters = new Map<string, (ok: boolean) => void>();
   async start(): Promise<void> {
@@ -264,15 +265,19 @@ class ReticulumRuntimeController {
   }
 
   /**
-   * Sends one encrypted raw Reticulum packet and waits for its delivery proof.
-   * `timeoutMs` covers the proof wait; uncached paths use the separate shared
-   * path-request timeout before the packet is submitted.
+   * Recalls the identity associated with `destination`, derives the destination
+   * hash for `fullDestinationName`, then sends one encrypted raw Reticulum
+   * packet and waits for its delivery proof. This permits a hash announced for
+   * one aspect (for example remote management) to address another aspect on
+   * the same identity (for example `rnstransport.probe`). `timeoutMs` covers
+   * the proof wait; uncached paths use the separate shared path-request timeout.
    */
   async probeDestination(
     destination: string,
     fullDestinationName: string,
     timeoutMs: number,
     probeSizeBytes: number,
+    signal?: AbortSignal,
   ): Promise<ProbeResult> {
     const destinationHash = normalizeDestinationHash(destination);
     const normalizedName = fullDestinationName.trim();
@@ -291,6 +296,15 @@ class ReticulumRuntimeController {
         code: 'PROBE_INVALID',
       };
     }
+    if (signal?.aborted) {
+      return {
+        ok: false,
+        destinationHash,
+        fullDestinationName: normalizedName,
+        probeSizeBytes,
+        code: 'PROBE_CANCELLED',
+      };
+    }
 
     const requestId = crypto.randomUUID();
     this.post({
@@ -302,12 +316,28 @@ class ReticulumRuntimeController {
       probeSizeBytes,
     });
     return new Promise((resolve) => {
+      const abort = () => {
+        const waiter = this.probeWaiters.get(requestId);
+        if (!waiter) return;
+        this.probeWaiters.delete(requestId);
+        waiter.cleanup?.();
+        this.post({ type: 'cancelProbe', requestId });
+        resolve({
+          ok: false,
+          destinationHash,
+          fullDestinationName: normalizedName,
+          probeSizeBytes,
+          code: 'PROBE_CANCELLED',
+        });
+      };
       this.probeWaiters.set(requestId, {
         resolve,
         destinationHash,
         fullDestinationName: normalizedName,
         probeSizeBytes,
+        ...(signal ? { cleanup: () => signal.removeEventListener('abort', abort) } : {}),
       });
+      signal?.addEventListener('abort', abort, { once: true });
     });
   }
 
@@ -1068,7 +1098,9 @@ class ReticulumRuntimeController {
       return;
     }
     if (event.type === 'probeResult') {
-      this.probeWaiters.get(event.requestId)?.resolve(event);
+      const waiter = this.probeWaiters.get(event.requestId);
+      waiter?.cleanup?.();
+      waiter?.resolve(event);
       this.probeWaiters.delete(event.requestId);
       return;
     }
@@ -1584,6 +1616,7 @@ class ReticulumRuntimeController {
 
   private failProbeWaiters(code: string): void {
     for (const waiter of this.probeWaiters.values()) {
+      waiter.cleanup?.();
       waiter.resolve({
         ok: false,
         destinationHash: waiter.destinationHash,

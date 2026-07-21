@@ -11,6 +11,8 @@
   import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/provisioning';
   import { normalizeDestinationHash } from '../../domain/settings';
   import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
+  import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
+  import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
   import { destinationPathStatuses, nomadAnnounces, provisioningNodes, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
   import { createDateFormatter, locale, t } from '../../i18n';
   import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
@@ -20,6 +22,7 @@
   import Icon from '../../lib/components/Icon.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
+  import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { toast } from '../../lib/notifications/toasts';
 
   let selectedNodeId = $state<string>();
@@ -143,6 +146,16 @@
     closeDestinationActions();
     if (await copyText(destinationHash)) toast.success('common.copied');
     else toast.error('common.copyFailed');
+  }
+
+  function probeDestination(node: ProvisioningNode): void {
+    closeDestinationActions();
+    showDestinationProbeActivity({
+      destinationHash: node.destinationHash,
+      displayName: nodeName(node) || undefined,
+      fullDestinationName: 'rnstransport.probe',
+      timeoutMs: probeTimeoutMsForPath($destinationPathStatuses[node.destinationHash]),
+    });
   }
 
   async function loadDevice(): Promise<void> {
@@ -635,6 +648,13 @@
       onclick={() => { void copyDestinationHash(destinationActions!.node.destinationHash); }}
     >
       <Icon name="copy" size={17} />{$t('nomadnet.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={$pendingProbeDestinationHashes.has(destinationActions.node.destinationHash)}
+      onclick={() => { probeDestination(destinationActions!.node); }}
+    >
+      <Icon name="probe" size={17} />{$t('provisioning.destination.actions.probe')}
     </button>
     {#if destinationActions.node.bookmarked}
       <button

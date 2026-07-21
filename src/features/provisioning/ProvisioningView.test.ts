@@ -1,13 +1,18 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProvisioningNode } from '../../domain/provisioning';
 import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
+import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
+import type { ProbeResult } from '../../infrastructure/reticulum/protocol';
 import {
   destinationPathStatuses,
   nomadAnnounces,
   provisioningNodes,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
+import ToastViewport from '../../lib/components/ToastViewport.svelte';
+import { clearToasts } from '../../lib/notifications/toasts';
 import ProvisioningView from './ProvisioningView.svelte';
 
 const announcedNode: ProvisioningNode = {
@@ -23,6 +28,8 @@ describe('ProvisioningView', () => {
     provisioningNodes.set([]);
     nomadAnnounces.set([]);
     destinationPathStatuses.set({});
+    clearProbeHistory();
+    clearToasts();
   });
 
   it('connects to a valid custom hash, hides the directory, and locks the address controls', async () => {
@@ -178,6 +185,67 @@ describe('ProvisioningView', () => {
       expect.objectContaining({ id: announcedNode.id }),
       'Workshop router',
     ));
+  });
+
+  it('probes a management destination with its name and provisioning aspect', async () => {
+    provisioningNodes.set([announcedNode]);
+    nomadAnnounces.set([{
+      id: `identity:${announcedNode.destinationHash}`,
+      identityId: 'identity',
+      destinationHash: announcedNode.destinationHash,
+      publicKey: announcedNode.publicKey,
+      displayName: 'Workshop router',
+      heardAt: announcedNode.heardAt,
+    }]);
+    destinationPathStatuses.set({
+      [announcedNode.destinationHash]: {
+        destinationHash: announcedNode.destinationHash,
+        hasPath: true,
+        hops: 2,
+      },
+    });
+    let resolveProbe!: (result: ProbeResult) => void;
+    const probe = vi.spyOn(reticulumRuntime, 'probeDestination').mockImplementation(() => new Promise((resolve) => {
+      resolveProbe = resolve;
+    }));
+    render(ProvisioningView);
+    render(ToastViewport);
+
+    const row = screen.getByRole('button', { name: /Workshop router/ });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    const menuItems = screen.getAllByRole('menuitem');
+    const copyIndex = menuItems.findIndex((item) => item.textContent?.includes('Copy destination hash'));
+    expect(menuItems[copyIndex + 1]).toHaveTextContent('Probe destination');
+
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
+    expect(probe).toHaveBeenCalledWith(
+      announcedNode.destinationHash,
+      'rnstransport.probe',
+      18_000,
+      8,
+      expect.any(AbortSignal),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      `Probing Workshop router <${announcedNode.destinationHash.slice(0, 8)}…${announcedNode.destinationHash.slice(-6)}>. Waiting for a response ...`,
+    );
+    expect(screen.getByRole('button', { name: 'Cancel activity' })).toBeInTheDocument();
+
+    resolveProbe({
+      ok: true,
+      destinationHash: announcedNode.destinationHash,
+      fullDestinationName: 'rnstransport.probe',
+      probeSizeBytes: 8,
+      roundTripTimeMs: 1_250,
+      hops: 2,
+    });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      `Probe to Workshop router <${announcedNode.destinationHash.slice(0, 8)}…${announcedNode.destinationHash.slice(-6)}> succeeded in 1.3 s.`,
+    ));
+    expect(get(probeHistory)[0]).toEqual(expect.objectContaining({
+      destinationHash: announcedNode.destinationHash,
+      fullDestinationName: 'rnstransport.probe',
+      ok: true,
+    }));
   });
 
   it('replaces the bookmarked destination overview with the loaded configuration', async () => {

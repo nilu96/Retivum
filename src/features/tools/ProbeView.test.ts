@@ -5,8 +5,8 @@ import {
   reticulumRuntime,
   runtimeStatus,
 } from '../../infrastructure/reticulum/runtime';
+import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history';
 import ProbeView from './ProbeView.svelte';
-import { clearProbeHistory } from './probe-state';
 
 describe('ProbeView', () => {
   beforeEach(() => {
@@ -54,7 +54,7 @@ describe('ProbeView', () => {
 
     await fireEvent.input(screen.getByLabelText('Destination hash'), { target: { value: destination } });
     await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
-    expect(probe).toHaveBeenLastCalledWith(destination, 'lxmf.delivery', 20_000, 8);
+    expect(probe).toHaveBeenLastCalledWith(destination, 'lxmf.delivery', 20_000, 8, expect.any(AbortSignal));
     expect(screen.getByText('Valid proof received')).toBeInTheDocument();
     expect(screen.getByText('23.50 ms')).toBeInTheDocument();
     expect(screen.getByText(`via <${'b'.repeat(32)}> on Community Hub (WebSocket)`)).toBeInTheDocument();

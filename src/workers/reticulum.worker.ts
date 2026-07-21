@@ -138,6 +138,7 @@ interface ProvisioningLinkState {
 
 interface ProbeJob {
   requestId: string;
+  sourceDestinationHash: string;
   destinationHash: string;
   fullDestinationName: string;
   timeoutMs: number;
@@ -145,6 +146,7 @@ interface ProbeJob {
   phase: 'findingPath' | 'awaitingProof';
   packetHash?: string;
   sentAtMs?: number;
+  publicKey?: Uint8Array;
   viaHash?: string;
   interfaceName?: string;
   interfaceType?: InterfaceConfig['type'];
@@ -401,6 +403,11 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
 
     if (command.type === 'probeDestination') {
       probeDestination(command);
+      return;
+    }
+
+    if (command.type === 'cancelProbe') {
+      cancelProbe(command.requestId);
       return;
     }
 
@@ -1159,6 +1166,7 @@ function probeDestination(command: Extract<RuntimeCommand, { type: 'probeDestina
 
   const job: ProbeJob = {
     requestId: command.requestId,
+    sourceDestinationHash: destinationHash,
     destinationHash,
     fullDestinationName,
     timeoutMs: command.timeoutMs,
@@ -1168,17 +1176,8 @@ function probeDestination(command: Extract<RuntimeCommand, { type: 'probeDestina
   probeJobs.set(job.requestId, job);
 
   try {
-    const destinationBytes = hexToBytes(destinationHash);
-    if (node.hasPath(destinationBytes)) {
-      sendProbe(job);
-      return;
-    }
-    job.timer = setTimeout(() => failProbe(job, 'PROBE_PATH_REQUEST_TIMEOUT'), pathRequestTimeoutMs);
-    processOutput(node.requestPath(destinationBytes) as WasmOutput);
-    log('debug', 'wasm', 'RETICULUM_PATH_REQUESTED', {
-      destinationHash,
-      purpose: 'probe',
-    });
+    deriveProbeDestination(job);
+    continueProbe(job);
   } catch {
     failProbe(job, 'PROBE_PATH_REQUEST_FAILED');
   }
@@ -1209,15 +1208,66 @@ function dropDestinationPath(command: Extract<RuntimeCommand, { type: 'dropDesti
   }
 }
 
+function cancelProbe(requestId: string): void {
+  const job = probeJobs.get(requestId);
+  if (!job || !probeJobs.delete(requestId)) return;
+  clearProbeTimer(job);
+  if (job.packetHash) probeJobsByPacketHash.delete(job.packetHash);
+  log('debug', 'wasm', 'PROBE_CANCELLED', { destinationHash: job.destinationHash });
+}
+
 function sendPendingProbes(destinationHash: string): void {
   for (const job of probeJobs.values()) {
     if (job.destinationHash === destinationHash && job.phase === 'findingPath') sendProbe(job);
   }
 }
 
+function continueProbe(job: ProbeJob): void {
+  if (!node || !probeJobs.has(job.requestId) || job.phase !== 'findingPath') return;
+  const destinationBytes = hexToBytes(job.destinationHash);
+  if (node.hasPath(destinationBytes)) {
+    sendProbe(job);
+    return;
+  }
+  clearProbeTimer(job);
+  job.timer = setTimeout(() => failProbe(job, 'PROBE_PATH_REQUEST_TIMEOUT'), pathRequestTimeoutMs);
+  processOutput(node.requestPath(destinationBytes) as WasmOutput);
+  log('debug', 'wasm', 'RETICULUM_PATH_REQUESTED', {
+    destinationHash: job.destinationHash,
+    sourceDestinationHash: job.sourceDestinationHash,
+    purpose: 'probe',
+  });
+}
+
+function deriveProbeDestination(job: ProbeJob): boolean {
+  if (!node) return false;
+  const publicKey = job.publicKey ?? knownDestinationPublicKeys.get(job.sourceDestinationHash);
+  if (!publicKey) return false;
+  const derivedDestination = new Uint8Array(
+    ReticulumNode.hashFromNameAndIdentity(job.fullDestinationName, publicKey),
+  );
+  if (derivedDestination.byteLength !== 16) throw new Error('Derived probe destination hash is invalid');
+  const derivedDestinationHash = bytesToHex(derivedDestination);
+  job.destinationHash = derivedDestinationHash;
+  job.publicKey = new Uint8Array(publicKey);
+  node.rememberIdentity(derivedDestination, publicKey);
+  knownDestinationPublicKeys.set(derivedDestinationHash, new Uint8Array(publicKey));
+  emitKnownDestinationSnapshot();
+  return true;
+}
+
 function sendProbe(job: ProbeJob): void {
   if (!node || !probeJobs.has(job.requestId) || job.phase !== 'findingPath') return;
   clearProbeTimer(job);
+  const previousDestinationHash = job.destinationHash;
+  if (!deriveProbeDestination(job)) {
+    failProbe(job, 'PROBE_DESTINATION_UNKNOWN');
+    return;
+  }
+  if (job.destinationHash !== previousDestinationHash) {
+    continueProbe(job);
+    return;
+  }
   try {
     Object.assign(job, resolveProbeRoute(
       node.exportNetworkPersistentState(),
@@ -1228,20 +1278,8 @@ function sendProbe(job: ProbeJob): void {
   } catch {
     // Route presentation metadata must never prevent the probe itself.
   }
-  const publicKey = knownDestinationPublicKeys.get(job.destinationHash);
-  if (!publicKey) {
-    failProbe(job, 'PROBE_DESTINATION_UNKNOWN');
-    return;
-  }
-
   try {
     const destinationBytes = hexToBytes(job.destinationHash);
-    const derivedDestination = ReticulumNode.hashFromNameAndIdentity(job.fullDestinationName, publicKey);
-    if (!equalBytes(destinationBytes, new Uint8Array(derivedDestination))) {
-      failProbe(job, 'PROBE_DESTINATION_NAME_MISMATCH');
-      return;
-    }
-
     const output = node.sendSinglePacket(
       destinationBytes,
       crypto.getRandomValues(new Uint8Array(job.probeSizeBytes)),

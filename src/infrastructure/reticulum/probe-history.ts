@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import type { ProbeResult } from '../../infrastructure/reticulum/protocol';
+import type { ProbeResult } from './protocol';
 
 export interface ProbeHistoryEntry extends ProbeResult {
   id: string;

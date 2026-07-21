@@ -187,6 +187,7 @@ export type RuntimeCommand =
       timeoutMs: number;
       probeSizeBytes: number;
     }
+  | { type: 'cancelProbe'; requestId: string }
   | { type: 'updateIdentityDisplayName'; requestId: string; displayName: string }
   | { type: 'createIdentity'; requestId: string; metadata: NewIdentityMetadata }
   | {

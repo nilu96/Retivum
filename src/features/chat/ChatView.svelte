@@ -35,6 +35,8 @@
     propagationSyncActive,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
+  import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
+  import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -45,6 +47,7 @@
   import ChatDeleteConfirmation from './ChatDeleteConfirmation.svelte';
   import NewConversationEditor from './NewConversationEditor.svelte';
   import MessageAttachment from './MessageAttachment.svelte';
+  import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { toast } from '../../lib/notifications/toasts';
 
   type ChatScope = 'chats' | 'contacts' | 'announces';
@@ -467,6 +470,16 @@
     closeChatActions();
     if (await copyText(destinationHash)) toast.success('common.copied');
     else toast.error('common.copyFailed');
+  }
+
+  function probeDestination(destinationHash: string, displayName: string): void {
+    closeChatActions();
+    showDestinationProbeActivity({
+      destinationHash,
+      displayName,
+      fullDestinationName: 'lxmf.delivery',
+      timeoutMs: probeTimeoutMsForPath($destinationPathStatuses[destinationHash]),
+    });
   }
 
   function openContactEditor(destinationHash: string): void {
@@ -1208,6 +1221,13 @@
       onclick={() => { void copyDestinationHash(chatActions!.destinationHash); }}
     >
       <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={$pendingProbeDestinationHashes.has(chatActions.destinationHash)}
+      onclick={() => { void probeDestination(chatActions!.destinationHash, chatActions!.displayName); }}
+    >
+      <Icon name="probe" size={17} />{$t('chat.destination.actions.probe')}
     </button>
     <button
       role="menuitem"

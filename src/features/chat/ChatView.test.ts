@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   chatAnnounces,
@@ -14,6 +15,7 @@ import {
   propagationSyncActive,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
+import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
 import ToastViewport from '../../lib/components/ToastViewport.svelte';
 import { clearToasts } from '../../lib/notifications/toasts';
 import ChatView from './ChatView.svelte';
@@ -29,6 +31,7 @@ describe('ChatView', () => {
     propagationSyncActive.set(false);
     markChatMessagesRead();
     clearToasts();
+    clearProbeHistory();
     vi.restoreAllMocks();
   });
 
@@ -635,6 +638,75 @@ describe('ChatView', () => {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
+  });
+
+  it('probes a chat destination from the action below copy and reports live progress', async () => {
+    const destinationHash = '9'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:probe-actions',
+      identityId: 'identity',
+      messageId: 'probe-actions',
+      sourceHash: destinationHash,
+      destinationHash: 'e'.repeat(32),
+      title: '',
+      content: 'Probe actions',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Remote Alice',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    let resolveProbe!: (result: Awaited<ReturnType<typeof reticulumRuntime.probeDestination>>) => void;
+    const probe = vi.spyOn(reticulumRuntime, 'probeDestination').mockImplementation(() => new Promise((resolve) => {
+      resolveProbe = resolve;
+    }));
+    destinationPathStatuses.set({
+      [destinationHash]: { destinationHash, hasPath: true, hops: 3 },
+    });
+    render(ChatView);
+    render(ToastViewport);
+
+    const row = screen.getByRole('button', { name: /Probe actions/ });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    const menuItems = screen.getAllByRole('menuitem');
+    const copyIndex = menuItems.findIndex((item) => item.textContent?.includes('Copy destination hash'));
+    expect(menuItems[copyIndex + 1]).toHaveTextContent('Probe destination');
+
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
+    expect(probe).toHaveBeenCalledWith(destinationHash, 'lxmf.delivery', 22_000, 8, expect.any(AbortSignal));
+    expect(await screen.findByRole('status')).toHaveTextContent(`Probing Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}>. Waiting for a response ...`);
+    expect(screen.getByRole('button', { name: 'Cancel activity' })).toBeInTheDocument();
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Probe destination' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Close chat actions' }));
+
+    resolveProbe({
+      ok: true,
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 8,
+      roundTripTimeMs: 31.25,
+      hops: 1,
+    });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(`Probe to Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}> succeeded in 0.0 s.`));
+    expect(get(probeHistory)[0]).toEqual(expect.objectContaining({ destinationHash, ok: true }));
+
+    probe.mockResolvedValueOnce({
+      ok: false,
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 8,
+      code: 'PROBE_DESTINATION_UNKNOWN',
+    });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(`Cannot probe Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}> because no public identity is known for this destination.`);
   });
 
   it('opens destination actions from contact and announce rows and edits known contacts', async () => {

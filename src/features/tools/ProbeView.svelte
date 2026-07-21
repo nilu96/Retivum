@@ -9,9 +9,10 @@
     reticulumRuntime,
     runtimeStatus,
   } from '../../infrastructure/reticulum/runtime';
+  import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
+  import { pendingProbeDestinationHashes, startDestinationProbe } from '../../infrastructure/reticulum/probe-operations';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
-  import { clearProbeHistory, probeHistory, recordProbeResult } from './probe-state';
 
   const destinationNames = ['lxmf.delivery', 'rnstransport.probe'] as const;
   let page: HTMLDivElement;
@@ -36,6 +37,9 @@
   const validDestinationName = $derived(fullDestinationName.trim().length > 0
     && fullDestinationName.trim().split('.').every((component) => component.length > 0));
   const formValid = $derived(Boolean(normalizedDestination) && validDestinationName && validTimeout && validProbeSize);
+  const destinationProbePending = $derived(Boolean(
+    normalizedDestination && $pendingProbeDestinationHashes.has(normalizedDestination),
+  ));
   const visibleDestinations = $derived.by(() => {
     const query = destinationHash.trim().toLowerCase();
     return query
@@ -78,16 +82,17 @@
   async function probe(): Promise<void> {
     validationVisible = true;
     pathDropFeedback = undefined;
-    if (!formValid || !normalizedDestination || probing) return;
+    if (!formValid || !normalizedDestination || probing || destinationProbePending) return;
+    const pendingProbe = startDestinationProbe(
+      normalizedDestination,
+      fullDestinationName,
+      timeoutSeconds * 1_000,
+      probeSizeBytes,
+    );
+    if (!pendingProbe) return;
     probing = true;
     try {
-      const result = await reticulumRuntime.probeDestination(
-        normalizedDestination,
-        fullDestinationName,
-        timeoutSeconds * 1_000,
-        probeSizeBytes,
-      );
-      recordProbeResult(result);
+      await pendingProbe.result;
     } finally {
       probing = false;
     }
@@ -249,12 +254,12 @@
         <button
           class="button primary"
           type="submit"
-          disabled={probing || droppingPath || $runtimeStatus !== 'online'}
-        ><Icon name="probe" size={17} />{probing ? $t('probe.action.probing') : $t('probe.action.start')}</button>
+          disabled={probing || destinationProbePending || droppingPath || $runtimeStatus !== 'online'}
+        ><Icon name="probe" size={17} />{probing || destinationProbePending ? $t('probe.action.probing') : $t('probe.action.start')}</button>
         <button
           class="button secondary danger-text"
           type="button"
-          disabled={probing || droppingPath || !normalizedDestination}
+          disabled={probing || destinationProbePending || droppingPath || !normalizedDestination}
           onclick={() => void dropPath()}
         ><Icon name="route" size={17} />{droppingPath ? $t('probe.action.droppingPath') : $t('probe.action.dropPath')}</button>
         {#if pathDropFeedback}

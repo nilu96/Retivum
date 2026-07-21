@@ -107,6 +107,33 @@ describe('ReticulumRuntimeController chat deletion', () => {
     }));
   });
 
+  it('cancels a pending raw probe through the worker', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '6'.repeat(32);
+    const controller = new AbortController();
+
+    const pending = reticulumRuntime.probeDestination(
+      destinationHash,
+      'lxmf.delivery',
+      20_000,
+      8,
+      controller.signal,
+    );
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+    controller.abort();
+
+    expect(postMessage).toHaveBeenLastCalledWith({ type: 'cancelProbe', requestId: command.requestId });
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 8,
+      code: 'PROBE_CANCELLED',
+    });
+  });
+
   it('rejects invalid probes without posting to the worker', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();
