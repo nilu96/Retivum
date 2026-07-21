@@ -48,7 +48,6 @@
   type DestinationActionTarget = {
     destinationHash: string;
     displayName: string;
-    canDeleteConversation: boolean;
   };
 
   let scope = $state<ChatScope>('chats');
@@ -90,7 +89,6 @@
     destinationHash: string;
     displayName: string;
     blocked: boolean;
-    canDeleteConversation: boolean;
     x: number;
     y: number;
   } | undefined>();
@@ -170,6 +168,9 @@
   ));
   const chatActionContact = $derived($chatContacts.find(
     (contact) => contact.destinationHash === chatActions?.destinationHash,
+  ));
+  const chatActionConversation = $derived(conversations.find(
+    (conversation) => conversation.destinationHash === chatActions?.destinationHash,
   ));
   const selectedName = $derived(selectedContact?.name ?? selectedAnnounce?.displayName);
   const selectedDestinationBlocked = $derived(Boolean(
@@ -355,17 +356,29 @@
     };
   }
 
-  function conversationActionTarget(conversation: ChatConversationSummary): DestinationActionTarget {
+  function destinationActionTarget(destinationHash: string, displayName: string): DestinationActionTarget {
     return {
-      destinationHash: conversation.destinationHash,
-      displayName: conversation.displayName ?? shortHash(conversation.destinationHash),
-      canDeleteConversation: true,
+      destinationHash,
+      displayName,
     };
+  }
+
+  function conversationActionTarget(conversation: ChatConversationSummary): DestinationActionTarget {
+    return destinationActionTarget(
+      conversation.destinationHash,
+      conversation.displayName ?? shortHash(conversation.destinationHash),
+    );
   }
 
   function openChatActions(target: DestinationActionTarget, clientX: number, clientY: number): void {
     const menuWidth = 210;
-    const menuHeight = target.canDeleteConversation ? 200 : 152;
+    const contactActionVisible = $chatContacts.some(
+      (contact) => contact.destinationHash === target.destinationHash,
+    );
+    const deleteActionVisible = conversations.some(
+      (conversation) => conversation.destinationHash === target.destinationHash && conversation.messageCount > 0,
+    );
+    const menuHeight = (deleteActionVisible ? 200 : 152) + (contactActionVisible ? 48 : 0);
     messageActions = undefined;
     chatActions = {
       ...target,
@@ -930,11 +943,7 @@
       {:else if scope === 'contacts' && visibleContacts.length > 0}
         <div class="chat-directory-list">
           {#each visibleContacts as contact (contact.id)}
-            {@const actionTarget = {
-              destinationHash: contact.destinationHash,
-              displayName: contact.name,
-              canDeleteConversation: false,
-            }}
+            {@const actionTarget = destinationActionTarget(contact.destinationHash, contact.name)}
             <div class="chat-contact-row" class:active={selectedDestination === contact.destinationHash}>
               <button
                 class="chat-directory-row"
@@ -986,11 +995,10 @@
       {:else if scope === 'announces' && visibleAnnounces.length > 0}
         <div class="chat-directory-list">
           {#each visibleAnnounces as announce (announce.id)}
-            {@const actionTarget = {
-              destinationHash: announce.destinationHash,
-              displayName: announce.displayName ?? shortHash(announce.destinationHash),
-              canDeleteConversation: false,
-            }}
+            {@const actionTarget = destinationActionTarget(
+              announce.destinationHash,
+              announce.displayName ?? shortHash(announce.destinationHash),
+            )}
             <button
               class="chat-directory-row"
               class:active={selectedDestination === announce.destinationHash}
@@ -1338,26 +1346,54 @@
     style:top={`${chatActions.y}px`}
   >
     <button
+      role="menuitem"
+      onclick={() => { void copyDestinationHash(chatActions!.destinationHash); }}
+    >
+      <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      onclick={() => openContactEditor(chatActions!.destinationHash)}
+    >
+      <Icon name={chatActionContact ? 'edit' : 'identity'} size={17} />
+      {$t(chatActionContact ? 'chat.contact.editAction' : 'chat.contact.add')}
+    </button>
+    {#if chatActionContact}
+      <button
+        class="danger"
+        role="menuitem"
+        onclick={() => {
+          const contactId = chatActionContact?.id;
+          closeChatActions();
+          if (contactId) void deleteContact(contactId);
+        }}
+      >
+        <Icon name="trash" size={17} />{$t('chat.contact.removeAction')}
+      </button>
+    {/if}
+    <button
       class:danger={!chatActions.blocked}
       role="menuitem"
       onclick={() => setDestinationBlocked(chatActions!.destinationHash, !chatActions!.blocked)}
     >
       <Icon name="block" size={17} />{$t(chatActions.blocked ? 'chat.unblock.action' : 'chat.block.action')}
     </button>
-    <button
-      class="danger"
-      role="menuitem"
-      onclick={() => {
-        deleteConfirmation = {
-          kind: 'conversation',
-          destinationHash: chatActions!.destinationHash,
-          displayName: chatActions!.displayName,
-        };
-        closeChatActions();
-      }}
-    >
-      <Icon name="trash" size={17} />{$t('chat.conversation.actions.delete')}
-    </button>
+    {#if chatActionConversation && chatActionConversation.messageCount > 0}
+      <button
+        class="danger"
+        role="menuitem"
+        onclick={() => {
+          deleteConfirmation = {
+            kind: 'conversation',
+            destinationHash: chatActions!.destinationHash,
+            displayName: chatActions!.displayName,
+          };
+          closeChatActions();
+        }}
+      >
+        <Icon name="trash" size={17} />{$t('chat.conversation.actions.delete')}
+      </button>
+    {/if}
   </div>
 {/if}
 

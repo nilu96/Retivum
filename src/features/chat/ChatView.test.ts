@@ -598,6 +598,108 @@ describe('ChatView', () => {
     expect(remove).toHaveBeenCalledWith(destinationHash);
   });
 
+  it('copies a chat destination hash and offers to add an unknown destination as a contact', async () => {
+    const destinationHash = 'c'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:destination-actions',
+      identityId: 'identity',
+      messageId: 'destination-actions',
+      sourceHash: destinationHash,
+      destinationHash: 'e'.repeat(32),
+      title: '',
+      content: 'Destination actions',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(ChatView);
+      const row = screen.getByRole('button', { name: /Destination actions/ });
+
+      await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
+      expect(writeText).toHaveBeenCalledWith(destinationHash);
+
+      await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+      expect(screen.getByRole('menuitem', { name: 'Add contact' })).toBeInTheDocument();
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Add contact' }));
+      expect(screen.getByRole('heading', { name: 'Add contact' })).toBeInTheDocument();
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('opens destination actions from contact and announce rows and edits known contacts', async () => {
+    const destinationHash = 'a'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Known Alice',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: 'b'.repeat(32),
+      publicKey: 'c'.repeat(128),
+      displayName: 'Announced Alice',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const removeContact = vi.spyOn(reticulumRuntime, 'deleteChatContact').mockResolvedValue(true);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Contacts' }));
+    const contactRow = screen.getByText('Known Alice').closest('button');
+    expect(contactRow).not.toBeNull();
+    if (contactRow) await fireEvent.contextMenu(contactRow, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Edit contact' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Remove contact' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Delete conversation' })).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Edit contact' }));
+    expect(screen.getByRole('textbox', { name: /^Contact name/ })).toHaveValue('Known Alice');
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    chatMessages.set([{
+      id: 'identity:known-alice-message',
+      identityId: 'identity',
+      messageId: 'known-alice-message',
+      sourceHash: destinationHash,
+      destinationHash: 'd'.repeat(32),
+      title: '',
+      content: 'Message from known Alice',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+
+    if (contactRow) await fireEvent.contextMenu(contactRow, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Close chat actions' }));
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    const announceRow = screen.getByText('Announced Alice').closest('button');
+    expect(announceRow).not.toBeNull();
+    if (announceRow) await fireEvent.contextMenu(announceRow, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Copy destination hash' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Edit contact' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Remove contact' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Block destination' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Remove contact' }));
+    expect(removeContact).toHaveBeenCalledWith(`identity:${destinationHash}`);
+  });
+
   it('blocks a chat from its context menu and makes the open chat read-only', async () => {
     const destinationHash = 'b'.repeat(32);
     chatMessages.set([{
