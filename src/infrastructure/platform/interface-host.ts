@@ -57,6 +57,7 @@ export class PlatformInterfaceHost {
       host = new RNodeHost(config, {
           onPacket: (data) => this.post({ type: 'platformInterfaceData', id: config.id, data }),
           onState: (state, errorCode) => this.post({ type: 'platformInterfaceState', id: config.id, state, errorCode }),
+          onTelemetry: (telemetry) => this.post({ type: 'platformInterfaceTelemetry', id: config.id, telemetry }),
           log: (code, details) => this.log(code, details),
         });
     } else if (config.type === 'tcp') {

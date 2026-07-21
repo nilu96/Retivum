@@ -114,10 +114,10 @@ Current fingerprints:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `leviculum_wasm.js` | `11a2164f25f952e0d4a91c6699f67cace35b542ddb0c4bad46761eba5550bf9d` |
-| `leviculum_wasm_bg.wasm` | `5fb2381d5c599cb63b190275dda5924796c696efb22081f1371e82ac0e4462bb` |
-| `leviculum_wasm.d.ts` | `f812229acb6174da259ac2659da20de7729fc65f573245ba5f7c2a1544d523ed` |
-| `leviculum_wasm_bg.wasm.d.ts` | `b274a53dc99e4c55079b1471a8d372b3c48b6b35666fc517571524f0f29d1cda` |
+| `leviculum_wasm.js` | `224426440bb0a949cf72ccbf91541a40808e92cb20734fe33ae048a4c6c244f8` |
+| `leviculum_wasm_bg.wasm` | `8feba6d029b8c03cad2de7c14cc21fda6706e09a1989d1389ba990f3507ddc78` |
+| `leviculum_wasm.d.ts` | `5f7d5edb81c50e0d36d67b44894e8c5e376e7eb41e04cd7018f449be63780cc3` |
+| `leviculum_wasm_bg.wasm.d.ts` | `784653da3a283bdf51796fc044c6d1ead8fc581312424ee52f67b7e374966645` |
 
 The current build was produced with Rust 1.95.0 and `wasm-bindgen` 0.2.126. From the Leviculum checkout, the documented development build is:
 
@@ -135,6 +135,7 @@ Rebuilding overwrites generated application inputs. Do it only when the task req
 The current generated API imposes these constraints:
 
 - `transportEnabled` is constructor-only; changing it requires a controlled runtime rebuild.
+- Retivum's vendored build exposes `ReticulumNode.transportedPacketCount()`, backed by `Node::transport_stats().packets_forwarded()`. The corresponding local source method is in `/Users/nils-lucas/Downloads/leviculum/leviculum-wasm/src/lib.rs`; preserve it when rebuilding or upstream the binding first.
 - Interfaces can be added and marked online/offline, but cannot be removed or updated live; edits and deletion require a controlled runtime rebuild.
 - Stable application interface UUIDs are distinct from runtime numeric indexes returned by `addInterface()`.
 - WebSocket endpoint/TLS/reconnection behavior belongs to the host driver, not WASM.

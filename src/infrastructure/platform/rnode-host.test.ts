@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRNodeInterfaceDraft } from '../../domain/settings';
 import type { ByteConnection } from './byte-connections';
-import { KissDeframer, RNodeHost, frame } from './rnode-host';
+import { KissDeframer, RNodeHost, frame, parseRNodeTelemetry } from './rnode-host';
 
 const CMD_DATA = 0x00;
 const CMD_FREQUENCY = 0x01;
@@ -60,6 +60,38 @@ describe('RNode KISS framing', () => {
       command: 0,
       payload: new Uint8Array([1, 0xc0, 2, 0xdb, 3]),
     }]);
+  });
+});
+
+describe('RNode telemetry', () => {
+  it('decodes radio channel and battery reports', () => {
+    expect(parseRNodeTelemetry(0x25, new Uint8Array([
+      0x00, 0x37,
+      0x00, 0xb6,
+      0x00, 0x7b,
+      0x01, 0xc8,
+      157 - 80,
+      157 - 92,
+      0xff,
+    ]))).toEqual({
+      airtimeShortPercent: 0.55,
+      airtimeLongPercent: 1.82,
+      channelLoadShortPercent: 1.23,
+      channelLoadLongPercent: 4.56,
+      currentRssiDbm: -80,
+      noiseFloorDbm: -92,
+      interferenceDbm: undefined,
+    });
+    expect(parseRNodeTelemetry(0x27, new Uint8Array([2, 84]))).toEqual({
+      batteryState: 'charging',
+      batteryPercent: 84,
+    });
+  });
+
+  it('decodes packet counters and signed signal reports', () => {
+    expect(parseRNodeTelemetry(0x21, new Uint8Array([0, 0, 1, 2]))).toEqual({ radioRxPackets: 258 });
+    expect(parseRNodeTelemetry(0x23, new Uint8Array([65]))).toEqual({ lastPacketRssiDbm: -92 });
+    expect(parseRNodeTelemetry(0x24, new Uint8Array([0xfc]))).toEqual({ lastPacketSnrDb: -1 });
   });
 });
 

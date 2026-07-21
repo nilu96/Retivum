@@ -637,7 +637,7 @@ Settings uses shared `SettingsSection`, `FormField`, `Toggle`, `Select`, `Number
 | LXMF | Default sending method (direct, opportunistic, or propagated), propagation fallback opt-in, optional preferred node, inbound stamp cost, and synchronization/announcement intervals |
 | Storage | Usage, persistence status, encrypted backup/restore, clear cache/history, and separately confirmed clearing of heard-announce history |
 | Appearance | System/light/dark theme, language foundation (system/English initially), density where appropriate, reduced motion follows OS |
-| Tools | Primary navigation directory for Reticulum logs and Remote provisioning plus planned Path table management, Probing, and Status details tools |
+| Tools | Primary navigation directory for Reticulum logs, Remote provisioning, and live Status details; Path table management and Probing remain planned |
 | Remote provisioning | Implemented tool with an experimental directory and schema-driven editor for authorized `rnstransport.remote.management` destinations |
 | Diagnostics | Version/build/WASM provenance, memory report, redacted logs, export support bundle |
 | About | Licenses, privacy statement, source/project links |

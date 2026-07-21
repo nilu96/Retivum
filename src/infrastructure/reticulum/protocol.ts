@@ -2,12 +2,59 @@ import type { PersistedIdentityRecord } from '../../domain/identity';
 import type { PersistedNetworkStateRecord } from '../../domain/network-state';
 import type { ReticulumLogEntry } from '../../domain/logging';
 import type { NomadPageLoadStage, NomadRequestData } from '../../domain/nomadnet';
-import type { AppPreferences, InterfaceConfig } from '../../domain/settings';
+import type { AppPreferences, InterfaceConfig, RNodeConnectionType } from '../../domain/settings';
 import type { ChatAttachment } from '../../domain/chat';
 import type { ProvisioningNode } from '../../domain/provisioning';
 
 export type RuntimeState = 'starting' | 'noInterfaces' | 'connecting' | 'online' | 'offline' | 'error';
 export type InterfaceRuntimeState = 'disabled' | 'connecting' | 'online' | 'reconnecting' | 'offline' | 'error';
+
+export type RNodeBatteryState = 'unknown' | 'discharging' | 'charging' | 'charged';
+
+export interface RNodeInterfaceTelemetry {
+  radioRxPackets?: number;
+  radioTxPackets?: number;
+  lastPacketRssiDbm?: number;
+  lastPacketSnrDb?: number;
+  currentRssiDbm?: number;
+  noiseFloorDbm?: number;
+  interferenceDbm?: number;
+  batteryPercent?: number;
+  batteryState?: RNodeBatteryState;
+  airtimeShortPercent?: number;
+  airtimeLongPercent?: number;
+  channelLoadShortPercent?: number;
+  channelLoadLongPercent?: number;
+}
+
+export interface InterfaceStatusDetails {
+  id: string;
+  name: string;
+  type: InterfaceConfig['type'];
+  mode: InterfaceConfig['mode'];
+  rnodeConnectionType?: RNodeConnectionType;
+  state: InterfaceRuntimeState;
+  bitrateBps: number;
+  rxBytes: number;
+  txBytes: number;
+  rxPackets: number;
+  txPackets: number;
+  incomingAnnouncesPerSecond: number;
+  outgoingAnnouncesPerSecond: number;
+  rnode?: RNodeInterfaceTelemetry;
+}
+
+export interface NetworkStatusDetails {
+  activeLinks: number;
+  transportEnabled: boolean;
+  transportHashHex?: string;
+  transportedPackets: number;
+}
+
+export interface RuntimeStatusDetails {
+  network: NetworkStatusDetails;
+  interfaces: InterfaceStatusDetails[];
+}
 
 export interface RuntimeConfiguration {
   preferences: AppPreferences;
@@ -134,13 +181,16 @@ export type RuntimeCommand =
   | { type: 'activationStorageResult'; requestId: string; ok: boolean }
   | { type: 'persistenceResult'; requestId: string; ok: boolean }
   | { type: 'networkPersistenceResult'; requestId: string; ok: boolean }
+  | { type: 'closeAllLinks' }
   | { type: 'platformInterfaceState'; id: string; state: 'online' | 'offline' | 'error'; errorCode?: string }
   | { type: 'platformInterfaceData'; id: string; data: Uint8Array }
+  | { type: 'platformInterfaceTelemetry'; id: string; telemetry: RNodeInterfaceTelemetry }
   | { type: 'shutdown' };
 
 export type RuntimeEvent =
   | { type: 'runtimeStatus'; state: RuntimeState }
   | { type: 'interfaceStatus'; id: string; state: InterfaceRuntimeState; errorCode?: string }
+  | { type: 'statusDetails'; details: RuntimeStatusDetails }
   | { type: 'lxmfPropagationSyncStatus'; syncing: boolean }
   | { type: 'identityReady'; identity: PersistedIdentityRecord; deliveryDestinationHashHex?: string }
   | { type: 'persistIdentity'; requestId: string; identity: PersistedIdentityRecord; activate?: boolean }

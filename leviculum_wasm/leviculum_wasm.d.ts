@@ -175,6 +175,7 @@ export class ReticulumNode {
     setLxmfPropagationNode(destination_hash?: Uint8Array | null): any;
     sign(message: Uint8Array): Uint8Array;
     tick(): any;
+    transportedPacketCount(): bigint;
     static truncatedHash(data: Uint8Array): Uint8Array;
     unregisterDestination(destination_hash: Uint8Array): void;
     /**
@@ -239,6 +240,7 @@ export interface InitOutput {
     readonly reticulumnode_setInterfaceOnline: (a: number, b: number, c: number) => [number, number, number];
     readonly reticulumnode_sign: (a: number, b: number, c: number) => [number, number, number, number];
     readonly reticulumnode_tick: (a: number) => [number, number, number];
+    readonly reticulumnode_transportedPacketCount: (a: number) => bigint;
     readonly reticulumnode_truncatedHash: (a: number, b: number) => [number, number];
     readonly reticulumnode_unregisterDestination: (a: number, b: number, c: number) => [number, number];
     readonly reticulumnode_validateSignature: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];

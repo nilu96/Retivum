@@ -1,4 +1,5 @@
 import type { RNodeInterfaceConfig } from '../../domain/settings';
+import type { RNodeBatteryState, RNodeInterfaceTelemetry } from '../reticulum/protocol';
 import { createRNodeByteConnection, type ByteConnection } from './byte-connections';
 
 const FEND = 0xc0;
@@ -16,6 +17,12 @@ const CMD_DETECT = 0x08;
 const CMD_LEAVE = 0x0a;
 const CMD_LT_ALOCK = 0x0c;
 const CMD_READY = 0x0f;
+const CMD_STAT_RX = 0x21;
+const CMD_STAT_TX = 0x22;
+const CMD_STAT_RSSI = 0x23;
+const CMD_STAT_SNR = 0x24;
+const CMD_STAT_CHTM = 0x25;
+const CMD_STAT_BAT = 0x27;
 const CMD_FW_VERSION = 0x50;
 const CMD_RESET = 0x55;
 const CMD_ERROR = 0x90;
@@ -43,6 +50,7 @@ interface RadioConfirmation {
 export interface RNodeHostHooks {
   onPacket(data: Uint8Array): void;
   onState(state: 'online' | 'offline' | 'error', errorCode?: string): void;
+  onTelemetry?(telemetry: RNodeInterfaceTelemetry): void;
   log(code: string, details?: Record<string, string | number | boolean>): void;
 }
 
@@ -204,9 +212,15 @@ export class RNodeHost {
       } else if (command === CMD_ERROR) {
         this.hooks.log('RNODE_DEVICE_ERROR', { interfaceId: this.config.id, code: payload[0] ?? -1 });
       }
+      this.applyTelemetry(command, payload);
       this.applyConfirmation(command, payload);
       for (const waiter of Array.from(this.waiters)) waiter();
     }
+  }
+
+  private applyTelemetry(command: number, payload: Uint8Array): void {
+    const telemetry = parseRNodeTelemetry(command, payload);
+    if (telemetry) this.hooks.onTelemetry?.(telemetry);
   }
 
   private applyConfirmation(command: number, payload: Uint8Array): void {
@@ -388,6 +402,40 @@ function readU16(value: Uint8Array): number {
 
 function readU32(value: Uint8Array): number {
   return ((value[0] * 0x1000000) + ((value[1] << 16) | (value[2] << 8) | value[3])) >>> 0;
+}
+
+export function parseRNodeTelemetry(command: number, payload: Uint8Array): RNodeInterfaceTelemetry | undefined {
+  if (command === CMD_STAT_RX && payload.length >= 4) return { radioRxPackets: readU32(payload) };
+  if (command === CMD_STAT_TX && payload.length >= 4) return { radioTxPackets: readU32(payload) };
+  if (command === CMD_STAT_RSSI && payload.length) return { lastPacketRssiDbm: payload[0] - 157 };
+  if (command === CMD_STAT_SNR && payload.length) {
+    const signed = payload[0] > 127 ? payload[0] - 256 : payload[0];
+    return { lastPacketSnrDb: signed * 0.25 };
+  }
+  if (command === CMD_STAT_CHTM && payload.length >= 8) {
+    return {
+      airtimeShortPercent: readU16(payload) / 100,
+      airtimeLongPercent: readU16(payload.subarray(2)) / 100,
+      channelLoadShortPercent: readU16(payload.subarray(4)) / 100,
+      channelLoadLongPercent: readU16(payload.subarray(6)) / 100,
+      ...(payload.length >= 11 ? {
+        currentRssiDbm: payload[8] - 157,
+        noiseFloorDbm: payload[9] - 157,
+        interferenceDbm: payload[10] === 0xff ? undefined : payload[10] - 157,
+      } : {}),
+    };
+  }
+  if (command === CMD_STAT_BAT && payload.length >= 2) {
+    return { batteryState: batteryState(payload[0]), batteryPercent: Math.min(100, payload[1]) };
+  }
+  return undefined;
+}
+
+function batteryState(value: number): RNodeBatteryState {
+  if (value === 1) return 'discharging';
+  if (value === 2) return 'charging';
+  if (value === 3) return 'charged';
+  return 'unknown';
 }
 
 function errorMessage(error: unknown): string {

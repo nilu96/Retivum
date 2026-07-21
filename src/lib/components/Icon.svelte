@@ -115,8 +115,10 @@
   {:else if name === 'interface'}
     <path d="M8 4v5m8-5v5M6 9h12v3a6 6 0 0 1-6 6v3m0-3a6 6 0 0 1-6-6V9Z" />
   {:else if name === 'radio'}
-    <path d="M5 19 19 5M8 16h8M6 12a6 6 0 0 0 6 6m0-12a6 6 0 0 1 6 6" />
-    <circle cx="12" cy="12" r="2" />
+    <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
+    <path d="M12 13.5V21m-3 0h6" />
+    <path d="M8.7 8.7a4.7 4.7 0 0 0 0 6.6M15.3 8.7a4.7 4.7 0 0 1 0 6.6" />
+    <path d="M5.7 5.7a9 9 0 0 0 0 12.6M18.3 5.7a9 9 0 0 1 0 12.6" />
   {:else if name === 'probe'}
     <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
     <circle cx="12" cy="12" r="5.25" />

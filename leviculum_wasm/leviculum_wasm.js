@@ -1184,6 +1184,13 @@ export class ReticulumNode {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * @returns {bigint}
+     */
+    transportedPacketCount() {
+        const ret = wasm.reticulumnode_transportedPacketCount(this.__wbg_ptr);
+        return BigInt.asUintN(64, ret);
+    }
+    /**
      * @param {Uint8Array} data
      * @returns {Uint8Array}
      */

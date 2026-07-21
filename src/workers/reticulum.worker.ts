@@ -44,6 +44,7 @@ import type {
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
 import { requiresReticulumRuntimeRebuild } from '../infrastructure/reticulum/runtime-configuration';
+import { computeRNodeBitrate, InterfaceTelemetryTracker } from '../infrastructure/reticulum/interface-telemetry';
 
 interface GeneratedIdentity {
   hash: Uint8Array;
@@ -147,6 +148,7 @@ let managementNodeNameHash: Uint8Array | undefined;
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
 let autoAnnounceTimer: ReturnType<typeof setTimeout> | undefined;
 let automaticPropagationSyncTimer: ReturnType<typeof setTimeout> | undefined;
+let statusDetailsTimer: ReturnType<typeof setInterval> | undefined;
 let automaticPropagationSyncPending = false;
 let propagationSyncRequestId: string | undefined;
 let persistenceQueue = Promise.resolve();
@@ -157,6 +159,7 @@ interface InterfaceDriver {
   state: InterfaceRuntimeState;
   readonly stableId: string;
   readonly reannounceOnReconnect: boolean;
+  readonly telemetry: InterfaceTelemetryTracker;
   hasRuntimeId(runtimeId: number | undefined): boolean;
   attach(owner: ReticulumNode): void;
   connect(): void;
@@ -165,6 +168,7 @@ interface InterfaceDriver {
 }
 
 const drivers = new Map<string, InterfaceDriver>();
+const activeLinkIds = new Set<string>();
 const nomadPendingJobs = new Map<string, NomadPageJob[]>();
 const nomadRequests = new Map<string, NomadPageJob>();
 const nomadLinksByDestination = new Map<string, NomadLinkState>();
@@ -369,6 +373,11 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       return;
     }
 
+    if (command.type === 'closeAllLinks') {
+      closeAllActiveLinks();
+      return;
+    }
+
 
     if (command.type === 'updateIdentityDisplayName') {
       const displayName = command.displayName.trim();
@@ -461,6 +470,15 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       return;
     }
 
+    if (command.type === 'platformInterfaceTelemetry') {
+      const driver = drivers.get(command.id);
+      if (driver instanceof PlatformInterfaceDriver) {
+        driver.telemetry.updateRNode(command.telemetry);
+        emitStatusDetails();
+      }
+      return;
+    }
+
     if (command.type === 'shutdown') {
       log('info', 'runtime', 'RUNTIME_SHUTTING_DOWN');
       await persistSnapshot();
@@ -546,6 +564,8 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
     propagationConfigured: propagationHash !== undefined,
   });
   emitAggregateStatus();
+  emitStatusDetails();
+  statusDetailsTimer = setInterval(emitStatusDetails, 1_000);
   scheduleNextTick();
   scheduleAutomaticAnnounce();
   scheduleAutomaticPropagationSync();
@@ -659,6 +679,8 @@ function cleanupRuntime(): void {
   autoAnnounceTimer = undefined;
   if (automaticPropagationSyncTimer !== undefined) clearTimeout(automaticPropagationSyncTimer);
   automaticPropagationSyncTimer = undefined;
+  if (statusDetailsTimer !== undefined) clearInterval(statusDetailsTimer);
+  statusDetailsTimer = undefined;
   automaticPropagationSyncPending = false;
   finishPropagationSync(false, 'LXMF_PROPAGATION_SYNC_RUNTIME_RESET');
   clearNomadState('NOMAD_RUNTIME_RESET');
@@ -666,6 +688,7 @@ function cleanupRuntime(): void {
   lxmfOutboundStatusCache.clear();
   lxmfDeliveryLinks.clear();
   lxmfLinkDestinations.clear();
+  activeLinkIds.clear();
   inboundChatTransfers.clear();
   inboundResourceSegments.clear();
   pendingInboundResourceAdvertisements.clear();
@@ -1751,6 +1774,16 @@ function handleInterfaceOnline(driver: InterfaceDriver, firstOnline: boolean): v
 }
 
 function handleWasmEvent(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (linkId) {
+    const linkIdHex = bytesToHex(linkId);
+    if (event.type === 'linkEstablished' || event.type === 'linkRecovered') activeLinkIds.add(linkIdHex);
+    if (event.type === 'linkStale' || event.type === 'linkClosed') activeLinkIds.delete(linkIdHex);
+  }
+  if (event.type === 'announceReceived') {
+    const driver = driverForRuntimeId(eventNumber(event, 'interfaceIndex'));
+    driver?.telemetry.recordIncomingAnnounce();
+  }
   const pathEventCode = event.type === 'pathFound'
     ? 'RETICULUM_PATH_DISCOVERED'
     : event.type === 'pathRequestReceived'
@@ -3038,15 +3071,59 @@ function emitAggregateStatus(): void {
   emit({ type: 'runtimeStatus', state });
 }
 
+function emitStatusDetails(): void {
+  if (!configuration) return;
+  const transportEnabled = configuration.preferences.transportEnabled;
+  emit({
+    type: 'statusDetails',
+    details: {
+      network: {
+        activeLinks: node?.activeLinkCount() ?? 0,
+        transportEnabled,
+        ...(transportEnabled && node ? { transportHashHex: bytesToHex(node.identityHash()) } : {}),
+        transportedPackets: transportEnabled && node ? Number(node.transportedPacketCount()) : 0,
+      },
+      interfaces: Array.from(drivers.values(), (driver) => driver.telemetry.snapshot()),
+    },
+  });
+}
+
+function closeAllActiveLinks(): void {
+  if (!node) return;
+  // Explicit operator teardown must not trigger the one-shot recovery paths
+  // used for incidental NomadNet or provisioning link loss.
+  clearNomadState('NOMAD_LINKS_CLOSED');
+  clearProvisioningState('PROVISIONING_LINKS_CLOSED');
+  for (const linkId of Array.from(activeLinkIds)) {
+    try {
+      processOutput(node.closeLink(hexToBytes(linkId)) as WasmOutput);
+    } catch (error) {
+      log('debug', 'wasm', 'LINK_ALREADY_CLOSED', {
+        linkId,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      activeLinkIds.delete(linkId);
+    }
+  }
+  emitStatusDetails();
+}
+
+function driverForRuntimeId(runtimeId: number | undefined): InterfaceDriver | undefined {
+  return Array.from(drivers.values()).find((driver) => driver.hasRuntimeId(runtimeId));
+}
+
 class PlatformInterfaceDriver implements InterfaceDriver {
   state: InterfaceRuntimeState = 'offline';
+  readonly telemetry: InterfaceTelemetryTracker;
   private runtimeId?: number;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectAttempt = 0;
   private closedByRuntime = false;
   private hasBeenOnline = false;
 
-  constructor(private readonly config: Exclude<InterfaceConfig, WebSocketInterfaceConfig>) {}
+  constructor(private readonly config: Exclude<InterfaceConfig, WebSocketInterfaceConfig>) {
+    this.telemetry = new InterfaceTelemetryTracker(config);
+  }
 
   get stableId(): string {
     return this.config.id;
@@ -3089,10 +3166,12 @@ class PlatformInterfaceDriver implements InterfaceDriver {
 
   dispatch(action: WasmAction): boolean {
     if (this.state !== 'online' || this.runtimeId === undefined || !actionTargetsRuntimeInterface(action, this.runtimeId)) return false;
+    const data = new Uint8Array(action.data);
+    this.telemetry.recordTransmit(data.byteLength, action.packet.packetType === 'announce');
     emit({
       type: 'platformInterfaceWrite',
       id: this.config.id,
-      data: new Uint8Array(action.data),
+      data,
       highPriority: action.packet.highPriority,
     });
     return true;
@@ -3100,6 +3179,7 @@ class PlatformInterfaceDriver implements InterfaceDriver {
 
   receive(data: Uint8Array): void {
     if (this.state !== 'online' || !node || this.runtimeId === undefined || data.byteLength === 0) return;
+    this.telemetry.recordReceive(data.byteLength);
     receiveReticulumFrame(this.runtimeId, data);
   }
 
@@ -3151,6 +3231,7 @@ class PlatformInterfaceDriver implements InterfaceDriver {
   private setState(state: InterfaceRuntimeState, errorCode?: string): void {
     const changed = this.state !== state;
     this.state = state;
+    this.telemetry.setState(state);
     if (changed || errorCode) log(errorCode ? 'error' : 'info', 'runtime', errorCode ?? `INTERFACE_${state.toUpperCase()}`, { interfaceId: this.config.id });
     emit({ type: 'interfaceStatus', id: this.config.id, state, errorCode });
     emitAggregateStatus();
@@ -3203,12 +3284,9 @@ function receiveReticulumFrame(runtimeId: number, data: Uint8Array): void {
   processOutput(node.receive(runtimeId, data) as WasmOutput);
 }
 
-function computeRNodeBitrate(spreadingFactor: number, codingRate: number, bandwidth: number): number {
-  return Math.floor((spreadingFactor * 4 * bandwidth) / (codingRate * 2 ** spreadingFactor));
-}
-
 class WebSocketDriver {
   state: InterfaceRuntimeState = 'offline';
+  readonly telemetry: InterfaceTelemetryTracker;
   private runtimeId?: number;
   private socket?: WebSocket;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -3217,7 +3295,9 @@ class WebSocketDriver {
   private generation = 0;
   private hasBeenOnline = false;
 
-  constructor(private readonly config: WebSocketInterfaceConfig) {}
+  constructor(private readonly config: WebSocketInterfaceConfig) {
+    this.telemetry = new InterfaceTelemetryTracker(config);
+  }
 
   get stableId(): string {
     return this.config.id;
@@ -3291,7 +3371,9 @@ class WebSocketDriver {
     } else if (action.type !== 'send') {
       return false;
     }
-    this.socket.send(new Uint8Array(action.data));
+    const data = new Uint8Array(action.data);
+    this.telemetry.recordTransmit(data.byteLength, action.packet.packetType === 'announce');
+    this.socket.send(data);
     return true;
   }
 
@@ -3300,6 +3382,7 @@ class WebSocketDriver {
     try {
       bytes = await messageBytes(data);
       if (!bytes || bytes.byteLength === 0 || !this.isCurrent(socket, generation) || !node || this.runtimeId === undefined) return;
+      this.telemetry.recordReceive(bytes.byteLength);
       receiveReticulumFrame(this.runtimeId, bytes);
     } catch (error) {
       if (!this.isCurrent(socket, generation)) return;
@@ -3337,6 +3420,7 @@ class WebSocketDriver {
   private setState(state: InterfaceRuntimeState, errorCode?: string): void {
     const changed = this.state !== state;
     this.state = state;
+    this.telemetry.setState(state);
     if (changed || errorCode) {
       log(errorCode ? 'error' : 'info', 'websocket', errorCode ?? `INTERFACE_${state.toUpperCase()}`, {
         interfaceId: this.config.id,

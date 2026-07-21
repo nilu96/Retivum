@@ -55,6 +55,7 @@ import type {
   RuntimeCommand,
   RuntimeConfiguration,
   RuntimeEvent,
+  RuntimeStatusDetails,
   RuntimeState,
   ProvisioningRequestStage,
 } from './protocol';
@@ -79,6 +80,7 @@ export {
 export const runtimeStatus = writable<RuntimeState>('starting');
 export const chatInboundTransfers = writable<ChatInboundTransfer[]>([]);
 export const interfaceStatuses = writable<Record<string, InterfaceRuntimeState>>({});
+export const statusDetails = writable<RuntimeStatusDetails | undefined>();
 export const activeIdentity = writable<IdentitySummary | undefined>();
 export const identities = writable<IdentitySummary[]>([]);
 export const deliveryDestinationHash = writable<string | undefined>();
@@ -225,6 +227,10 @@ class ReticulumRuntimeController {
       interfaces: structuredClone(interfaces),
     };
     this.post({ type: 'applyConfiguration', configuration });
+  }
+
+  closeAllLinks(): void {
+    this.post({ type: 'closeAllLinks' });
   }
 
   async announceLxmf(): Promise<boolean> {
@@ -896,6 +902,7 @@ class ReticulumRuntimeController {
     void this.platformInterfaceHost.closeAll();
     this.worker = undefined;
     this.started = false;
+    statusDetails.set(undefined);
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
     for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
@@ -941,6 +948,10 @@ class ReticulumRuntimeController {
       // Connection failures belong to the individual interface. Drivers retry
       // automatically, and another configured interface may still be online,
       // so they must not become a global Reticulum runtime error banner.
+      return;
+    }
+    if (event.type === 'statusDetails') {
+      statusDetails.set(event.details);
       return;
     }
     if (event.type === 'identityReady') {

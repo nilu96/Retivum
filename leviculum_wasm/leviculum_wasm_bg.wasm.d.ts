@@ -49,6 +49,7 @@ export const reticulumnode_sendSinglePacket: (a: number, b: number, c: number, d
 export const reticulumnode_setInterfaceOnline: (a: number, b: number, c: number) => [number, number, number];
 export const reticulumnode_sign: (a: number, b: number, c: number) => [number, number, number, number];
 export const reticulumnode_tick: (a: number) => [number, number, number];
+export const reticulumnode_transportedPacketCount: (a: number) => bigint;
 export const reticulumnode_truncatedHash: (a: number, b: number) => [number, number];
 export const reticulumnode_unregisterDestination: (a: number, b: number, c: number) => [number, number];
 export const reticulumnode_validateSignature: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number, number];

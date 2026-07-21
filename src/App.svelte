@@ -8,6 +8,7 @@
   import SettingsView from './features/settings/SettingsView.svelte';
   import ReticulumLogsView from './features/settings/ReticulumLogsView.svelte';
   import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
+  import StatusDetailsView from './features/tools/StatusDetailsView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
   import DesktopBluetoothPairing from './lib/components/DesktopBluetoothPairing.svelte';
   import ToastViewport from './lib/components/ToastViewport.svelte';
@@ -58,6 +59,8 @@
     <ToolsView />
   {:else if $route === 'provisioning'}
     <ProvisioningView />
+  {:else if $route === 'status'}
+    <StatusDetailsView />
   {/if}
   <div class="persistent-route-view" hidden={$route !== 'nomadnet'}>
     <NomadNetView />

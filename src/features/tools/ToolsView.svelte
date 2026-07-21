@@ -40,7 +40,8 @@
       title: 'tools.status.title',
       description: 'tools.status.description',
       icon: 'interface',
-      available: false,
+      available: true,
+      route: 'status',
     },
     {
       id: 'logs',
