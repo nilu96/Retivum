@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
+  import { navigate } from '../../app/router';
   import type { LoadedProvisioningDevice } from '../../infrastructure/reticulum/provisioning-client';
   import type {
     ProvisioningField,
@@ -8,9 +9,14 @@
     ProvisioningValue,
   } from '../../domain/provisioning';
   import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/provisioning';
+  import { normalizeDestinationHash } from '../../domain/settings';
   import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
   import { destinationPathStatuses, nomadAnnounces, provisioningNodes, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
   import { createDateFormatter, locale, t } from '../../i18n';
+  import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
+  import { copyText } from '../../lib/clipboard';
+  import BookmarkEditor from '../../lib/components/BookmarkEditor.svelte';
+  import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
@@ -23,59 +29,101 @@
   let commandValues = $state<Record<string, ProvisioningValue>>({});
   let dirtyFields = $state<string[]>([]);
   let busy = $state(false);
+  let loadingDevice = $state(false);
   let stage = $state<string>();
   let transferProgress = $state<number>();
   let transferSize = $state<number>();
   let managementDestination = $state('');
   let query = $state('');
+  let selectedNodeSnapshot = $state<ProvisioningNode>();
+  let bookmarkEditor = $state<{ node: ProvisioningNode; mode: 'add' | 'edit' }>();
+  let destinationActions = $state<{ node: ProvisioningNode; x: number; y: number }>();
+  let loadSequence = 0;
   const heardAtFormatter = $derived(createDateFormatter($locale));
-  const selectedNode = $derived($provisioningNodes.find((node) => node.id === selectedNodeId));
+  const selectedNode = $derived(
+    $provisioningNodes.find((node) => node.id === selectedNodeId)
+      ?? (selectedNodeSnapshot?.id === selectedNodeId ? selectedNodeSnapshot : undefined),
+  );
   const destinationNode = $derived($provisioningNodes.find((node) => (
     node.destinationHash === managementDestination.trim().toLowerCase()
   )));
   const normalizedQuery = $derived(query.trim().toLowerCase());
   const filteredNodes = $derived($provisioningNodes.filter((node) => [
     nodeName(node),
+    node.label,
     node.destinationHash,
-  ].some((value) => value.toLowerCase().includes(normalizedQuery))));
+  ].some((value) => value?.toLowerCase().includes(normalizedQuery))));
   const bookmarkedNodes = $derived(filteredNodes.filter((node) => node.bookmarked === true));
   const announcedNodes = $derived(filteredNodes.filter((node) => node.bookmarked !== true));
+  const normalizedDestination = $derived(normalizeDestinationHash(managementDestination));
 
-  onDestroy(() => client?.close());
+  onDestroy(() => {
+    loadSequence += 1;
+    reticulumRuntime.closeProvisioning();
+  });
 
   function nodeName(node: ProvisioningNode): string {
-    return $nomadAnnounces.find((announce) => announce.publicKey === node.publicKey)?.displayName
+    if (node.bookmarked) return node.label ?? '';
+    return node.label
+      ?? announcedNodeName(node)
       ?? $t('provisioning.node.unknown');
   }
 
+  function announcedNodeName(node: ProvisioningNode): string | undefined {
+    return $nomadAnnounces.find((announce) => announce.publicKey === node.publicKey)?.displayName;
+  }
+
   async function selectNode(node: ProvisioningNode): Promise<void> {
-    if (busy) return;
-    if (client && client.provisioningNode.id !== node.id) client.close();
+    if (selectedNode || client || busy) return;
     if (selectedNodeId !== node.id) {
       loaded = undefined;
       draft = {};
       commandValues = {};
       dirtyFields = [];
     }
+    selectedNodeSnapshot = node;
     selectedNodeId = node.id;
     managementDestination = node.destinationHash;
-    client = new ProvisioningClient(node, (nextStage, progress, dataSize) => {
+    client = createClient(node);
+    await loadDevice();
+  }
+
+  function createClient(node: ProvisioningNode): ProvisioningClient {
+    return new ProvisioningClient(node, (nextStage, progress, dataSize) => {
       stage = nextStage;
       transferProgress = progress;
       transferSize = dataSize;
     });
-    await loadDevice();
   }
 
   function connectToDestination(event: SubmitEvent): void {
     event.preventDefault();
-    if (destinationNode) void selectNode(destinationNode);
+    if (!normalizedDestination) return;
+    const node = destinationNode ?? {
+      id: normalizedDestination,
+      destinationHash: normalizedDestination,
+      publicKey: '',
+      heardAt: new Date().toISOString(),
+    };
+    void selectNode(node);
   }
 
-  async function toggleSelectedBookmark(): Promise<void> {
-    if (!selectedNode || busy) return;
+  function editBookmark(node: ProvisioningNode): void {
+    bookmarkEditor = { node, mode: node.bookmarked ? 'edit' : 'add' };
+  }
+
+  async function saveBookmark(name: string): Promise<boolean> {
+    if (!bookmarkEditor) return false;
     try {
-      if (!await reticulumRuntime.setProvisioningNodeBookmarked(selectedNode.id, selectedNode.bookmarked !== true)) {
+      return await reticulumRuntime.saveProvisioningNodeBookmark(bookmarkEditor.node, name);
+    } catch {
+      return false;
+    }
+  }
+
+  async function removeBookmark(node: ProvisioningNode): Promise<void> {
+    try {
+      if (!await reticulumRuntime.setProvisioningNodeBookmarked(node.id, false)) {
         toast.error('provisioning.bookmark.failed');
       }
     } catch {
@@ -83,23 +131,69 @@
     }
   }
 
+  function openDestinationActions(node: ProvisioningNode, x: number, y: number): void {
+    destinationActions = { node, x, y };
+  }
+
+  function closeDestinationActions(): void {
+    destinationActions = undefined;
+  }
+
+  async function copyDestinationHash(destinationHash: string): Promise<void> {
+    closeDestinationActions();
+    if (await copyText(destinationHash)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
   async function loadDevice(): Promise<void> {
     if (!client || busy) return;
+    const activeClient = client;
+    const sequence = ++loadSequence;
     busy = true;
+    loadingDevice = true;
     stage = 'findingPath';
     transferProgress = undefined;
     transferSize = undefined;
     try {
-      loaded = await client.load();
-      draft = structuredClone(loaded.state);
+      const nextLoaded = await activeClient.load();
+      if (sequence !== loadSequence || client !== activeClient) return;
+      loaded = nextLoaded;
+      draft = structuredClone(nextLoaded.state);
       dirtyFields = [];
       stage = undefined;
     } catch {
+      if (sequence !== loadSequence || client !== activeClient) return;
       stage = undefined;
       toast.error('provisioning.load.failed');
     } finally {
-      busy = false;
+      if (sequence === loadSequence && client === activeClient) {
+        busy = false;
+        loadingDevice = false;
+      }
     }
+  }
+
+  function reloadDevice(): void {
+    if (!selectedNode || !client || busy) return;
+    void loadDevice();
+  }
+
+  function disconnectDevice(): void {
+    if (!selectedNode && !client) return;
+    loadSequence += 1;
+    client?.close();
+    client = undefined;
+    selectedNodeId = undefined;
+    selectedNodeSnapshot = undefined;
+    loaded = undefined;
+    draft = {};
+    commandValues = {};
+    dirtyFields = [];
+    busy = false;
+    loadingDevice = false;
+    stage = undefined;
+    transferProgress = undefined;
+    transferSize = undefined;
   }
 
   function fieldKey(namespaceId: number, fieldId: number): string {
@@ -273,31 +367,35 @@
 
 <div class="page provisioning-page">
   <header class="page-header provisioning-header">
-    <div>
+    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigate('tools')}>
+      <Icon name="arrow-left" size={16} />{$t('provisioning.backToTools')}
+    </button>
+    <div class="provisioning-header-copy">
       <p class="eyebrow">{$t('app.name')}</p>
       <h1>{$t('provisioning.title')}</h1>
       <p>{$t('provisioning.description')}</p>
     </div>
-    <div class="header-actions">
-      <button
-        class="icon-button"
-        aria-label={$t('provisioning.refresh')}
-        title={$t('provisioning.refresh')}
-        disabled={!selectedNode || busy}
-        onclick={() => void loadDevice()}
-      ><Icon name="sync" size={19} /></button>
-      <button
-        class="icon-button"
-        class:primary={selectedNode?.bookmarked !== true}
-        aria-label={$t(selectedNode?.bookmarked ? 'provisioning.bookmark.remove' : 'provisioning.bookmark.add')}
-        title={$t(selectedNode?.bookmarked ? 'provisioning.bookmark.remove' : 'provisioning.bookmark.add')}
-        disabled={!selectedNode || busy}
-        onclick={() => void toggleSelectedBookmark()}
-      ><Icon name="bookmark" size={19} /></button>
-    </div>
   </header>
 
   <form class="provisioning-address" onsubmit={connectToDestination}>
+    <div class="provisioning-address-actions" role="group" aria-label={$t('provisioning.destination.actions.toolbar')}>
+      <button
+        class="icon-button"
+        type="button"
+        aria-label={$t('provisioning.refresh')}
+        title={$t('provisioning.refresh')}
+        disabled={!selectedNode || busy}
+        onclick={reloadDevice}
+      ><Icon name="sync" size={19} /></button>
+      <button
+        class="icon-button"
+        type="button"
+        aria-label={$t(loadingDevice ? 'provisioning.connection.cancel' : 'provisioning.connection.disconnect')}
+        title={$t(loadingDevice ? 'provisioning.connection.cancel' : 'provisioning.connection.disconnect')}
+        disabled={!selectedNode || (busy && !loadingDevice)}
+        onclick={disconnectDevice}
+      ><Icon name="close" size={19} /></button>
+    </div>
     <label>
       <span class="sr-only">{$t('provisioning.destination.label')}</span>
       <Icon name="network" size={19} />
@@ -306,39 +404,48 @@
         placeholder={$t('provisioning.destination.placeholder')}
         autocapitalize="none"
         spellcheck="false"
+        disabled={Boolean(selectedNode)}
       />
     </label>
-    <button class="button primary" type="submit" disabled={!destinationNode || busy}>
-      {$t(busy ? 'provisioning.connecting' : 'provisioning.connect')}<Icon name="arrow-right" size={17} />
+    <button class="button primary" type="submit" disabled={!normalizedDestination || Boolean(selectedNode)}>
+      {$t(loadingDevice ? 'provisioning.connecting' : 'provisioning.connect')}<Icon name="arrow-right" size={17} />
     </button>
   </form>
 
   <div class="provisioning-workspace">
-    <aside class="provisioning-directory">
-      <label class="search-field">
-        <Icon name="search" size={18} />
-        <span class="sr-only">{$t('provisioning.search.label')}</span>
-        <input bind:value={query} type="search" placeholder={$t('provisioning.search.placeholder')} />
-      </label>
-      <div class="provisioning-directory-content">
+    {#if !selectedNode}
+      <aside class="provisioning-directory">
+        <label class="search-field">
+          <Icon name="search" size={18} />
+          <span class="sr-only">{$t('provisioning.search.label')}</span>
+          <input
+            bind:value={query}
+            type="search"
+            placeholder={$t('provisioning.search.placeholder')}
+          />
+        </label>
+        <div id="provisioning-destination-results" class="provisioning-directory-content">
         {#if bookmarkedNodes.length}
           <section class="provisioning-directory-section">
             <h2>{$t('provisioning.bookmarks.title')}</h2>
             <div class="provisioning-node-list">
               {#each bookmarkedNodes as node (node.id)}
                 <button
-                  class="provisioning-node-row"
-                  class:active={selectedNodeId === node.id}
-                  disabled={busy}
+                  class="nomad-destination"
+                  aria-haspopup="menu"
+                  title={$t('provisioning.destination.actions.open')}
                   onclick={() => void selectNode(node)}
+                  use:contextMenuTrigger={{
+                    onopen: (x, y) => openDestinationActions(node, x, y),
+                  }}
                 >
                   <span class="destination-mark"><Icon name="bookmark" size={17} /></span>
-                  <span class="provisioning-node-copy">
-                    <strong>{nodeName(node)}</strong>
+                  <span>
+                    {#if node.label}<strong>{node.label}</strong>{/if}
                     <code>{node.destinationHash}</code>
                     <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.heardAt)) })}</small>
                   </span>
-                  <span class="provisioning-node-route">
+                  <span class="directory-row-route">
                     <PathStatus status={$destinationPathStatuses[node.destinationHash]} />
                     <Icon name="arrow-right" size={16} />
                   </span>
@@ -354,18 +461,21 @@
             <div class="provisioning-node-list">
               {#each announcedNodes as node (node.id)}
                 <button
-                  class="provisioning-node-row"
-                  class:active={selectedNodeId === node.id}
-                  disabled={busy}
+                  class="nomad-destination"
+                  aria-haspopup="menu"
+                  title={$t('provisioning.destination.actions.open')}
                   onclick={() => void selectNode(node)}
+                  use:contextMenuTrigger={{
+                    onopen: (x, y) => openDestinationActions(node, x, y),
+                  }}
                 >
                   <span class="destination-mark"><Icon name="network" size={17} /></span>
-                  <span class="provisioning-node-copy">
+                  <span>
                     <strong>{nodeName(node)}</strong>
                     <code>{node.destinationHash}</code>
                     <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.heardAt)) })}</small>
                   </span>
-                  <span class="provisioning-node-route">
+                  <span class="directory-row-route">
                     <PathStatus status={$destinationPathStatuses[node.destinationHash]} />
                     <Icon name="arrow-right" size={16} />
                   </span>
@@ -378,10 +488,10 @@
         {#if !bookmarkedNodes.length && !announcedNodes.length}
           <EmptyState icon="network" title={$t('provisioning.nodes.empty.title')} body={$t('provisioning.nodes.empty.description')} />
         {/if}
-      </div>
-    </aside>
-
-    <section class:device-loaded={Boolean(loaded) && !busy} class="provisioning-editor-card">
+        </div>
+      </aside>
+    {:else}
+      <section class:device-loaded={Boolean(loaded) && !busy} class="provisioning-editor-card">
       <div class="provisioning-grid" aria-hidden="true"></div>
       {#if busy}
         <div class="provisioning-loading">
@@ -392,8 +502,6 @@
             <small>{Math.round(transferProgress * 100)}%{transferSize ? ` · ${Math.ceil(transferSize / 1024)} KiB` : ''}</small>
           {/if}
         </div>
-      {:else if !selectedNode}
-        <EmptyState icon="network" title={$t('provisioning.select.title')} body={$t('provisioning.select.description')} />
       {:else if loaded}
         <header class="provisioning-device-header">
           <div>
@@ -491,6 +599,76 @@
       {:else}
         <EmptyState icon="network" title={$t('provisioning.load.empty.title')} body={$t('provisioning.load.empty.description')} />
       {/if}
-    </section>
+      </section>
+    {/if}
   </div>
 </div>
+
+{#if bookmarkEditor}
+  <BookmarkEditor
+    address={bookmarkEditor.node.destinationHash}
+    title={$t(bookmarkEditor.mode === 'add'
+      ? 'provisioning.bookmark.editor.addTitle'
+      : 'provisioning.bookmark.editor.editTitle')}
+    description={$t('provisioning.bookmark.editor.description')}
+    addressLabel={$t('provisioning.destination.label')}
+    nameLabel={$t('nomadnet.bookmark.name')}
+    namePlaceholder={$t('provisioning.bookmark.name.placeholder')}
+    nameHelp={$t('nomadnet.bookmark.name.help')}
+    saveErrorKey="provisioning.bookmark.failed"
+    currentName={bookmarkEditor.node.label ?? ''}
+    oncancel={() => { bookmarkEditor = undefined; }}
+    onsave={(name) => saveBookmark(name)}
+  />
+{/if}
+
+{#if destinationActions}
+  <ContextMenu
+    x={destinationActions.x}
+    y={destinationActions.y}
+    label={$t('provisioning.destination.actions.label')}
+    closeLabel={$t('provisioning.destination.actions.close')}
+    onclose={closeDestinationActions}
+  >
+    <button
+      role="menuitem"
+      onclick={() => { void copyDestinationHash(destinationActions!.node.destinationHash); }}
+    >
+      <Icon name="copy" size={17} />{$t('nomadnet.destination.actions.copyHash')}
+    </button>
+    {#if destinationActions.node.bookmarked}
+      <button
+        role="menuitem"
+        onclick={() => {
+          const node = destinationActions!.node;
+          closeDestinationActions();
+          editBookmark(node);
+        }}
+      >
+        <Icon name="edit" size={17} />{$t('nomadnet.destination.actions.editBookmark')}
+      </button>
+      <button
+        class="danger"
+        role="menuitem"
+        onclick={() => {
+          const node = destinationActions!.node;
+          closeDestinationActions();
+          void removeBookmark(node);
+        }}
+      >
+        <Icon name="trash" size={17} />{$t('nomadnet.destination.actions.removeBookmark')}
+      </button>
+    {:else}
+      <button
+        role="menuitem"
+        onclick={() => {
+          const node = destinationActions!.node;
+          closeDestinationActions();
+          editBookmark(node);
+        }}
+      >
+        <Icon name="bookmark" size={17} />{$t('nomadnet.destination.actions.addBookmark')}
+      </button>
+    {/if}
+  </ContextMenu>
+{/if}

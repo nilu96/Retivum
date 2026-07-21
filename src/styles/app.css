@@ -525,8 +525,6 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 @media (min-width: 700px) {
   .nomad-page { height: 100%; min-height: 0; padding-block-end: 28px; overflow: hidden; }
   .nomad-workspace { height: auto; min-height: 0; }
-  .provisioning-page { height: 100%; min-height: 0; padding-block-end: 28px; overflow: hidden; }
-  .provisioning-workspace { height: auto; min-height: 0; }
 }
 
 .settings-page { max-width: 1050px; }
@@ -550,11 +548,16 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .settings-card-header h2, .about-card h2 { margin: 0; }
 .settings-card-header p, .about-card p { margin: 3px 0 0; font-size: .76rem; }
 .provisioning-page { display: grid; grid-template-rows: auto auto 1fr; gap: 23px; max-width: 1320px; }
-.provisioning-address { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px; }
+.provisioning-header { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; justify-items: start; gap: 13px; }
+.provisioning-back-button { width: max-content; min-height: 38px; }
+.provisioning-header-copy { min-width: 0; }
+.provisioning-address { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.provisioning-address-actions { display: flex; align-items: center; gap: 8px; }
+.provisioning-address-actions .icon-button { width: 45px; height: 45px; }
 .provisioning-address label { display: flex; min-width: 0; min-height: 45px; align-items: center; gap: 10px; padding-inline: 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-subtle); background: var(--surface-1); }
 .provisioning-address label:focus-within { border-color: var(--accent); }
 .provisioning-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
-.provisioning-workspace { display: grid; height: clamp(430px, calc(100dvh - 250px), 680px); min-height: 430px; grid-template-columns: minmax(270px, 330px) minmax(0, 1fr); gap: 14px; }
+.provisioning-workspace { display: grid; height: clamp(430px, calc(100dvh - 250px), 680px); min-height: 430px; grid-template-columns: minmax(0, 1fr); }
 .provisioning-directory { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .provisioning-directory-content { display: grid; min-height: 0; align-content: start; gap: 20px; padding: 14px; overflow: auto; overscroll-behavior: contain; }
 .provisioning-directory-content > .empty-state { align-self: center; margin: auto; }
@@ -595,6 +598,12 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .provisioning-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px 16px; border-top: 1px solid var(--border); }
 .provisioning-actions > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .danger-text { color: var(--danger) !important; }
+
+@media (min-width: 700px) {
+  .provisioning-page { height: 100%; min-height: 0; padding-block-end: 28px; overflow: hidden; }
+  .provisioning-workspace { height: auto; min-height: 0; }
+}
+
 #settings-interfaces > .empty-state { margin: 18px auto 28px; }
 .section-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; color: var(--accent); background: var(--accent-soft); }
 .section-icon.identity { color: #9fc4ff; background: rgba(112, 158, 228, .12); }
@@ -930,10 +939,13 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .tools-grid { grid-template-columns: 1fr; }
   .tool-card { min-height: 0; padding: 16px; }
   .provisioning-page { grid-template-rows: auto auto minmax(380px, 1fr); }
-  .provisioning-address { grid-template-columns: minmax(0, 1fr); }
-  .provisioning-address > .button { width: 100%; }
+  .provisioning-header { gap: 12px; }
+  .provisioning-back-button { min-height: 42px; }
+  .provisioning-address { grid-template-columns: auto minmax(0, 1fr); }
+  .provisioning-address > .button { grid-column: 1 / -1; width: 100%; }
   .provisioning-workspace { height: auto; min-height: 0; grid-template-columns: 1fr; }
-  .provisioning-directory { height: auto; max-height: min(420px, 52dvh); }
+  .provisioning-directory { height: 100%; max-height: none; }
+  .provisioning-directory-content { min-height: 0; max-height: none; }
   .provisioning-editor-card { min-height: 390px; }
   .provisioning-field-grid { grid-template-columns: 1fr; }
   .provisioning-actions { align-items: stretch; flex-direction: column-reverse; }

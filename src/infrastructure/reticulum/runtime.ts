@@ -694,7 +694,8 @@ class ReticulumRuntimeController {
     responseTimeoutMs?: number,
   ): Promise<Uint8Array> {
     const destinationHash = normalizeDestinationHash(provisioningNode.destinationHash);
-    if (!this.worker || !get(activeIdentity) || !destinationHash || !/^[0-9a-f]{128}$/i.test(provisioningNode.publicKey)) {
+    const publicKey = provisioningNode.publicKey.trim().toLowerCase();
+    if (!this.worker || !get(activeIdentity) || !destinationHash || (publicKey && !/^[0-9a-f]{128}$/.test(publicKey))) {
       throw new ProvisioningRequestFailure('PROVISIONING_DESTINATION_UNKNOWN');
     }
     const requestId = crypto.randomUUID();
@@ -704,7 +705,7 @@ class ReticulumRuntimeController {
         type: 'requestProvisioning',
         requestId,
         destinationHash,
-        publicKey: provisioningNode.publicKey,
+        ...(publicKey ? { publicKey } : {}),
         payload: new Uint8Array(payload),
         safeToRetry,
         responseTimeoutMs,
@@ -719,8 +720,38 @@ class ReticulumRuntimeController {
     }
   }
 
-  async setProvisioningNodeBookmarked(id: string, bookmarked: boolean): Promise<boolean> {
-    const updated = await this.provisioningRepository.setNodeBookmarked(id, bookmarked);
+  closeProvisioning(): void {
+    if (this.worker) this.post({ type: 'closeProvisioning' });
+  }
+
+  async saveProvisioningNodeBookmark(node: ProvisioningNode, label: string): Promise<boolean> {
+    const destinationHash = normalizeDestinationHash(node.destinationHash);
+    const publicKey = node.publicKey.trim().toLowerCase();
+    if (!destinationHash || (publicKey && !/^[0-9a-f]{128}$/.test(publicKey))) return false;
+    const existing = get(provisioningNodes).find((item) => (
+      item.id === node.id || item.destinationHash === destinationHash
+    ));
+    const updated: ProvisioningNode = {
+      ...node,
+      ...existing,
+      id: existing?.id ?? destinationHash,
+      destinationHash,
+      publicKey: existing?.publicKey || publicKey,
+      heardAt: existing?.heardAt ?? node.heardAt ?? new Date().toISOString(),
+      bookmarked: true,
+      label: label.trim() || undefined,
+    };
+    await this.provisioningRepository.saveNode(updated);
+    provisioningNodes.update((items) => [
+      updated,
+      ...items.filter((item) => item.id !== updated.id),
+    ].sort((left, right) => right.heardAt.localeCompare(left.heardAt)));
+    this.refreshDestinationPaths([destinationHash]);
+    return true;
+  }
+
+  async setProvisioningNodeBookmarked(id: string, bookmarked: boolean, label?: string): Promise<boolean> {
+    const updated = await this.provisioningRepository.setNodeBookmarked(id, bookmarked, label);
     if (!updated) return false;
     provisioningNodes.update((items) => items.map((item) => item.id === id ? updated : item));
     return true;
@@ -975,6 +1006,7 @@ class ReticulumRuntimeController {
         hops: event.hops,
         heardAt: event.heardAt,
         bookmarked: previousNode?.bookmarked === true,
+        label: previousNode?.label,
       };
       try {
         await this.provisioningRepository.saveNode(managementNode);

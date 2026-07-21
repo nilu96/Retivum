@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { blockedChatDestinations, chatMessages } from './chat-state';
-import { activeIdentity, chatInboundTransfers, nomadAnnounces, reticulumLogs, reticulumRuntime } from './runtime';
+import { activeIdentity, chatInboundTransfers, nomadAnnounces, provisioningNodes, reticulumLogs, reticulumRuntime } from './runtime';
 
 type RuntimeInternals = {
   cancelChatMessageDelivery(messageId: string): Promise<boolean>;
@@ -11,6 +11,9 @@ type RuntimeInternals = {
   chatRepository: {
     deleteMessages(ids: string[]): Promise<void>;
     saveMessage(message: unknown): Promise<void>;
+  };
+  provisioningRepository: {
+    saveNode(node: unknown): Promise<void>;
   };
 };
 
@@ -27,6 +30,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     chatInboundTransfers.set([]);
     blockedChatDestinations.set([]);
     nomadAnnounces.set([]);
+    provisioningNodes.set([]);
     reticulumLogs.set([]);
     (reticulumRuntime as unknown as RuntimeInternals).worker = undefined;
   });
@@ -108,6 +112,76 @@ describe('ReticulumRuntimeController chat deletion', () => {
     });
     await expect(pending).resolves.toBeUndefined();
     expect(onUpdate).toHaveBeenCalledWith({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
+  });
+
+  it('lets the worker discover an unannounced provisioning destination public key', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '5'.repeat(32);
+
+    const pending = reticulumRuntime.requestProvisioning({
+      id: destinationHash,
+      destinationHash,
+      publicKey: '',
+      heardAt: '2026-07-21T10:00:00.000Z',
+    }, Uint8Array.of(1), true);
+    const command = postMessage.mock.calls[0][0] as { requestId: string; publicKey?: string };
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'requestProvisioning',
+      destinationHash,
+    }));
+    expect(command).not.toHaveProperty('publicKey');
+
+    await internals.handleEvent({
+      type: 'provisioningResponse',
+      requestId: command.requestId,
+      data: Uint8Array.of(2),
+    });
+    await expect(pending).resolves.toEqual(Uint8Array.of(2));
+  });
+
+  it('persists a bookmark for an unannounced provisioning destination', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const saveNode = vi.spyOn(internals.provisioningRepository, 'saveNode').mockResolvedValue();
+    const destinationHash = '4'.repeat(32);
+
+    await expect(reticulumRuntime.saveProvisioningNodeBookmark({
+      id: destinationHash,
+      destinationHash,
+      publicKey: '',
+      heardAt: '2026-07-21T10:00:00.000Z',
+    }, '  Custom router  ')).resolves.toBe(true);
+
+    expect(saveNode).toHaveBeenCalledWith(expect.objectContaining({
+      id: destinationHash,
+      destinationHash,
+      publicKey: '',
+      bookmarked: true,
+      label: 'Custom router',
+    }));
+    expect(get(provisioningNodes)).toEqual([
+      expect.objectContaining({ destinationHash, bookmarked: true, label: 'Custom router' }),
+    ]);
+
+    await expect(reticulumRuntime.saveProvisioningNodeBookmark({
+      id: destinationHash,
+      destinationHash,
+      publicKey: '',
+      heardAt: '2026-07-21T10:00:00.000Z',
+    }, '   ')).resolves.toBe(true);
+    expect(saveNode).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }));
+  });
+
+  it('asks the worker to close every provisioning link', () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+
+    reticulumRuntime.closeProvisioning();
+
+    expect(postMessage).toHaveBeenCalledWith({ type: 'closeProvisioning' });
   });
 
   it('cancels every pending outbound message before deleting the conversation', async () => {

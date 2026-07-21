@@ -101,6 +101,7 @@ export interface ProvisioningNode {
   hops?: number;
   heardAt: string;
   bookmarked?: boolean;
+  label?: string;
 }
 
 export interface CachedProvisioningSchema {

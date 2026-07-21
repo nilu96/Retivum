@@ -116,7 +116,7 @@ interface NomadLinkState {
 interface ProvisioningJob {
   requestId: string;
   destinationHash: string;
-  publicKey: string;
+  publicKey?: string;
   payload: Uint8Array;
   safeToRetry: boolean;
   responseTimeoutMs?: number;
@@ -356,6 +356,11 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
 
     if (command.type === 'cancelProvisioning') {
       cancelProvisioning(command.destinationHash, command.closeLink ?? false);
+      return;
+    }
+
+    if (command.type === 'closeProvisioning') {
+      closeProvisioning();
       return;
     }
 
@@ -1421,11 +1426,12 @@ function clearNomadState(code: string): void {
 
 function requestProvisioning(command: Extract<RuntimeCommand, { type: 'requestProvisioning' }>): void {
   const destinationHash = normalizeDestinationHash(command.destinationHash);
-  const publicKey = command.publicKey.trim().toLowerCase();
-  if (!node || !identity || !destinationHash || !/^[0-9a-f]{128}$/.test(publicKey) || command.payload.byteLength === 0) {
+  const publicKey = command.publicKey?.trim().toLowerCase();
+  if (!node || !identity || !destinationHash || (publicKey !== undefined && !/^[0-9a-f]{128}$/.test(publicKey)) || command.payload.byteLength === 0) {
     emit({ type: 'provisioningFailed', requestId: command.requestId, code: 'PROVISIONING_DESTINATION_UNKNOWN' });
     return;
   }
+  closeOtherProvisioningDestinations(destinationHash);
   const job: ProvisioningJob = {
     requestId: command.requestId,
     destinationHash,
@@ -1450,7 +1456,7 @@ function requestProvisioning(command: Extract<RuntimeCommand, { type: 'requestPr
   }
   try {
     const destinationBytes = hexToBytes(destinationHash);
-    if (node.hasPath(destinationBytes)) beginProvisioningLink(job);
+    if (job.publicKey && node.hasPath(destinationBytes)) beginProvisioningLink(job);
     else {
       emitProvisioningProgress(job, 'findingPath');
       armProvisioningPathTimeout(job);
@@ -1467,7 +1473,7 @@ function requestProvisioning(command: Extract<RuntimeCommand, { type: 'requestPr
 }
 
 function beginProvisioningLink(job: ProvisioningJob): void {
-  if (!node || provisioningLinksByDestination.has(job.destinationHash)) return;
+  if (!node || !job.publicKey || provisioningLinksByDestination.has(job.destinationHash)) return;
   for (const pending of provisioningPendingJobs.get(job.destinationHash) ?? []) {
     clearProvisioningPathTimer(pending);
     emitProvisioningProgress(pending, 'establishingLink');
@@ -1533,6 +1539,29 @@ function cancelProvisioning(destination: string, closeLink: boolean): void {
   if (link && closeLink) retireProvisioningLink(destinationHash, bytesToHex(link.linkId));
   else if (link && node) {
     try { processOutput(node.rejectResource(link.linkId) as WasmOutput); } catch { /* no pending Resource */ }
+  }
+}
+
+function provisioningDestinations(): Set<string> {
+  return new Set([
+    ...provisioningPendingJobs.keys(),
+    ...provisioningLinksByDestination.keys(),
+    ...Array.from(provisioningRequests.values(), (job) => job.destinationHash),
+  ]);
+}
+
+function closeOtherProvisioningDestinations(activeDestinationHash: string): void {
+  for (const destinationHash of provisioningDestinations()) {
+    if (destinationHash === activeDestinationHash) continue;
+    failProvisioningDestination(destinationHash, 'PROVISIONING_CANCELLED');
+    retireProvisioningLink(destinationHash);
+  }
+}
+
+function closeProvisioning(): void {
+  for (const destinationHash of provisioningDestinations()) {
+    failProvisioningDestination(destinationHash, 'PROVISIONING_CANCELLED');
+    retireProvisioningLink(destinationHash);
   }
 }
 
@@ -2212,7 +2241,7 @@ function handleProvisioningPathFound(event: Record<string, unknown>): void {
   const destinationHash = eventBytes(event, 'destinationHash');
   if (!destinationHash) return;
   const pending = provisioningPendingJobs.get(bytesToHex(destinationHash));
-  if (pending?.[0]) beginProvisioningLink(pending[0]);
+  if (pending?.[0]?.publicKey) beginProvisioningLink(pending[0]);
 }
 
 function handleProvisioningLinkEstablished(event: Record<string, unknown>): void {
@@ -2427,11 +2456,12 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
   if (managementNodeNameHash && equalBytes(nameHash, managementNodeNameHash)
     && publicKey?.byteLength === 64) {
     const destinationHashHex = bytesToHex(destinationHash);
+    const publicKeyHex = bytesToHex(publicKey);
     emit({
       type: 'managementAnnounce',
       id: destinationHashHex,
       destinationHash: destinationHashHex,
-      publicKey: bytesToHex(publicKey),
+      publicKey: publicKeyHex,
       interfaceId,
       hops,
       heardAt,
@@ -2439,6 +2469,11 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
     log('debug', 'wasm', 'PROVISIONING_MANAGEMENT_ANNOUNCE_PROJECTED', {
       destinationHash: destinationHashHex,
     });
+    const pending = provisioningPendingJobs.get(destinationHashHex) ?? [];
+    if (pending.length) {
+      for (const job of pending) job.publicKey = publicKeyHex;
+      if (node?.hasPath(destinationHash)) beginProvisioningLink(pending[0]);
+    }
     return;
   }
 

@@ -27,7 +27,7 @@ export class BrowserProvisioningRepository {
     }
   }
 
-  async setNodeBookmarked(id: string, bookmarked: boolean): Promise<ProvisioningNode | undefined> {
+  async setNodeBookmarked(id: string, bookmarked: boolean, label?: string): Promise<ProvisioningNode | undefined> {
     const database = await openRetivumDatabase();
     try {
       const transaction = database.transaction('provisioningNodes', 'readwrite');
@@ -37,7 +37,11 @@ export class BrowserProvisioningRepository {
         await transactionDone(transaction);
         return undefined;
       }
-      const updated = { ...node, bookmarked };
+      const updated = {
+        ...node,
+        bookmarked,
+        label: bookmarked ? label?.trim() || undefined : undefined,
+      };
       store.put(updated);
       await transactionDone(transaction);
       return updated;

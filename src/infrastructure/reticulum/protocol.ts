@@ -106,12 +106,13 @@ export type RuntimeCommand =
       type: 'requestProvisioning';
       requestId: string;
       destinationHash: string;
-      publicKey: string;
+      publicKey?: string;
       payload: Uint8Array;
       safeToRetry: boolean;
       responseTimeoutMs?: number;
-    }
+  }
   | { type: 'cancelProvisioning'; destinationHash: string; closeLink?: boolean }
+  | { type: 'closeProvisioning' }
   | { type: 'queryDestinationPaths'; destinationHashes: string[] }
   | { type: 'updateIdentityDisplayName'; requestId: string; displayName: string }
   | { type: 'createIdentity'; requestId: string; metadata: NewIdentityMetadata }

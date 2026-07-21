@@ -46,14 +46,21 @@ describe('BrowserProvisioningRepository', () => {
       heardAt: '2026-07-20T10:00:00.000Z',
     });
 
-    expect(await repository.setNodeBookmarked('node', true)).toMatchObject({
+    expect(await repository.setNodeBookmarked('node', true, '  Workshop router  ')).toMatchObject({
       id: 'node',
       bookmarked: true,
+      label: 'Workshop router',
       heardAt: '2026-07-20T10:00:00.000Z',
     });
     expect(await repository.loadNodes()).toEqual([
-      expect.objectContaining({ id: 'node', bookmarked: true }),
+      expect.objectContaining({ id: 'node', bookmarked: true, label: 'Workshop router' }),
     ]);
+
+    expect(await repository.setNodeBookmarked('node', false)).toMatchObject({
+      id: 'node',
+      bookmarked: false,
+      label: undefined,
+    });
   });
 
   it('caches schemas by version and hash and retains only the five newest entries', async () => {
