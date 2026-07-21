@@ -538,11 +538,9 @@
 
   async function saveBookmark(name: string, identifyBeforeLoad: boolean): Promise<boolean> {
     if (!bookmarkEditor) return false;
-    const saved = bookmarkEditor.bookmarkId
+    return bookmarkEditor.bookmarkId
       ? await reticulumRuntime.updateNomadBookmark(bookmarkEditor.bookmarkId, name, identifyBeforeLoad)
       : await reticulumRuntime.addNomadBookmark(bookmarkEditor.address, name, identifyBeforeLoad);
-    if (saved) scope = 'bookmarks';
-    return saved;
   }
 
   async function removeBookmark(id: string): Promise<void> {

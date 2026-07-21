@@ -188,6 +188,8 @@ describe('NomadNetView', () => {
       'Community node',
       true,
     ));
+    expect(screen.getByRole('tab', { name: 'Announced' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
   });
 
   it('copies an announced destination hash and offers to add it as a bookmark', async () => {
