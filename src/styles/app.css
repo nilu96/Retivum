@@ -813,10 +813,13 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 
 .logs-page { max-width: 1180px; min-width: 0; overflow-x: clip; }
 .logs-header { margin-block-end: 22px; }
-.logs-header .button:first-child svg { rotate: 180deg; }
-.log-filter { display: flex; gap: 4px; margin-block-end: 12px; padding: 4px; overflow-x: auto; border-radius: 10px; background: var(--surface-2); }
+.log-filter { display: flex; min-width: 0; gap: 4px; margin-block-end: 12px; padding: 4px; border-radius: 10px; background: var(--surface-2); }
+.log-filter-levels { display: flex; min-width: 0; flex: 1; gap: 4px; overflow-x: auto; }
 .log-filter button { min-height: 34px; padding-inline: 13px; border: 0; border-radius: 8px; color: var(--text-muted); background: transparent; font-size: .75rem; font-weight: 650; white-space: nowrap; }
 .log-filter button.active { color: var(--text); background: var(--surface-3); }
+.log-filter .log-clear { display: inline-flex; flex: none; align-items: center; gap: 6px; margin-inline-start: 4px; border-inline-start: 1px solid var(--border); border-radius: 0 8px 8px 0; }
+.log-filter .log-clear:hover:not(:disabled) { color: var(--danger); background: var(--danger-soft); }
+.log-filter .log-clear:disabled { opacity: .45; }
 .log-viewer { min-width: 0; min-height: 420px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .log-viewer > .empty-state { margin: 100px auto; }
 .log-list { display: grid; min-width: 0; gap: 7px; margin: 0; padding: 0; list-style: none; }
@@ -941,6 +944,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .provisioning-page { grid-template-rows: auto auto minmax(380px, 1fr); }
   .provisioning-header { gap: 12px; }
   .provisioning-back-button { min-height: 42px; }
+  .log-filter .log-clear { padding-inline: 11px; border-radius: 0 8px 8px 0; }
+  .log-clear span { display: none; }
   .provisioning-address { grid-template-columns: auto minmax(0, 1fr); }
   .provisioning-address > .button { grid-column: 1 / -1; width: 100%; }
   .provisioning-workspace { height: auto; min-height: 0; grid-template-columns: 1fr; }

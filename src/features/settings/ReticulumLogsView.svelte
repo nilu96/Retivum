@@ -28,28 +28,33 @@
 </script>
 
 <div class="page logs-page" bind:this={page}>
-  <header class="page-header logs-header">
-    <div>
+  <header class="page-header provisioning-header logs-header">
+    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigate('tools')}>
+      <Icon name="arrow-left" size={16} />{$t('provisioning.backToTools')}
+    </button>
+    <div class="provisioning-header-copy">
       <p class="eyebrow">{$t('app.name')}</p>
       <h1>{$t('logs.title')}</h1>
       <p>{$t('logs.subtitle')}</p>
     </div>
-    <div class="header-actions">
-      <button class="button secondary compact" onclick={() => navigate('settings')}>
-        <Icon name="arrow-right" size={16} />{$t('common.back')}
-      </button>
-      <button class="button secondary compact" disabled={$reticulumLogs.length === 0} onclick={clearReticulumLogs}>
-        {$t('logs.clear')}
-      </button>
-    </div>
   </header>
 
   <div class="log-filter" role="toolbar" aria-label={$t('logs.filter.label')}>
-    {#each levels as level}
-      <button class:active={filter === level} onclick={() => { filter = level; }}>
-        {$t(`logs.level.${level}`)}
-      </button>
-    {/each}
+    <div class="log-filter-levels">
+      {#each levels as level}
+        <button class:active={filter === level} onclick={() => { filter = level; }}>
+          {$t(`logs.level.${level}`)}
+        </button>
+      {/each}
+    </div>
+    <button
+      class="log-clear"
+      type="button"
+      aria-label={$t('logs.clear')}
+      title={$t('logs.clear')}
+      disabled={$reticulumLogs.length === 0}
+      onclick={clearReticulumLogs}
+    ><Icon name="trash" size={15} /><span>{$t('logs.clear')}</span></button>
   </div>
 
   <section class="log-viewer" aria-live="polite">

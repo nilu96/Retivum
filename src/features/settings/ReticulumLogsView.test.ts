@@ -33,7 +33,9 @@ describe('ReticulumLogsView', () => {
     expect(screen.queryByText('RUNTIME_READY')).not.toBeInTheDocument();
     expect(screen.getByText('WEBSOCKET_CONNECTION_ERROR')).toBeInTheDocument();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Clear logs' }));
+    const clearButton = screen.getByRole('button', { name: 'Clear logs' });
+    expect(screen.getByRole('toolbar', { name: 'Filter Reticulum logs' })).toContainElement(clearButton);
+    await fireEvent.click(clearButton);
     expect(screen.getByRole('heading', { name: 'No matching log entries' })).toBeInTheDocument();
   });
 
@@ -45,5 +47,13 @@ describe('ReticulumLogsView', () => {
 
     expect(document.documentElement.scrollTop).toBe(0);
     expect(document.body.scrollTop).toBe(0);
+  });
+
+  it('returns to the tools directory', async () => {
+    window.location.hash = '#/logs';
+    render(ReticulumLogsView);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back to Tools' }));
+    expect(window.location.hash).toBe('#/tools');
   });
 });
