@@ -9,6 +9,7 @@
   import ReticulumLogsView from './features/settings/ReticulumLogsView.svelte';
   import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
   import StatusDetailsView from './features/tools/StatusDetailsView.svelte';
+  import ProbeView from './features/tools/ProbeView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
   import DesktopBluetoothPairing from './lib/components/DesktopBluetoothPairing.svelte';
   import ToastViewport from './lib/components/ToastViewport.svelte';
@@ -59,6 +60,8 @@
     <ToolsView />
   {:else if $route === 'provisioning'}
     <ProvisioningView />
+  {:else if $route === 'probe'}
+    <ProbeView />
   {:else if $route === 'status'}
     <StatusDetailsView />
   {/if}

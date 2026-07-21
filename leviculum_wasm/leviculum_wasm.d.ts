@@ -47,6 +47,11 @@ export class ReticulumNode {
     deregisterRequestHandler(path: string): boolean;
     diagnosticDump(): string;
     /**
+     * Remove one cached path by destination hash without disturbing any
+     * other path-table entries or live links.
+     */
+    dropPath(destination_hash: Uint8Array): boolean;
+    /**
      * Enable one LXMF delivery router on this Reticulum node.
      */
     enableLxmf(options: any): any;
@@ -202,6 +207,7 @@ export interface InitOutput {
     readonly reticulumnode_connect: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly reticulumnode_deregisterRequestHandler: (a: number, b: number, c: number) => number;
     readonly reticulumnode_diagnosticDump: (a: number) => [number, number];
+    readonly reticulumnode_dropPath: (a: number, b: number, c: number) => [number, number, number];
     readonly reticulumnode_exportIdentityPersistentState: (a: number) => [number, number, number];
     readonly reticulumnode_exportIdentityPrivateKey: (a: number) => [number, number, number, number];
     readonly reticulumnode_exportNetworkPersistentState: (a: number) => [number, number, number];

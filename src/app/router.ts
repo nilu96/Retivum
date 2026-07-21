@@ -1,9 +1,9 @@
 import { writable } from 'svelte/store';
 
-export type AppRoute = 'chat' | 'nomadnet' | 'tools' | 'settings' | 'logs' | 'provisioning' | 'status';
+export type AppRoute = 'chat' | 'nomadnet' | 'tools' | 'settings' | 'logs' | 'provisioning' | 'probe' | 'status';
 
 const defaultRoute: AppRoute = 'chat';
-const knownRoutes = new Set<AppRoute>(['chat', 'nomadnet', 'tools', 'settings', 'logs', 'provisioning', 'status']);
+const knownRoutes = new Set<AppRoute>(['chat', 'nomadnet', 'tools', 'settings', 'logs', 'provisioning', 'probe', 'status']);
 
 function routeFromHash(hash: string): AppRoute {
   const candidate = hash.replace(/^#\/?/, '').split(/[/?]/, 1)[0] as AppRoute;

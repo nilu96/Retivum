@@ -12,7 +12,7 @@ The initial application foundation includes:
 
 - a Svelte 5, TypeScript, and Vite client-only application;
 - adaptive desktop sidebar and mobile bottom-tab navigation;
-- Chat, NomadNet, Tools, and Settings views with Reticulum logs and Remote provisioning available from the Tools directory;
+- Chat, NomadNet, Tools, and Settings views with Reticulum logs, Remote provisioning, live status, and raw destination probing available from the Tools directory;
 - a bundled typed English localization catalog used by all GUI components;
 - IndexedDB-backed application preferences, NomadNet directories, and persistent heterogeneous interface definitions;
 - a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations;

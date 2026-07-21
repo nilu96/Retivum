@@ -26,7 +26,8 @@
 
   function navigationItemIsActive(item: (typeof navigation)[number]): boolean {
     return current === item.route
-      || ((current === 'logs' || current === 'provisioning') && item.route === 'tools');
+      || ((current === 'logs' || current === 'provisioning' || current === 'probe' || current === 'status')
+        && item.route === 'tools');
   }
 
   const runtimeLabels: Record<typeof $runtimeStatus, MessageKey> = {

@@ -33,7 +33,8 @@
       title: 'tools.probe.title',
       description: 'tools.probe.description',
       icon: 'probe',
-      available: false,
+      available: true,
+      route: 'probe',
     },
     {
       id: 'status',

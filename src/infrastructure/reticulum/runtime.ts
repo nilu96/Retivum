@@ -52,6 +52,7 @@ import type {
   InterfaceRuntimeState,
   AnnouncedPropagationNode,
   LxmfPropagationSyncResult,
+  ProbeResult,
   RuntimeCommand,
   RuntimeConfiguration,
   RuntimeEvent,
@@ -59,6 +60,7 @@ import type {
   RuntimeState,
   ProvisioningRequestStage,
 } from './protocol';
+import { maximumProbePayloadBytes } from './protocol';
 import {
   chatAnnounces,
   blockedChatDestinations,
@@ -91,6 +93,7 @@ export const nomadBookmarks = writable<NomadBookmark[]>([]);
 export const propagationNodeAnnounces = writable<AnnouncedPropagationNode[]>([]);
 export const provisioningNodes = writable<ProvisioningNode[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
+export const knownDestinationHashes = writable<string[]>([]);
 export const reticulumLogs = writable<ReticulumLogEntry[]>([]);
 
 export function clearReticulumLogs(): void {
@@ -156,6 +159,13 @@ class ReticulumRuntimeController {
     reject: (error: ProvisioningRequestFailure) => void;
     onUpdate?: (stage: ProvisioningRequestStage, progress?: number, dataSize?: number) => void;
   }>();
+  private readonly probeWaiters = new Map<string, {
+    resolve: (result: ProbeResult) => void;
+    destinationHash: string;
+    fullDestinationName: string;
+    probeSizeBytes: number;
+  }>();
+  private readonly pathDropWaiters = new Map<string, (ok: boolean) => void>();
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
@@ -186,6 +196,10 @@ class ReticulumRuntimeController {
         this.lxmaPeerWaiters.clear();
         for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_FAILED'));
         this.provisioningWaiters.clear();
+        this.failProbeWaiters('PROBE_RUNTIME_FAILED');
+        for (const resolve of this.pathDropWaiters.values()) resolve(false);
+        this.pathDropWaiters.clear();
+        knownDestinationHashes.set([]);
       };
 
       let blockedDestinationHashes: string[] = [];
@@ -243,6 +257,71 @@ class ReticulumRuntimeController {
         resolve(false);
       }, 10_000);
       this.announceWaiters.set(requestId, (ok) => {
+        window.clearTimeout(timeout);
+        resolve(ok);
+      });
+    });
+  }
+
+  /**
+   * Sends one encrypted raw Reticulum packet and waits for its delivery proof.
+   * `timeoutMs` covers the proof wait; uncached paths use the separate shared
+   * path-request timeout before the packet is submitted.
+   */
+  async probeDestination(
+    destination: string,
+    fullDestinationName: string,
+    timeoutMs: number,
+    probeSizeBytes: number,
+  ): Promise<ProbeResult> {
+    const destinationHash = normalizeDestinationHash(destination);
+    const normalizedName = fullDestinationName.trim();
+    const validName = normalizedName.length > 0
+      && normalizedName.split('.').every((component) => component.length > 0);
+    const validTimeout = Number.isSafeInteger(timeoutMs) && timeoutMs > 0 && timeoutMs <= 2_147_483_647;
+    const validSize = Number.isSafeInteger(probeSizeBytes)
+      && probeSizeBytes >= 0
+      && probeSizeBytes <= maximumProbePayloadBytes;
+    if (!this.worker || !get(activeIdentity) || !destinationHash || !validName || !validTimeout || !validSize) {
+      return {
+        ok: false,
+        destinationHash: destinationHash ?? destination.trim().toLowerCase(),
+        fullDestinationName: normalizedName,
+        probeSizeBytes,
+        code: 'PROBE_INVALID',
+      };
+    }
+
+    const requestId = crypto.randomUUID();
+    this.post({
+      type: 'probeDestination',
+      requestId,
+      destinationHash,
+      fullDestinationName: normalizedName,
+      timeoutMs,
+      probeSizeBytes,
+    });
+    return new Promise((resolve) => {
+      this.probeWaiters.set(requestId, {
+        resolve,
+        destinationHash,
+        fullDestinationName: normalizedName,
+        probeSizeBytes,
+      });
+    });
+  }
+
+  async dropDestinationPath(destination: string): Promise<boolean> {
+    const destinationHash = normalizeDestinationHash(destination);
+    if (!this.worker || !get(activeIdentity) || !destinationHash) return false;
+    const requestId = crypto.randomUUID();
+    this.post({ type: 'dropDestinationPath', requestId, destinationHash });
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        this.pathDropWaiters.delete(requestId);
+        resolve(false);
+      }, 10_000);
+      this.pathDropWaiters.set(requestId, (ok) => {
         window.clearTimeout(timeout);
         resolve(ok);
       });
@@ -903,6 +982,7 @@ class ReticulumRuntimeController {
     this.worker = undefined;
     this.started = false;
     statusDetails.set(undefined);
+    knownDestinationHashes.set([]);
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
     for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
@@ -916,6 +996,9 @@ class ReticulumRuntimeController {
     this.messageOperationWaiters.clear();
     for (const resolve of this.ignoredDestinationsWaiters.values()) resolve(false);
     this.ignoredDestinationsWaiters.clear();
+    this.failProbeWaiters('PROBE_RUNTIME_STOPPED');
+    for (const resolve of this.pathDropWaiters.values()) resolve(false);
+    this.pathDropWaiters.clear();
   }
 
   private async handleEvent(event: RuntimeEvent): Promise<void> {
@@ -973,6 +1056,20 @@ class ReticulumRuntimeController {
         for (const status of event.statuses) next[status.destinationHash] = status;
         return next;
       });
+      return;
+    }
+    if (event.type === 'knownDestinationSnapshot') {
+      knownDestinationHashes.set(event.destinationHashes);
+      return;
+    }
+    if (event.type === 'destinationPathDropResult') {
+      this.pathDropWaiters.get(event.requestId)?.(event.ok);
+      this.pathDropWaiters.delete(event.requestId);
+      return;
+    }
+    if (event.type === 'probeResult') {
+      this.probeWaiters.get(event.requestId)?.resolve(event);
+      this.probeWaiters.delete(event.requestId);
       return;
     }
     if (event.type === 'propagationNodeAnnounce') {
@@ -1483,6 +1580,19 @@ class ReticulumRuntimeController {
       type: 'setChatContactDestinations',
       destinationHashes: get(chatContacts).map((item) => item.destinationHash),
     });
+  }
+
+  private failProbeWaiters(code: string): void {
+    for (const waiter of this.probeWaiters.values()) {
+      waiter.resolve({
+        ok: false,
+        destinationHash: waiter.destinationHash,
+        fullDestinationName: waiter.fullDestinationName,
+        probeSizeBytes: waiter.probeSizeBytes,
+        code,
+      });
+    }
+    this.probeWaiters.clear();
   }
 }
 

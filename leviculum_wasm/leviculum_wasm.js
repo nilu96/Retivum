@@ -304,6 +304,21 @@ export class ReticulumNode {
         }
     }
     /**
+     * Remove one cached path by destination hash without disturbing any
+     * other path-table entries or live links.
+     * @param {Uint8Array} destination_hash
+     * @returns {boolean}
+     */
+    dropPath(destination_hash) {
+        const ptr0 = passArray8ToWasm0(destination_hash, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.reticulumnode_dropPath(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
+    }
+    /**
      * Enable one LXMF delivery router on this Reticulum node.
      * @param {any} options
      * @returns {any}

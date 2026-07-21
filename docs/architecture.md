@@ -637,7 +637,7 @@ Settings uses shared `SettingsSection`, `FormField`, `Toggle`, `Select`, `Number
 | LXMF | Default sending method (direct, opportunistic, or propagated), propagation fallback opt-in, optional preferred node, inbound stamp cost, and synchronization/announcement intervals |
 | Storage | Usage, persistence status, encrypted backup/restore, clear cache/history, and separately confirmed clearing of heard-announce history |
 | Appearance | System/light/dark theme, language foundation (system/English initially), density where appropriate, reduced motion follows OS |
-| Tools | Primary navigation directory for Reticulum logs, Remote provisioning, and live Status details; Path table management and Probing remain planned |
+| Tools | Primary navigation directory for Reticulum logs, Remote provisioning, live Status details, and raw destination Probing; Path table management remains planned |
 | Remote provisioning | Implemented tool with an experimental directory and schema-driven editor for authorized `rnstransport.remote.management` destinations |
 | Diagnostics | Version/build/WASM provenance, memory report, redacted logs, export support bundle |
 | About | Licenses, privacy statement, source/project links |
@@ -652,7 +652,7 @@ Configuration editing uses a draft. Save validates it, persists it as pending, a
 
 Breakpoints are content-driven and expressed as shared CSS custom media/tokens, with these initial targets:
 
-Primary navigation always contains **Chat**, **NomadNet**, **Tools**, and **Settings**. Tools is the entry point for Remote provisioning and future Reticulum inspection/diagnostic utilities. Desktop uses a persistent left sidebar: compact icon-and-tooltip navigation at medium widths and an expanded icon-and-label sidebar on wide screens. Mobile uses a fixed bottom tab bar with an icon and visible text label for every destination. The tab bar respects the bottom safe-area inset and mobile keyboard/viewport changes; it is not duplicated inside feature pages. Both variants consume the same route metadata and navigation component model, so changing layout never resets the active route or chat overview scope.
+Primary navigation always contains **Chat**, **NomadNet**, **Tools**, and **Settings**. Tools is the entry point for Remote provisioning, raw destination probing, and other Reticulum inspection/diagnostic utilities. Desktop uses a persistent left sidebar: compact icon-and-tooltip navigation at medium widths and an expanded icon-and-label sidebar on wide screens. Mobile uses a fixed bottom tab bar with an icon and visible text label for every destination. The tab bar respects the bottom safe-area inset and mobile keyboard/viewport changes; it is not duplicated inside feature pages. Both variants consume the same route metadata and navigation component model, so changing layout never resets the active route or chat overview scope.
 
 | Width | Navigation | Chat | NomadNet/tools/settings |
 | --- | --- | --- | --- |

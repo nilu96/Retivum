@@ -821,6 +821,33 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 
 .status-details-page { max-width: 1180px; min-width: 0; }
 .status-details-header { margin-block-end: 22px; }
+.probe-page { display: grid; max-width: 1050px; min-width: 0; align-content: start; gap: 26px; }
+.probe-header { margin-block-end: -3px; }
+.probe-config-card { overflow: visible; }
+.probe-form { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(150px, .65fr) minmax(150px, .65fr); gap: 16px; padding: 2px 20px 20px 70px; }
+.probe-form > .full-span { grid-column: 1 / -1; }
+.probe-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding-block-start: 2px; }
+.probe-path-feedback { margin: 0 0 0 4px; color: var(--text-muted); font-size: .72rem; }
+.probe-path-feedback.success { color: var(--accent-strong); }
+.probe-history-section { min-width: 0; }
+.probe-history-section .section-heading-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.probe-history-section > .empty-state { width: 100%; max-width: none; padding: 54px 24px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }
+.probe-history-list { display: grid; min-width: 0; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.probe-history-list > li { min-width: 0; padding: 15px 17px; border: 1px solid var(--border); border-inline-start: 3px solid var(--accent); border-radius: 11px; background: var(--surface-1); box-shadow: 0 1px 0 rgba(255,255,255,.015); }
+.probe-history-list > li.failed { border-inline-start-color: var(--danger); }
+.probe-history-list > li > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block-end: 9px; }
+.probe-result-title { display: flex; align-items: center; gap: 8px; font-size: .8rem; }
+.probe-result-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+.probe-history-list > li.failed .probe-result-dot { background: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
+.probe-history-list time { flex: none; color: var(--text-subtle); font-size: .65rem; }
+.probe-result-destination { display: block; min-width: 0; margin-block-end: 3px; color: var(--text-muted); font-size: .7rem; overflow-wrap: anywhere; }
+.probe-result-route { margin: 0 0 12px; color: var(--text-subtle); font-size: .68rem; line-height: 1.45; overflow-wrap: anywhere; }
+.probe-history-list dl { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; }
+.probe-history-list dl div { display: flex; align-items: baseline; gap: 6px; }
+.probe-history-list dt { color: var(--text-subtle); font-size: .64rem; }
+.probe-history-list dd { margin: 0; color: var(--text); font-size: .7rem; font-weight: 700; }
+.probe-history-list dd code { font-size: .68rem; }
+.probe-result-error { margin: 10px 0 0; color: var(--danger); font-size: .68rem; }
 .status-overview { margin-block-end: 28px; }
 .network-status-card { display: grid; min-width: 0; grid-template-columns: minmax(240px, .7fr) minmax(0, 1.3fr); overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow); }
 .network-status-block { display: grid; min-width: 0; align-content: start; gap: 13px; padding: 16px 18px; }
@@ -845,7 +872,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .section-heading-row { margin-block-end: 12px; }
 .section-heading-row h2 { margin: 0; font-size: 1.02rem; }
 .section-title-with-count { display: flex; align-items: center; gap: 8px; }
-.interface-count-badge { display: inline-grid; min-width: 23px; height: 23px; flex: none; place-items: center; padding: 0 7px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); color: var(--accent-strong); background: var(--accent-soft); font-size: .68rem; font-weight: 780; line-height: 1; font-variant-numeric: tabular-nums; }
+.section-count-badge { display: inline-grid; min-width: 23px; height: 23px; flex: none; place-items: center; padding: 0 7px; border: 1px solid color-mix(in srgb, var(--accent) 22%, var(--border)); color: var(--accent-strong); background: var(--accent-soft); font-size: .68rem; font-weight: 780; line-height: 1; font-variant-numeric: tabular-nums; }
 .status-interface-list { display: grid; gap: 16px; }
 .status-interface-card { min-width: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); box-shadow: var(--shadow); }
 .status-interface-card > header { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 17px; border-block-end: 1px solid var(--border); background: var(--surface-2); }
@@ -868,6 +895,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .status-radio-metric-grid div { background: color-mix(in srgb, var(--surface-1) 55%, transparent); }
 
 @media (max-width: 820px) {
+  .probe-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .network-status-card { grid-template-columns: 1fr; }
   .transport-status-block { border-block-start: 1px solid var(--border); border-inline-start: 0; }
   .status-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -876,6 +904,13 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 }
 
 @media (max-width: 520px) {
+  .probe-form { grid-template-columns: 1fr; padding: 0 16px 16px; }
+  .probe-form > .full-span { grid-column: auto; }
+  .probe-actions { align-items: stretch; flex-direction: column; }
+  .probe-actions .button { width: 100%; }
+  .probe-path-feedback { margin: 4px 0 0; text-align: center; }
+  .probe-history-section .section-heading-row { align-items: flex-start; }
+  .probe-history-list > li > header { align-items: flex-start; }
   .transport-summary-details { grid-template-columns: 1fr; }
   .transport-summary-details > div + div { margin: 12px 0 0; padding: 12px 0 0; border-block-start: 1px solid var(--border); border-inline-start: 0; }
   .transport-packets { min-height: 54px; }

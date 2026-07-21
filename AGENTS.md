@@ -114,10 +114,10 @@ Current fingerprints:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `leviculum_wasm.js` | `224426440bb0a949cf72ccbf91541a40808e92cb20734fe33ae048a4c6c244f8` |
-| `leviculum_wasm_bg.wasm` | `8feba6d029b8c03cad2de7c14cc21fda6706e09a1989d1389ba990f3507ddc78` |
-| `leviculum_wasm.d.ts` | `5f7d5edb81c50e0d36d67b44894e8c5e376e7eb41e04cd7018f449be63780cc3` |
-| `leviculum_wasm_bg.wasm.d.ts` | `784653da3a283bdf51796fc044c6d1ead8fc581312424ee52f67b7e374966645` |
+| `leviculum_wasm.js` | `5ecc7ce4ef1cbca2aa230f18dc9c61068205293cda93910f638d489b25bd39d0` |
+| `leviculum_wasm_bg.wasm` | `9cdbccccd38f0a11ff1a42ab9bed4c905472eade7b5b843bc8dc004bf321c900` |
+| `leviculum_wasm.d.ts` | `11863e64b0b96d064f1fd9f973ff190cf5b2888197f73736a630816ba5486402` |
+| `leviculum_wasm_bg.wasm.d.ts` | `e05c75eb3c561a5cebe58b1b2c1e7661b9ffed1000c41032cf9d301fbe38767c` |
 
 The current build was produced with Rust 1.95.0 and `wasm-bindgen` 0.2.126. From the Leviculum checkout, the documented development build is:
 

@@ -2,9 +2,13 @@ import type { PersistedIdentityRecord } from '../../domain/identity';
 import type { PersistedNetworkStateRecord } from '../../domain/network-state';
 import type { ReticulumLogEntry } from '../../domain/logging';
 import type { NomadPageLoadStage, NomadRequestData } from '../../domain/nomadnet';
-import type { AppPreferences, InterfaceConfig, RNodeConnectionType } from '../../domain/settings';
+import type { AppPreferences, InterfaceConfig, InterfaceType, RNodeConnectionType } from '../../domain/settings';
 import type { ChatAttachment } from '../../domain/chat';
 import type { ProvisioningNode } from '../../domain/provisioning';
+
+// Python Reticulum's Packet.ENCRYPTED_MDU: the largest plaintext that can be
+// encrypted into one 500-byte Single-destination packet.
+export const maximumProbePayloadBytes = 383;
 
 export type RuntimeState = 'starting' | 'noInterfaces' | 'connecting' | 'online' | 'offline' | 'error';
 export type InterfaceRuntimeState = 'disabled' | 'connecting' | 'online' | 'reconnecting' | 'offline' | 'error';
@@ -74,6 +78,19 @@ export interface LxmfPropagationSyncResult {
 
 export interface ChatMessageQueueResult {
   ok: boolean;
+  code?: string;
+}
+
+export interface ProbeResult {
+  ok: boolean;
+  destinationHash: string;
+  fullDestinationName: string;
+  probeSizeBytes: number;
+  roundTripTimeMs?: number;
+  hops?: number;
+  viaHash?: string;
+  interfaceName?: string;
+  interfaceType?: InterfaceType;
   code?: string;
 }
 
@@ -161,6 +178,15 @@ export type RuntimeCommand =
   | { type: 'cancelProvisioning'; destinationHash: string; closeLink?: boolean }
   | { type: 'closeProvisioning' }
   | { type: 'queryDestinationPaths'; destinationHashes: string[] }
+  | { type: 'dropDestinationPath'; requestId: string; destinationHash: string }
+  | {
+      type: 'probeDestination';
+      requestId: string;
+      destinationHash: string;
+      fullDestinationName: string;
+      timeoutMs: number;
+      probeSizeBytes: number;
+    }
   | { type: 'updateIdentityDisplayName'; requestId: string; displayName: string }
   | { type: 'createIdentity'; requestId: string; metadata: NewIdentityMetadata }
   | {
@@ -302,6 +328,9 @@ export type RuntimeEvent =
   | { type: 'provisioningResponse'; requestId: string; data: Uint8Array }
   | { type: 'provisioningFailed'; requestId: string; code: string }
   | { type: 'destinationPathStatuses'; statuses: DestinationPathStatus[] }
+  | { type: 'knownDestinationSnapshot'; destinationHashes: string[] }
+  | { type: 'destinationPathDropResult'; requestId: string; ok: boolean; code?: string }
+  | ({ type: 'probeResult'; requestId: string } & ProbeResult)
   | {
       type: 'chatAnnounce';
       identityId: string;

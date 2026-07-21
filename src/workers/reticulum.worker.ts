@@ -41,10 +41,13 @@ import type {
   RuntimeEvent,
   RuntimeState,
 } from '../infrastructure/reticulum/protocol';
+import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
+import { resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
 import { requiresReticulumRuntimeRebuild } from '../infrastructure/reticulum/runtime-configuration';
 import { computeRNodeBitrate, InterfaceTelemetryTracker } from '../infrastructure/reticulum/interface-telemetry';
+import { pathRequestTimeoutMs } from '../infrastructure/reticulum/timeouts';
 
 interface GeneratedIdentity {
   hash: Uint8Array;
@@ -82,8 +85,6 @@ const reconnectMultiplier = 2;
 const reconnectJitter = 0.2;
 const maxNomadPageBytes = 1024 * 1024;
 const maxProvisioningResponseBytes = 4 * 1024 * 1024;
-const nomadPathDiscoveryTimeoutMs = 20_000;
-const provisioningPathDiscoveryTimeoutMs = 20_000;
 const provisioningRequestDeadlineMs = 120_000;
 const maxNomadLinkRecoveryAttempts = 1;
 const maxCachedNomadLinks = 32;
@@ -135,6 +136,21 @@ interface ProvisioningLinkState {
   identified: boolean;
 }
 
+interface ProbeJob {
+  requestId: string;
+  destinationHash: string;
+  fullDestinationName: string;
+  timeoutMs: number;
+  probeSizeBytes: number;
+  phase: 'findingPath' | 'awaitingProof';
+  packetHash?: string;
+  sentAtMs?: number;
+  viaHash?: string;
+  interfaceName?: string;
+  interfaceType?: InterfaceConfig['type'];
+  timer?: ReturnType<typeof setTimeout>;
+}
+
 let node: ReticulumNode | undefined;
 let wrappingKey: CryptoKey | undefined;
 let privateKey: Uint8Array | undefined;
@@ -177,6 +193,11 @@ const provisioningPendingJobs = new Map<string, ProvisioningJob[]>();
 const provisioningRequests = new Map<string, ProvisioningJob>();
 const provisioningLinksByDestination = new Map<string, ProvisioningLinkState>();
 const provisioningLinksById = new Map<string, ProvisioningLinkState>();
+const probeJobs = new Map<string, ProbeJob>();
+const probeJobsByPacketHash = new Map<string, ProbeJob>();
+const knownDestinationPublicKeys = new Map<string, Uint8Array>();
+const localDestinationHashes = new Set<string>();
+let knownDestinationSnapshotSignature = '';
 const lxmfOutboundStatusCache = new Map<string, string>();
 const lxmfDeliveryLinks = new Set<string>();
 const lxmfLinkDestinations = new Map<string, string>();
@@ -373,6 +394,16 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       return;
     }
 
+    if (command.type === 'dropDestinationPath') {
+      dropDestinationPath(command);
+      return;
+    }
+
+    if (command.type === 'probeDestination') {
+      probeDestination(command);
+      return;
+    }
+
     if (command.type === 'closeAllLinks') {
       closeAllActiveLinks();
       return;
@@ -517,6 +548,7 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
       emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_RESTORE_FAILED' });
     }
   }
+  restoreKnownDestinationPublicKeys(networkPersistentState ?? legacyPersistentState);
 
   node = new ReticulumNode({
     identityPrivateKey: privateKey,
@@ -533,6 +565,9 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
   }) as {
     deliveryDestinationHash?: Uint8Array;
   };
+  if (lxmf.deliveryDestinationHash) {
+    localDestinationHashes.add(bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash)));
+  }
   applyBlockedDestinationPolicy();
 
   for (const interfaceConfig of configuration.interfaces) {
@@ -549,6 +584,7 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
   }
 
   emitPropagationNodeSnapshot();
+  emitKnownDestinationSnapshot();
 
   emit({
     type: 'identityReady',
@@ -574,6 +610,50 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
 
 function normalizeBlockedDestinationHashes(destinationHashes: string[]): string[] {
   return Array.from(normalizeDestinationHashes(destinationHashes)).sort();
+}
+
+function restoreKnownDestinationPublicKeys(state: unknown): void {
+  if (!state || typeof state !== 'object') return;
+  const source = state as Record<string, unknown>;
+  const identities = source.knownIdentities ?? source.known_identities;
+  if (!Array.isArray(identities)) return;
+  for (const value of identities) {
+    if (!value || typeof value !== 'object') continue;
+    const entry = value as Record<string, unknown>;
+    const destinationHash = eventBytes(entry, 'destinationHash');
+    const publicKey = eventBytes(entry, 'publicKey');
+    if (destinationHash?.byteLength !== 16 || publicKey?.byteLength !== 64) continue;
+    knownDestinationPublicKeys.set(bytesToHex(destinationHash), new Uint8Array(publicKey));
+  }
+}
+
+function emitKnownDestinationSnapshot(): void {
+  const hashes = new Set<string>([
+    ...knownDestinationPublicKeys.keys(),
+    ...localDestinationHashes,
+    ...observedDestinationPaths,
+  ]);
+  if (node) {
+    try {
+      const snapshot = node.exportNetworkPersistentState() as Record<string, unknown>;
+      for (const collectionName of ['knownIdentities', 'knownDestinations', 'paths']) {
+        const collection = snapshot[collectionName];
+        if (!Array.isArray(collection)) continue;
+        for (const value of collection) {
+          if (!value || typeof value !== 'object') continue;
+          const destinationHash = eventBytes(value as Record<string, unknown>, 'destinationHash');
+          if (destinationHash?.byteLength === 16) hashes.add(bytesToHex(destinationHash));
+        }
+      }
+    } catch {
+      // The in-memory indexes above still provide a safe partial snapshot.
+    }
+  }
+  const destinationHashes = Array.from(hashes).sort();
+  const signature = destinationHashes.join(':');
+  if (signature === knownDestinationSnapshotSignature) return;
+  knownDestinationSnapshotSignature = signature;
+  emit({ type: 'knownDestinationSnapshot', destinationHashes });
 }
 
 function normalizeDestinationHashes(destinationHashes: string[]): Set<string> {
@@ -685,6 +765,11 @@ function cleanupRuntime(): void {
   finishPropagationSync(false, 'LXMF_PROPAGATION_SYNC_RUNTIME_RESET');
   clearNomadState('NOMAD_RUNTIME_RESET');
   clearProvisioningState('PROVISIONING_RUNTIME_RESET');
+  clearProbeState('PROBE_RUNTIME_RESET');
+  knownDestinationPublicKeys.clear();
+  localDestinationHashes.clear();
+  knownDestinationSnapshotSignature = '';
+  emit({ type: 'knownDestinationSnapshot', destinationHashes: [] });
   lxmfOutboundStatusCache.clear();
   lxmfDeliveryLinks.clear();
   lxmfLinkDestinations.clear();
@@ -963,6 +1048,8 @@ function importLxmaPeer(command: Extract<RuntimeCommand, { type: 'importLxmaPeer
       return;
     }
     node.rememberIdentity(destinationBytes, publicKey);
+    knownDestinationPublicKeys.set(destinationHash, new Uint8Array(publicKey));
+    emitKnownDestinationSnapshot();
     queueSnapshotPersistence();
     log('debug', 'wasm', 'LXMF_PEER_IMPORTED', { destinationHash });
     emit({ type: 'lxmaPeerImportResult', requestId: command.requestId, ok: true, destinationHash });
@@ -1044,6 +1131,217 @@ function emitNomadPageProgress(
     stage,
     ...details,
   });
+}
+
+function probeDestination(command: Extract<RuntimeCommand, { type: 'probeDestination' }>): void {
+  const destinationHash = normalizeDestinationHash(command.destinationHash);
+  const fullDestinationName = command.fullDestinationName.trim();
+  const validName = fullDestinationName.length > 0
+    && fullDestinationName.split('.').every((component) => component.length > 0);
+  const validTimeout = Number.isSafeInteger(command.timeoutMs)
+    && command.timeoutMs > 0
+    && command.timeoutMs <= maxTimerDelayMs;
+  const validSize = Number.isSafeInteger(command.probeSizeBytes)
+    && command.probeSizeBytes >= 0
+    && command.probeSizeBytes <= maximumProbePayloadBytes;
+  if (!node || !identity || !destinationHash || !validName || !validTimeout || !validSize) {
+    emit({
+      type: 'probeResult',
+      requestId: command.requestId,
+      ok: false,
+      destinationHash: destinationHash ?? command.destinationHash.trim().toLowerCase(),
+      fullDestinationName,
+      probeSizeBytes: command.probeSizeBytes,
+      code: 'PROBE_INVALID',
+    });
+    return;
+  }
+
+  const job: ProbeJob = {
+    requestId: command.requestId,
+    destinationHash,
+    fullDestinationName,
+    timeoutMs: command.timeoutMs,
+    probeSizeBytes: command.probeSizeBytes,
+    phase: 'findingPath',
+  };
+  probeJobs.set(job.requestId, job);
+
+  try {
+    const destinationBytes = hexToBytes(destinationHash);
+    if (node.hasPath(destinationBytes)) {
+      sendProbe(job);
+      return;
+    }
+    job.timer = setTimeout(() => failProbe(job, 'PROBE_PATH_REQUEST_TIMEOUT'), pathRequestTimeoutMs);
+    processOutput(node.requestPath(destinationBytes) as WasmOutput);
+    log('debug', 'wasm', 'RETICULUM_PATH_REQUESTED', {
+      destinationHash,
+      purpose: 'probe',
+    });
+  } catch {
+    failProbe(job, 'PROBE_PATH_REQUEST_FAILED');
+  }
+}
+
+function dropDestinationPath(command: Extract<RuntimeCommand, { type: 'dropDestinationPath' }>): void {
+  const destinationHash = normalizeDestinationHash(command.destinationHash);
+  if (!node || !destinationHash) {
+    emit({ type: 'destinationPathDropResult', requestId: command.requestId, ok: false, code: 'PATH_DROP_INVALID' });
+    return;
+  }
+  try {
+    const dropped = node.dropPath(hexToBytes(destinationHash));
+    if (dropped) {
+      queueSnapshotPersistence();
+      emitDestinationPathStatus(hexToBytes(destinationHash), false);
+      emitKnownDestinationSnapshot();
+      log('info', 'wasm', 'RETICULUM_PATH_DROPPED', { destinationHash });
+    }
+    emit({
+      type: 'destinationPathDropResult',
+      requestId: command.requestId,
+      ok: dropped,
+      ...(dropped ? {} : { code: 'PATH_NOT_FOUND' }),
+    });
+  } catch {
+    emit({ type: 'destinationPathDropResult', requestId: command.requestId, ok: false, code: 'PATH_DROP_FAILED' });
+  }
+}
+
+function sendPendingProbes(destinationHash: string): void {
+  for (const job of probeJobs.values()) {
+    if (job.destinationHash === destinationHash && job.phase === 'findingPath') sendProbe(job);
+  }
+}
+
+function sendProbe(job: ProbeJob): void {
+  if (!node || !probeJobs.has(job.requestId) || job.phase !== 'findingPath') return;
+  clearProbeTimer(job);
+  try {
+    Object.assign(job, resolveProbeRoute(
+      node.exportNetworkPersistentState(),
+      job.destinationHash,
+      configuration?.interfaces ?? [],
+      stableInterfaceId,
+    ));
+  } catch {
+    // Route presentation metadata must never prevent the probe itself.
+  }
+  const publicKey = knownDestinationPublicKeys.get(job.destinationHash);
+  if (!publicKey) {
+    failProbe(job, 'PROBE_DESTINATION_UNKNOWN');
+    return;
+  }
+
+  try {
+    const destinationBytes = hexToBytes(job.destinationHash);
+    const derivedDestination = ReticulumNode.hashFromNameAndIdentity(job.fullDestinationName, publicKey);
+    if (!equalBytes(destinationBytes, new Uint8Array(derivedDestination))) {
+      failProbe(job, 'PROBE_DESTINATION_NAME_MISMATCH');
+      return;
+    }
+
+    const output = node.sendSinglePacket(
+      destinationBytes,
+      crypto.getRandomValues(new Uint8Array(job.probeSizeBytes)),
+    ) as WasmOutput;
+    const packetHash = submittedPacketHash(output);
+    if (!packetHash) {
+      failProbe(job, 'PROBE_SUBMISSION_FAILED');
+      return;
+    }
+
+    job.phase = 'awaitingProof';
+    job.packetHash = bytesToHex(packetHash);
+    job.sentAtMs = performance.now();
+    probeJobsByPacketHash.set(job.packetHash, job);
+    job.timer = setTimeout(() => failProbe(job, 'PROBE_TIMEOUT'), job.timeoutMs);
+    processOutput(output);
+    log('info', 'wasm', 'PROBE_SENT', {
+      destinationHash: job.destinationHash,
+      fullDestinationName: job.fullDestinationName,
+      packetHash: job.packetHash,
+      bytes: job.probeSizeBytes,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    failProbe(job, /too large|TooLarge/i.test(message) ? 'PROBE_SIZE_TOO_LARGE' : 'PROBE_SUBMISSION_FAILED');
+  }
+}
+
+function submittedPacketHash(output: WasmOutput): Uint8Array | undefined {
+  for (let index = (output.events?.length ?? 0) - 1; index >= 0; index -= 1) {
+    const event = output.events?.[index];
+    if (event?.type !== 'packetSubmitted') continue;
+    const packetHash = eventBytes(event, 'packetHash');
+    if (packetHash?.byteLength) return packetHash;
+  }
+  return undefined;
+}
+
+function handleProbeDeliveryConfirmed(event: Record<string, unknown>): void {
+  const packetHash = eventBytes(event, 'packetHash');
+  if (!packetHash) return;
+  const job = probeJobsByPacketHash.get(bytesToHex(packetHash));
+  if (!job || job.sentAtMs === undefined) return;
+  const destinationBytes = hexToBytes(job.destinationHash);
+  const hops = node?.hopsTo(destinationBytes);
+  finishProbe(job, {
+    ok: true,
+    roundTripTimeMs: Math.max(0, performance.now() - job.sentAtMs),
+    ...(typeof hops === 'number' ? { hops } : {}),
+  });
+}
+
+function handleProbeDeliveryFailed(event: Record<string, unknown>): void {
+  const packetHash = eventBytes(event, 'packetHash');
+  if (!packetHash) return;
+  const job = probeJobsByPacketHash.get(bytesToHex(packetHash));
+  if (job) failProbe(job, 'PROBE_DELIVERY_FAILED');
+}
+
+function failProbe(job: ProbeJob, code: string): void {
+  finishProbe(job, { ok: false, code });
+}
+
+function finishProbe(
+  job: ProbeJob,
+  result: { ok: boolean; roundTripTimeMs?: number; hops?: number; code?: string },
+): void {
+  if (!probeJobs.delete(job.requestId)) return;
+  clearProbeTimer(job);
+  if (job.packetHash) probeJobsByPacketHash.delete(job.packetHash);
+  emit({
+    type: 'probeResult',
+    requestId: job.requestId,
+    destinationHash: job.destinationHash,
+    fullDestinationName: job.fullDestinationName,
+    probeSizeBytes: job.probeSizeBytes,
+    ...(job.viaHash ? { viaHash: job.viaHash } : {}),
+    ...(job.interfaceName ? { interfaceName: job.interfaceName } : {}),
+    ...(job.interfaceType ? { interfaceType: job.interfaceType } : {}),
+    ...result,
+  });
+  log(result.ok ? 'info' : 'warning', 'wasm', result.ok ? 'PROBE_REPLY_RECEIVED' : (result.code ?? 'PROBE_FAILED'), {
+    destinationHash: job.destinationHash,
+    ...(result.roundTripTimeMs !== undefined ? { roundTripTimeMs: result.roundTripTimeMs } : {}),
+    ...(result.hops !== undefined ? { hops: result.hops } : {}),
+    ...(job.viaHash ? { viaHash: job.viaHash } : {}),
+    ...(job.interfaceName ? { interfaceName: job.interfaceName } : {}),
+    ...(job.interfaceType ? { interfaceType: job.interfaceType } : {}),
+  });
+}
+
+function clearProbeTimer(job: ProbeJob): void {
+  if (job.timer === undefined) return;
+  clearTimeout(job.timer);
+  job.timer = undefined;
+}
+
+function clearProbeState(code: string): void {
+  for (const job of Array.from(probeJobs.values())) failProbe(job, code);
+  probeJobsByPacketHash.clear();
 }
 
 function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomadPage' }>): void {
@@ -1270,7 +1568,7 @@ function armNomadPathDiscoveryTimeout(job: NomadPageJob): void {
   clearNomadJobTimer(job);
   job.timer = setTimeout(
     () => failNomadJob(job, job.publicKey ? 'NOMAD_PATH_REQUEST_TIMEOUT' : 'NOMAD_DESTINATION_UNKNOWN'),
-    nomadPathDiscoveryTimeoutMs,
+    pathRequestTimeoutMs,
   );
 }
 
@@ -1600,7 +1898,7 @@ function armProvisioningPathTimeout(job: ProvisioningJob): void {
   clearProvisioningPathTimer(job);
   job.pathTimer = setTimeout(
     () => failProvisioningJob(job, 'PROVISIONING_PATH_REQUEST_TIMEOUT'),
-    provisioningPathDiscoveryTimeoutMs,
+    pathRequestTimeoutMs,
   );
 }
 
@@ -1832,15 +2130,26 @@ function handleWasmEvent(event: Record<string, unknown>): void {
   }
   if (event.type === 'pathFound') {
     const destinationHash = eventBytes(event, 'destinationHash');
-    if (destinationHash) emitDestinationPathStatus(destinationHash, true, eventNumber(event, 'hops'));
+    if (destinationHash) {
+      emitDestinationPathStatus(destinationHash, true, eventNumber(event, 'hops'));
+      const destinationHashHex = bytesToHex(destinationHash);
+      // Announce and path events can be part of the same WASM output. Defer
+      // sending until every event has been projected so the public identity
+      // needed to validate the full destination name is available.
+      queueMicrotask(() => sendPendingProbes(destinationHashHex));
+      queueMicrotask(emitKnownDestinationSnapshot);
+    }
   }
   if (event.type === 'pathLost') {
     const destinationHash = eventBytes(event, 'destinationHash');
     if (destinationHash) emitDestinationPathStatus(destinationHash, false);
+    queueMicrotask(emitKnownDestinationSnapshot);
   }
   if (event.type === 'resourceAdvertisementReceived') {
     handleNomadResourceAdvertisementEvent(event);
   }
+  if (event.type === 'packetDeliveryConfirmed') handleProbeDeliveryConfirmed(event);
+  if (event.type === 'deliveryFailed') handleProbeDeliveryFailed(event);
   handleChatTransferEvent(event);
   if (!identity) return;
   if (event.type === 'announceReceived') handleReceivedAnnounce(event);
@@ -2477,6 +2786,10 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
   if (!nameHash || !destinationHash) {
     log('warning', 'wasm', 'RETICULUM_ANNOUNCE_PROJECTION_INVALID');
     return;
+  }
+  if (publicKey?.byteLength === 64) {
+    knownDestinationPublicKeys.set(bytesToHex(destinationHash), new Uint8Array(publicKey));
+    emitKnownDestinationSnapshot();
   }
   const interfaceId = stableInterfaceId(eventNumber(event, 'interfaceIndex'));
   const pathHops = node?.hopsTo(destinationHash);

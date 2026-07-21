@@ -1,7 +1,15 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { blockedChatDestinations, chatMessages } from './chat-state';
-import { activeIdentity, chatInboundTransfers, nomadAnnounces, provisioningNodes, reticulumLogs, reticulumRuntime } from './runtime';
+import {
+  activeIdentity,
+  chatInboundTransfers,
+  knownDestinationHashes,
+  nomadAnnounces,
+  provisioningNodes,
+  reticulumLogs,
+  reticulumRuntime,
+} from './runtime';
 
 type RuntimeInternals = {
   cancelChatMessageDelivery(messageId: string): Promise<boolean>;
@@ -32,6 +40,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     nomadAnnounces.set([]);
     provisioningNodes.set([]);
     reticulumLogs.set([]);
+    knownDestinationHashes.set([]);
     (reticulumRuntime as unknown as RuntimeInternals).worker = undefined;
   });
 
@@ -53,6 +62,84 @@ describe('ReticulumRuntimeController chat deletion', () => {
     });
 
     await expect(pending).resolves.toBe('7'.repeat(32));
+  });
+
+  it('sends a named raw probe and resolves with proof RTT details', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '9'.repeat(32);
+
+    const pending = reticulumRuntime.probeDestination(destinationHash, 'lxmf.delivery', 12_000, 16);
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'probeDestination',
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      timeoutMs: 12_000,
+      probeSizeBytes: 16,
+    }));
+
+    await internals.handleEvent({
+      type: 'probeResult',
+      requestId: command.requestId,
+      ok: true,
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 16,
+      roundTripTimeMs: 42.5,
+      hops: 2,
+      viaHash: '8'.repeat(32),
+      interfaceName: 'Home RNode',
+      interfaceType: 'rnode',
+    });
+
+    await expect(pending).resolves.toEqual(expect.objectContaining({
+      ok: true,
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 16,
+      roundTripTimeMs: 42.5,
+      hops: 2,
+      viaHash: '8'.repeat(32),
+      interfaceName: 'Home RNode',
+      interfaceType: 'rnode',
+    }));
+  });
+
+  it('rejects invalid probes without posting to the worker', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+
+    await expect(reticulumRuntime.probeDestination('invalid', 'lxmf..delivery', 0, 501)).resolves.toEqual({
+      ok: false,
+      destinationHash: 'invalid',
+      fullDestinationName: 'lxmf..delivery',
+      probeSizeBytes: 501,
+      code: 'PROBE_INVALID',
+    });
+    expect(postMessage).not.toHaveBeenCalled();
+  });
+
+  it('drops a destination path through the worker and tracks known destination snapshots', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '3'.repeat(32);
+
+    await internals.handleEvent({ type: 'knownDestinationSnapshot', destinationHashes: [destinationHash] });
+    expect(get(knownDestinationHashes)).toEqual([destinationHash]);
+
+    const pending = reticulumRuntime.dropDestinationPath(destinationHash);
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'dropDestinationPath',
+      destinationHash,
+    }));
+
+    await internals.handleEvent({ type: 'destinationPathDropResult', requestId: command.requestId, ok: true });
+    await expect(pending).resolves.toBe(true);
   });
 
   it('does not duplicate detailed worker logs for NomadNet page failures', async () => {

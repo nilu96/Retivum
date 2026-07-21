@@ -102,7 +102,7 @@
       <div class="section-heading-row">
         <div class="section-title-with-count">
           <h2 id="status-interface-heading">{$t('status.interfaces.title')}</h2>
-          <span class="badge interface-count-badge">{$statusDetails.interfaces.length}</span>
+          <span class="badge section-count-badge">{$statusDetails.interfaces.length}</span>
         </div>
       </div>
 

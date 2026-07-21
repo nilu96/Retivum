@@ -11,6 +11,7 @@ export const reticulumnode_closeLink: (a: number, b: number, c: number) => [numb
 export const reticulumnode_connect: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
 export const reticulumnode_deregisterRequestHandler: (a: number, b: number, c: number) => number;
 export const reticulumnode_diagnosticDump: (a: number) => [number, number];
+export const reticulumnode_dropPath: (a: number, b: number, c: number) => [number, number, number];
 export const reticulumnode_exportIdentityPersistentState: (a: number) => [number, number, number];
 export const reticulumnode_exportIdentityPrivateKey: (a: number) => [number, number, number, number];
 export const reticulumnode_exportNetworkPersistentState: (a: number) => [number, number, number];
