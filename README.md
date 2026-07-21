@@ -12,7 +12,7 @@ The initial application foundation includes:
 
 - a Svelte 5, TypeScript, and Vite client-only application;
 - adaptive desktop sidebar and mobile bottom-tab navigation;
-- initial Chat, NomadNet, and Settings views;
+- Chat, NomadNet, Tools, and Settings views with Reticulum logs and Remote provisioning available from the Tools directory;
 - a bundled typed English localization catalog used by all GUI components;
 - IndexedDB-backed application preferences, NomadNet directories, and persistent heterogeneous interface definitions;
 - a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations;
@@ -29,12 +29,13 @@ The initial application foundation includes:
 - persistent identity-scoped contacts with local custom names, including announce-name prefilling;
 - persistent, identity-scoped announced and bookmarked NomadNet destinations with searchable local bookmark names;
 - live NomadNet page requests over reusable Reticulum links, bounded resource handling, Micron rendering, and same-node or announced cross-node page navigation;
+- native Reticulum provisioning for announced microReticulum management destinations, including schema-driven settings, staged save/commit, discard, reboot, and factory reset without an `rnsapid` WebSocket dependency;
 - direct/opportunistic LXMF delivery preferences plus explicitly enabled, hash-validated propagation-node routing;
 - manual and configurable automatic LXMF destination announcements, plus offline-generated interoperable LXMA address QR codes;
 - generated Capacitor 8 projects for iOS and Android using `de.nilu96.retivum`;
 - unit tests, Svelte diagnostics, and a production build.
 
-NomadNet form submission and page caching, the PWA offline cache, native secure-vault storage adapters, and signed Electron distribution packaging remain subsequent implementation slices.
+NomadNet form submission and page caching, the PWA offline cache, native secure-vault storage adapters, and signed Electron distribution packaging remain subsequent implementation slices. Remote provisioning is experimental and requires firmware that announces `rnstransport.remote.management` and authorizes the active Retivum identity.
 
 ## Development
 

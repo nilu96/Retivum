@@ -35,6 +35,7 @@ import type {
   NomadPageLoadUpdate,
   NomadRequestData,
 } from '../../domain/nomadnet';
+import type { ProvisioningNode } from '../../domain/provisioning';
 import { formatNomadAddress, nomadRequestPath, parseNomadAddress, upsertNomadAnnounce } from '../../domain/nomadnet';
 import { normalizeDestinationHash, type AppPreferences, type InterfaceConfig } from '../../domain/settings';
 import { t } from '../../i18n';
@@ -43,6 +44,7 @@ import { BrowserChatRepository } from '../database/chat-repository';
 import { BrowserNomadRepository } from '../database/nomad-repository';
 import { BrowserSettingsRepository } from '../database/settings-repository';
 import { BrowserNetworkStateRepository } from '../database/network-state-repository';
+import { BrowserProvisioningRepository } from '../database/provisioning-repository';
 import { PlatformInterfaceHost } from '../platform/interface-host';
 import type {
   ChatMessageQueueResult,
@@ -54,6 +56,7 @@ import type {
   RuntimeConfiguration,
   RuntimeEvent,
   RuntimeState,
+  ProvisioningRequestStage,
 } from './protocol';
 import {
   chatAnnounces,
@@ -84,11 +87,19 @@ export const propagationSyncActive = writable(false);
 export const nomadAnnounces = writable<NomadAnnounce[]>([]);
 export const nomadBookmarks = writable<NomadBookmark[]>([]);
 export const propagationNodeAnnounces = writable<AnnouncedPropagationNode[]>([]);
+export const provisioningNodes = writable<ProvisioningNode[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
 export const reticulumLogs = writable<ReticulumLogEntry[]>([]);
 
 export function clearReticulumLogs(): void {
   reticulumLogs.set([]);
+}
+
+export class ProvisioningRequestFailure extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    this.name = 'ProvisioningRequestFailure';
+  }
 }
 
 function appendLocalLog(
@@ -116,6 +127,7 @@ class ReticulumRuntimeController {
   private readonly nomadRepository = new BrowserNomadRepository();
   private readonly settingsRepository = new BrowserSettingsRepository();
   private readonly networkStateRepository = new BrowserNetworkStateRepository();
+  private readonly provisioningRepository = new BrowserProvisioningRepository();
   private readonly platformInterfaceHost = new PlatformInterfaceHost(
     (command) => this.post(command),
     (code, details) => appendLocalLog('debug', 'runtime', code, details),
@@ -137,21 +149,28 @@ class ReticulumRuntimeController {
     onUpdate?: (update: NomadPageLoadUpdate) => void;
   }>();
   private readonly nomadIdentityWaiters = new Map<string, (ok: boolean) => void>();
+  private readonly provisioningWaiters = new Map<string, {
+    resolve: (data: Uint8Array) => void;
+    reject: (error: ProvisioningRequestFailure) => void;
+    onUpdate?: (stage: ProvisioningRequestStage, progress?: number, dataSize?: number) => void;
+  }>();
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
     runtimeStatus.set('starting');
 
     try {
-      const [wrappingKey, identity, storedIdentities, settings, networkState] = await Promise.all([
+      const [wrappingKey, identity, storedIdentities, settings, networkState, storedProvisioningNodes] = await Promise.all([
         this.identityRepository.getOrCreateWrappingKey(),
         this.identityRepository.loadActiveIdentity(),
         this.identityRepository.loadAll(),
         this.settingsRepository.load(),
         this.networkStateRepository.load(),
+        this.provisioningRepository.loadNodes(),
       ]);
       identities.set(storedIdentities.map(identitySummary));
       propagationNodeAnnounces.set([]);
+      provisioningNodes.set(storedProvisioningNodes);
       const worker = new Worker(new URL('../../workers/reticulum.worker.ts', import.meta.url), { type: 'module' });
       this.worker = worker;
       worker.onmessage = (message: MessageEvent<RuntimeEvent>) => void this.handleEvent(message.data);
@@ -163,6 +182,8 @@ class ReticulumRuntimeController {
         this.propagationSyncWaiters.clear();
         for (const resolve of this.lxmaPeerWaiters.values()) resolve(undefined);
         this.lxmaPeerWaiters.clear();
+        for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_FAILED'));
+        this.provisioningWaiters.clear();
       };
 
       let blockedDestinationHashes: string[] = [];
@@ -671,6 +692,46 @@ class ReticulumRuntimeController {
     });
   }
 
+  async requestProvisioning(
+    provisioningNode: ProvisioningNode,
+    payload: Uint8Array,
+    safeToRetry: boolean,
+    onUpdate?: (stage: ProvisioningRequestStage, progress?: number, dataSize?: number) => void,
+    responseTimeoutMs?: number,
+  ): Promise<Uint8Array> {
+    const destinationHash = normalizeDestinationHash(provisioningNode.destinationHash);
+    if (!this.worker || !get(activeIdentity) || !destinationHash || !/^[0-9a-f]{128}$/i.test(provisioningNode.publicKey)) {
+      throw new ProvisioningRequestFailure('PROVISIONING_DESTINATION_UNKNOWN');
+    }
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve, reject) => {
+      this.provisioningWaiters.set(requestId, { resolve, reject, onUpdate });
+      this.post({
+        type: 'requestProvisioning',
+        requestId,
+        destinationHash,
+        publicKey: provisioningNode.publicKey,
+        payload: new Uint8Array(payload),
+        safeToRetry,
+        responseTimeoutMs,
+      });
+    });
+  }
+
+  cancelProvisioning(destinationHash: string, closeLink = false): void {
+    const normalizedDestination = normalizeDestinationHash(destinationHash);
+    if (this.worker && normalizedDestination) {
+      this.post({ type: 'cancelProvisioning', destinationHash: normalizedDestination, closeLink });
+    }
+  }
+
+  async setProvisioningNodeBookmarked(id: string, bookmarked: boolean): Promise<boolean> {
+    const updated = await this.provisioningRepository.setNodeBookmarked(id, bookmarked);
+    if (!updated) return false;
+    provisioningNodes.update((items) => items.map((item) => item.id === id ? updated : item));
+    return true;
+  }
+
   async deleteNomadBookmark(id: string): Promise<void> {
     await this.nomadRepository.deleteBookmark(id);
     nomadBookmarks.update((items) => items.filter((item) => item.id !== id));
@@ -812,6 +873,8 @@ class ReticulumRuntimeController {
     this.started = false;
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
+    for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
+    this.provisioningWaiters.clear();
     for (const resolve of this.nomadIdentityWaiters.values()) resolve(false);
     this.nomadIdentityWaiters.clear();
     for (const resolve of this.propagationSyncWaiters.values()) resolve(undefined);
@@ -906,6 +969,49 @@ class ReticulumRuntimeController {
       } catch {
         runtimeErrorCode.set('RUNTIME_NOMAD_DIRECTORY_PERSIST_FAILED');
       }
+      return;
+    }
+    if (event.type === 'managementAnnounce') {
+      const previousNode = get(provisioningNodes).find((item) => item.id === event.id);
+      const managementNode: ProvisioningNode = {
+        id: event.id,
+        destinationHash: event.destinationHash,
+        publicKey: event.publicKey,
+        interfaceId: event.interfaceId,
+        hops: event.hops,
+        heardAt: event.heardAt,
+        bookmarked: previousNode?.bookmarked === true,
+      };
+      try {
+        await this.provisioningRepository.saveNode(managementNode);
+        provisioningNodes.update((items) => [
+          managementNode,
+          ...items.filter((item) => item.id !== managementNode.id),
+        ].sort((left, right) => right.heardAt.localeCompare(left.heardAt)));
+      } catch {
+        appendLocalLog('error', 'persistence', 'PROVISIONING_NODE_PERSIST_FAILED', {
+          destinationHash: event.destinationHash,
+        });
+      }
+      return;
+    }
+    if (event.type === 'provisioningProgress') {
+      this.provisioningWaiters.get(event.requestId)?.onUpdate?.(
+        event.stage,
+        event.progress,
+        event.dataSize,
+      );
+      return;
+    }
+    if (event.type === 'provisioningResponse') {
+      this.provisioningWaiters.get(event.requestId)?.resolve(new Uint8Array(event.data));
+      this.provisioningWaiters.delete(event.requestId);
+      return;
+    }
+    if (event.type === 'provisioningFailed') {
+      appendLocalLog('warning', 'runtime', event.code, { requestId: event.requestId });
+      this.provisioningWaiters.get(event.requestId)?.reject(new ProvisioningRequestFailure(event.code));
+      this.provisioningWaiters.delete(event.requestId);
       return;
     }
     if (event.type === 'nomadPageLoaded') {
@@ -1306,6 +1412,7 @@ class ReticulumRuntimeController {
       ...get(chatContacts).map((item) => item.destinationHash),
       ...get(chatMessages).map(chatMessagePeerHash),
       ...get(blockedChatDestinations).map((item) => item.destinationHash),
+      ...get(provisioningNodes).map((item) => item.destinationHash),
     ]);
   }
 

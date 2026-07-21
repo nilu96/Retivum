@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { get } from 'svelte/store';
-  import { navigate, requestedSettingsSection } from '../../app/router';
+  import { requestedSettingsSection } from '../../app/router';
   import { parseIdentityFile, type IdentitySummary } from '../../domain/identity';
   import {
     defaultAppPreferences,
@@ -765,12 +765,6 @@
         <span><strong>{$t('settings.network.transport')}</strong><small>{$t('settings.network.transport.note')}</small></span>
         <input type="checkbox" role="switch" bind:checked={preferences.transportEnabled} onchange={persistPreferences} />
       </label>
-    </section>
-
-    <section class="settings-card logs-card">
-      <div class="section-icon"><Icon name="history" size={21} /></div>
-      <div><h2>{$t('settings.logs.title')}</h2><p>{$t('settings.logs.description')}</p></div>
-      <button class="button secondary compact" onclick={() => navigate('logs')}>{$t('settings.logs.open')}</button>
     </section>
 
     <section class="settings-card about-card">

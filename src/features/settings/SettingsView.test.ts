@@ -38,17 +38,16 @@ describe('SettingsView blocked destinations', () => {
     expect(screen.queryByText('4'.repeat(32))).not.toBeInTheDocument();
   });
 
-  it('places the experimental network node setting between appearance and logs', () => {
+  it('places the experimental network node setting after appearance', () => {
     render(SettingsView);
 
     const headings = screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
     const appearanceIndex = headings.indexOf('Appearance');
     const networkIndex = headings.indexOf('Network node');
-    const logsIndex = headings.indexOf('Reticulum logs');
 
     expect(appearanceIndex).toBeGreaterThanOrEqual(0);
     expect(networkIndex).toBeGreaterThan(appearanceIndex);
-    expect(logsIndex).toBeGreaterThan(networkIndex);
+    expect(headings).not.toContain('Reticulum logs');
     expect(screen.getByText('Experimental')).toBeInTheDocument();
   });
 });

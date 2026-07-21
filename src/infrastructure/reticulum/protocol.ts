@@ -4,6 +4,7 @@ import type { ReticulumLogEntry } from '../../domain/logging';
 import type { NomadPageLoadStage, NomadRequestData } from '../../domain/nomadnet';
 import type { AppPreferences, InterfaceConfig } from '../../domain/settings';
 import type { ChatAttachment } from '../../domain/chat';
+import type { ProvisioningNode } from '../../domain/provisioning';
 
 export type RuntimeState = 'starting' | 'noInterfaces' | 'connecting' | 'online' | 'offline' | 'error';
 export type InterfaceRuntimeState = 'disabled' | 'connecting' | 'online' | 'reconnecting' | 'offline' | 'error';
@@ -46,6 +47,8 @@ export interface AnnouncedPropagationNode {
   hops?: number;
   heardAt: string;
 }
+
+export type ProvisioningRequestStage = 'findingPath' | 'establishingLink' | 'identifying' | 'requesting' | 'receiving';
 
 export type RuntimeCommand =
   | {
@@ -99,6 +102,16 @@ export type RuntimeCommand =
       destinationHash: string;
     }
   | { type: 'cancelNomadPage'; destinationHash: string; closeLink?: boolean }
+  | {
+      type: 'requestProvisioning';
+      requestId: string;
+      destinationHash: string;
+      publicKey: string;
+      payload: Uint8Array;
+      safeToRetry: boolean;
+      responseTimeoutMs?: number;
+    }
+  | { type: 'cancelProvisioning'; destinationHash: string; closeLink?: boolean }
   | { type: 'queryDestinationPaths'; destinationHashes: string[] }
   | { type: 'updateIdentityDisplayName'; requestId: string; displayName: string }
   | { type: 'createIdentity'; requestId: string; metadata: NewIdentityMetadata }
@@ -227,6 +240,16 @@ export type RuntimeEvent =
     }
   | { type: 'nomadIdentityResult'; requestId: string; ok: boolean; code?: string }
   | { type: 'nomadPageFailed'; requestId: string; code: string }
+  | ({ type: 'managementAnnounce' } & ProvisioningNode)
+  | {
+      type: 'provisioningProgress';
+      requestId: string;
+      stage: ProvisioningRequestStage;
+      progress?: number;
+      dataSize?: number;
+    }
+  | { type: 'provisioningResponse'; requestId: string; data: Uint8Array }
+  | { type: 'provisioningFailed'; requestId: string; code: string }
   | { type: 'destinationPathStatuses'; statuses: DestinationPathStatus[] }
   | {
       type: 'chatAnnounce';

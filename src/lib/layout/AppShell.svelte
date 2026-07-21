@@ -20,8 +20,14 @@
   const navigation: Array<{ route: AppRoute; label: MessageKey; icon: IconName }> = [
     { route: 'chat', label: 'nav.chat', icon: 'chat' },
     { route: 'nomadnet', label: 'nav.nomadnet', icon: 'nomadnet' },
+    { route: 'tools', label: 'nav.tools', icon: 'tools' },
     { route: 'settings', label: 'nav.settings', icon: 'settings' },
   ];
+
+  function navigationItemIsActive(item: (typeof navigation)[number]): boolean {
+    return current === item.route
+      || ((current === 'logs' || current === 'provisioning') && item.route === 'tools');
+  }
 
   const runtimeLabels: Record<typeof $runtimeStatus, MessageKey> = {
     starting: 'status.starting',
@@ -123,8 +129,8 @@
     <nav class="desktop-navigation">
       {#each navigation as item}
         <button
-          class:active={current === item.route || (current === 'logs' && item.route === 'settings')}
-          aria-current={current === item.route || (current === 'logs' && item.route === 'settings') ? 'page' : undefined}
+          class:active={navigationItemIsActive(item)}
+          aria-current={navigationItemIsActive(item) ? 'page' : undefined}
           aria-label={navigationLabel(item)}
           onclick={() => navigate(item.route)}
         >
@@ -228,8 +234,8 @@
   <nav class="bottom-navigation" aria-label={$t('nav.primary')}>
     {#each navigation as item}
       <button
-        class:active={current === item.route || (current === 'logs' && item.route === 'settings')}
-        aria-current={current === item.route || (current === 'logs' && item.route === 'settings') ? 'page' : undefined}
+        class:active={navigationItemIsActive(item)}
+        aria-current={navigationItemIsActive(item) ? 'page' : undefined}
         aria-label={navigationLabel(item)}
         onclick={() => navigate(item.route)}
       >

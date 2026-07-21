@@ -659,6 +659,14 @@ The existing WASM artifact proves that generic requests/resources are possible; 
 
 Current implementation note: Retivum requests `/page/index.mu` for a destination's root address, establishes and reuses destination links in the Reticulum worker, accepts page resources up to 1 MiB, unwraps the Reticulum MessagePack response value, decodes its binary or string payload as UTF-8, and renders Micron with the installed `micron-parser` package. Rendered links are intercepted by an application policy layer: same-node links resolve against the current destination, and cross-node links require a previously heard announce containing that destination's public key. Bookmarks persist the complete normalized page address, including Micron request parameters, and may opt into sending `LINKIDENTIFY` over the established link immediately before the page request. Browser navigation and script execution are not exposed. The NomadNet view remains mounted while another primary tab is visible, preserving the active loading state, loaded page, in-memory page history, and scrollable browser DOM; the worker can therefore finish an active request in the background. Established links remain live only in worker memory and are not serialized across application or runtime restarts. Micron request-field/form submission and persistent page caching remain future work.
 
+### 9.4 Remote node provisioning
+
+Retivum can provision compatible microReticulum nodes through Reticulum itself instead of requiring the firmware web console's `rnsapid` WebSocket adapter. The worker recognizes verified announces for `rnstransport.remote.management`, persists the destination hash/public key and latest route observation globally, and opens an ordinary Reticulum link to the management destination. It sends `LINKIDENTIFY` before requesting `/provision`, because the firmware management destination uses an identity allow-list.
+
+The application-level provisioning codec mirrors the firmware protocol: MessagePack request/response envelopes, optional heatshrink-compressed payloads, schema discovery, state reads, staged state updates, commit/discard, reboot, and factory reset. KISS and WebSocket framing from the standalone web console are deliberately absent; configured Retivum interfaces already carry the resulting Reticulum packets. This feature consumes Leviculum's existing generic path, link, identity, request, response, and Resource APIs and does not add provisioning behavior to Reticulum Core or LXMF.
+
+Provisioning reads may recover once after an already-established link breaks. Mutating operations are never replayed automatically because the current firmware protocol has no operation ID or duplicate-request cache that would make such replay provably idempotent. A 20-second path-discovery timeout, a 120-second overall operation deadline, and a 4 MiB Resource limit bound stalled or malicious peers. The active provisioning view closes its link when leaving the view; discovered nodes and compatible schemas remain cached for later sessions.
+
 ## 10. Settings information architecture
 
 Settings uses shared `SettingsSection`, `FormField`, `Toggle`, `Select`, `NumberField`, `InlineNotice`, and `ConfirmDialog` components.
@@ -671,6 +679,8 @@ Settings uses shared `SettingsSection`, `FormField`, `Toggle`, `Select`, `Number
 | LXMF | Default sending method (direct, opportunistic, or propagated), propagation fallback opt-in, optional preferred node, inbound stamp cost, and synchronization/announcement intervals |
 | Storage | Usage, persistence status, encrypted backup/restore, clear cache/history, and separately confirmed clearing of heard-announce history |
 | Appearance | System/light/dark theme, language foundation (system/English initially), density where appropriate, reduced motion follows OS |
+| Tools | Primary navigation directory for Reticulum logs and Remote provisioning plus planned Path table management, Probing, and Status details tools |
+| Remote provisioning | Implemented tool with an experimental directory and schema-driven editor for authorized `rnstransport.remote.management` destinations |
 | Diagnostics | Version/build/WASM provenance, memory report, redacted logs, export support bundle |
 | About | Licenses, privacy statement, source/project links |
 
@@ -684,9 +694,9 @@ Configuration editing uses a draft. Save validates it, persists it as pending, a
 
 Breakpoints are content-driven and expressed as shared CSS custom media/tokens, with these initial targets:
 
-Primary navigation always contains **Chat**, **NomadNet**, and **Settings**. Desktop uses a persistent left sidebar: compact icon-and-tooltip navigation at medium widths and an expanded icon-and-label sidebar on wide screens. Mobile uses a fixed bottom tab bar with an icon and visible text label for every destination. The tab bar respects the bottom safe-area inset and mobile keyboard/viewport changes; it is not duplicated inside feature pages. Both variants consume the same route metadata and navigation component model, so changing layout never resets the active route or chat overview scope.
+Primary navigation always contains **Chat**, **NomadNet**, **Tools**, and **Settings**. Tools is the entry point for Remote provisioning and future Reticulum inspection/diagnostic utilities. Desktop uses a persistent left sidebar: compact icon-and-tooltip navigation at medium widths and an expanded icon-and-label sidebar on wide screens. Mobile uses a fixed bottom tab bar with an icon and visible text label for every destination. The tab bar respects the bottom safe-area inset and mobile keyboard/viewport changes; it is not duplicated inside feature pages. Both variants consume the same route metadata and navigation component model, so changing layout never resets the active route or chat overview scope.
 
-| Width | Navigation | Chat | NomadNet/settings |
+| Width | Navigation | Chat | NomadNet/tools/settings |
 | --- | --- | --- | --- |
 | `< 700px` | Fixed bottom tab bar; icons plus labels; safe-area aware | One pane: scoped overview or conversation | Full-screen single pane |
 | `700–1099px` | Persistent compact left sidebar | Scoped overview + conversation where space permits | Sidebar + content |
@@ -722,7 +732,7 @@ Mobile chat overview:
 │ Recent message preview…      │
 │ Bob             No messages  │
 ├──────────────────────────────┤
-│ Chat     NomadNet   Settings │
+│ Chat   NomadNet   Tools   Settings │
 └──────────────────────────────┘
 ```
 
@@ -738,7 +748,7 @@ Mobile conversation:
 ├──────────────────────────────┤
 │ Message…              Send   │
 ├──────────────────────────────┤
-│ Chat     NomadNet   Settings │
+│ Chat   NomadNet   Tools   Settings │
 └──────────────────────────────┘
 ```
 
@@ -853,6 +863,8 @@ Use Svelte context for app-scoped service injection and small rune/store modules
 | `nomadBookmarks` | `identityId`, destination/path and an optional editable local user label used for display and search |
 | `nomadHistory` | `identityId`, bounded navigation history |
 | `nomadCache` | `identityId`, bounded raw response, parsed version, validation metadata |
+| `provisioningNodes` | Global management-destination hash/public key, last receiving interface/hops, and last-heard time; independent of the active identity |
+| `provisioningSchemas` | Global bounded cache of parsed provisioning schemas keyed by the advertised schema version/hash |
 | `networkRuntimeState` | One encrypted global WASM checkpoint containing known identities, known ratchets, paths, verified raw known-destination announces and their last-heard/use/retain metadata |
 | `identityRuntimeSnapshots` | One encrypted, serialized, versioned WASM/LXMF snapshot envelope plus previous-known-good envelope per identity |
 | `diagnosticLog` | Bounded/redacted local ring buffer, opt-in export only |
@@ -1271,7 +1283,7 @@ Exit: signed release candidates satisfy the acceptance criteria below.
 | D-12 | Data encryption scope | **Decided by user:** messages, contacts, announces, settings, and Nomad cache remain plaintext in the v1 app sandbox/database; private identity state is encrypted |
 | D-13 | Electron close behavior | Proposed: Close hides to tray/menu while transport is enabled; otherwise Close exits normally after a snapshot |
 | D-14 | Linux vault fallback | **Derived from the accepted no-passphrase/encrypted-identity requirements:** fail closed for durable identity state when no approved secure vault is available; never use Electron `basic_text` as protected storage |
-| D-15 | Primary navigation | **Decided by user:** persistent left sidebar on desktop and bottom tab bar on mobile, sharing the same Chat/NomadNet/Settings route model |
+| D-15 | Primary navigation | **Revised by user:** persistent left sidebar on desktop and bottom tab bar on mobile, sharing the same Chat/NomadNet/Tools/Settings route model |
 | D-16 | Product name | **Decided by user:** **Retivum — A Reticulum Messenger** |
 | D-17 | First-run network defaults | **Decided by user:** generate a default identity, create no interfaces, and persist every later interface definition/enabled state across restart |
 | D-18 | Identity activation model | **Decided by user:** manage multiple stored identities with exactly one active identity/node/LXMF router at a time; others remain durable and inactive until selected |
@@ -1294,7 +1306,7 @@ Exit: signed release candidates satisfy the acceptance criteria below.
 | ADR-007 | Proposed | Hash routing and fully local production assets |
 | ADR-008 | Proposed | Parse NomadNet/Micron into a bounded AST; never inject remote HTML/script |
 | ADR-009 | Partially implemented | Electron uses a sandboxed local renderer and narrow validated app-owned IPC for TCP, UDP, and device access; secure custom protocol, `safeStorage`, packaging, and background/quit lifecycle remain release work |
-| ADR-010 | **Accepted by user** | Primary navigation is a persistent desktop left sidebar and a mobile bottom tab bar, both backed by shared route metadata and components |
+| ADR-010 | **Accepted by user, revised** | Primary navigation is a persistent desktop left sidebar and a mobile bottom tab bar, both backed by shared Chat/NomadNet/Tools/Settings route metadata and components |
 | ADR-011 | **Accepted by user** | Product name is **Retivum — A Reticulum Messenger** |
 | ADR-012 | **Accepted by user, revised** | First run has one generated default identity and no interfaces; WebSocket, capability-gated RNode, native TCP, and native UDP records persist with their enabled state across restarts |
 | ADR-013 | **Accepted by user** | Retivum stores multiple identities but runs exactly one active identity/node/LXMF router at a time; activation is a transactional controlled restart with identity-scoped data and outboxes |

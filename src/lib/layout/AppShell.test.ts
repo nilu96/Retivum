@@ -23,6 +23,25 @@ describe('AppShell Chat unread indicator', () => {
     expect(screen.getAllByText('2')).toHaveLength(2);
   });
 
+  it('keeps provisioning grouped under Tools in desktop and mobile navigation', () => {
+    render(AppShell, { current: 'provisioning', children: emptyChildren });
+
+    const toolsButtons = screen.getAllByRole('button', { name: 'Tools' });
+    const settingsButtons = screen.getAllByRole('button', { name: 'Settings' });
+    expect(toolsButtons).toHaveLength(2);
+    expect(toolsButtons.every((button) => button.classList.contains('active'))).toBe(true);
+    expect(settingsButtons.every((button) => !button.classList.contains('active'))).toBe(true);
+  });
+
+  it('keeps Reticulum logs grouped under Tools in desktop and mobile navigation', () => {
+    render(AppShell, { current: 'logs', children: emptyChildren });
+
+    const toolsButtons = screen.getAllByRole('button', { name: 'Tools' });
+    const settingsButtons = screen.getAllByRole('button', { name: 'Settings' });
+    expect(toolsButtons.every((button) => button.classList.contains('active'))).toBe(true);
+    expect(settingsButtons.every((button) => !button.classList.contains('active'))).toBe(true);
+  });
+
   it('shows the live network state beside the mobile announce action', async () => {
     render(AppShell, { current: 'chat', children: emptyChildren });
 

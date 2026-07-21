@@ -3,6 +3,7 @@
     | 'chat'
     | 'nomadnet'
     | 'settings'
+    | 'tools'
     | 'search'
     | 'plus'
     | 'arrow-left'
@@ -16,6 +17,7 @@
     | 'block'
     | 'interface'
     | 'radio'
+    | 'probe'
     | 'send'
     | 'bookmark'
     | 'history'
@@ -64,6 +66,10 @@
   {:else if name === 'settings'}
     <circle cx="12" cy="12" r="3" />
     <path d="M19 13.5v-3l-2-.7a7 7 0 0 0-.8-1.8l.9-1.9L15 4l-1.9.9a7 7 0 0 0-1.8-.8l-.8-2h-3l-.7 2a7 7 0 0 0-1.8.8L3.1 4 1 6.1 1.9 8a7 7 0 0 0-.8 1.8l-2 .7v3l2 .7A7 7 0 0 0 1.9 16L1 17.9 3.1 20l1.9-.9a7 7 0 0 0 1.8.8l.7 2h3l.8-2a7 7 0 0 0 1.8-.8l1.9.9 2.1-2.1-.9-1.9a7 7 0 0 0 .8-1.8l2-.7Z" transform="translate(3.81 1.08) scale(.91)" />
+  {:else if name === 'tools'}
+    <path d="M4 8h16v11H4V8Z" />
+    <path d="M9 8V5h6v3M4 12h16" />
+    <path d="M10 12v2h4v-2" />
   {:else if name === 'search'}
     <circle cx="10.5" cy="10.5" r="6.5" />
     <path d="m15.5 15.5 5 5" />
@@ -111,6 +117,10 @@
   {:else if name === 'radio'}
     <path d="M5 19 19 5M8 16h8M6 12a6 6 0 0 0 6 6m0-12a6 6 0 0 1 6 6" />
     <circle cx="12" cy="12" r="2" />
+  {:else if name === 'probe'}
+    <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="5.25" />
+    <circle cx="12" cy="12" r="9" />
   {:else if name === 'send'}
     <path d="m3 11 18-8-8 18-2.5-7.5L3 11Z" />
     <path d="M10.5 13.5 21 3" />

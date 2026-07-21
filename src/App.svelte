@@ -4,8 +4,10 @@
   import AppShell from './lib/layout/AppShell.svelte';
   import ChatView from './features/chat/ChatView.svelte';
   import NomadNetView from './features/nomadnet/NomadNetView.svelte';
+  import ToolsView from './features/tools/ToolsView.svelte';
   import SettingsView from './features/settings/SettingsView.svelte';
   import ReticulumLogsView from './features/settings/ReticulumLogsView.svelte';
+  import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
   import DesktopBluetoothPairing from './lib/components/DesktopBluetoothPairing.svelte';
   import ToastViewport from './lib/components/ToastViewport.svelte';
@@ -52,6 +54,10 @@
     <ReticulumLogsView />
   {:else if $route === 'settings'}
     <SettingsView />
+  {:else if $route === 'tools'}
+    <ToolsView />
+  {:else if $route === 'provisioning'}
+    <ProvisioningView />
   {/if}
   <div class="persistent-route-view" hidden={$route !== 'nomadnet'}>
     <NomadNetView />

@@ -80,7 +80,10 @@ const reconnectMaximumDelayMs = 30_000;
 const reconnectMultiplier = 2;
 const reconnectJitter = 0.2;
 const maxNomadPageBytes = 1024 * 1024;
+const maxProvisioningResponseBytes = 4 * 1024 * 1024;
 const nomadPathDiscoveryTimeoutMs = 20_000;
+const provisioningPathDiscoveryTimeoutMs = 20_000;
+const provisioningRequestDeadlineMs = 120_000;
 const maxNomadLinkRecoveryAttempts = 1;
 const maxCachedNomadLinks = 32;
 const maxPendingInboundResourceAdvertisements = 64;
@@ -110,6 +113,27 @@ interface NomadLinkState {
   lastUsedAt: number;
 }
 
+interface ProvisioningJob {
+  requestId: string;
+  destinationHash: string;
+  publicKey: string;
+  payload: Uint8Array;
+  safeToRetry: boolean;
+  responseTimeoutMs?: number;
+  recoveryAttempts: number;
+  linkId?: string;
+  pathTimer?: ReturnType<typeof setTimeout>;
+  deadlineTimer?: ReturnType<typeof setTimeout>;
+}
+
+interface ProvisioningLinkState {
+  destinationHash: string;
+  linkId: Uint8Array;
+  established: boolean;
+  everEstablished: boolean;
+  identified: boolean;
+}
+
 let node: ReticulumNode | undefined;
 let wrappingKey: CryptoKey | undefined;
 let privateKey: Uint8Array | undefined;
@@ -119,6 +143,7 @@ let configuration: RuntimeConfiguration | undefined;
 let blockedDestinationHashes: string[] = [];
 let contactDestinationHashes = new Set<string>();
 let nomadNodeNameHash: Uint8Array | undefined;
+let managementNodeNameHash: Uint8Array | undefined;
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
 let autoAnnounceTimer: ReturnType<typeof setTimeout> | undefined;
 let automaticPropagationSyncTimer: ReturnType<typeof setTimeout> | undefined;
@@ -144,6 +169,10 @@ const nomadPendingJobs = new Map<string, NomadPageJob[]>();
 const nomadRequests = new Map<string, NomadPageJob>();
 const nomadLinksByDestination = new Map<string, NomadLinkState>();
 const nomadLinksById = new Map<string, NomadLinkState>();
+const provisioningPendingJobs = new Map<string, ProvisioningJob[]>();
+const provisioningRequests = new Map<string, ProvisioningJob>();
+const provisioningLinksByDestination = new Map<string, ProvisioningLinkState>();
+const provisioningLinksById = new Map<string, ProvisioningLinkState>();
 const lxmfOutboundStatusCache = new Map<string, string>();
 const lxmfDeliveryLinks = new Set<string>();
 const lxmfLinkDestinations = new Map<string, string>();
@@ -214,6 +243,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       emit({ type: 'runtimeStatus', state: 'starting' });
       await initWasm();
       nomadNodeNameHash = ReticulumNode.fullHash(new TextEncoder().encode('nomadnetwork.node')).slice(0, 10);
+      managementNodeNameHash = ReticulumNode.fullHash(new TextEncoder().encode('rnstransport.remote.management')).slice(0, 10);
 
       if (command.identity) {
         identity = command.identity;
@@ -316,6 +346,16 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
 
     if (command.type === 'cancelNomadPage') {
       cancelNomadPage(command.destinationHash, command.closeLink ?? false);
+      return;
+    }
+
+    if (command.type === 'requestProvisioning') {
+      requestProvisioning(command);
+      return;
+    }
+
+    if (command.type === 'cancelProvisioning') {
+      cancelProvisioning(command.destinationHash, command.closeLink ?? false);
       return;
     }
 
@@ -617,6 +657,7 @@ function cleanupRuntime(): void {
   automaticPropagationSyncPending = false;
   finishPropagationSync(false, 'LXMF_PROPAGATION_SYNC_RUNTIME_RESET');
   clearNomadState('NOMAD_RUNTIME_RESET');
+  clearProvisioningState('PROVISIONING_RUNTIME_RESET');
   lxmfOutboundStatusCache.clear();
   lxmfDeliveryLinks.clear();
   lxmfLinkDestinations.clear();
@@ -1117,10 +1158,7 @@ function beginNomadLink(job: NomadPageJob): void {
     emitNomadPageProgress(pending, 'establishingLink');
   }
   try {
-    const result = node.connect(
-      hexToBytes(job.destinationHash),
-      hexToBytes(job.publicKey).slice(32, 64),
-    ) as { linkId: Uint8Array; output: WasmOutput };
+    const result = connectReticulumDestination(job.destinationHash, job.publicKey);
     const state: NomadLinkState = {
       destinationHash: job.destinationHash,
       linkId: new Uint8Array(result.linkId),
@@ -1138,6 +1176,17 @@ function beginNomadLink(job: NomadPageJob): void {
   } catch {
     failNomadDestination(job.destinationHash, 'NOMAD_LINK_FAILED');
   }
+}
+
+function connectReticulumDestination(
+  destinationHash: string,
+  publicKey: string,
+): { linkId: Uint8Array; output: WasmOutput } {
+  if (!node) throw new Error('RUNTIME_NOT_READY');
+  return node.connect(
+    hexToBytes(destinationHash),
+    hexToBytes(publicKey).slice(32, 64),
+  ) as { linkId: Uint8Array; output: WasmOutput };
 }
 
 function sendNomadRequest(link: NomadLinkState, job: NomadPageJob): void {
@@ -1370,6 +1419,239 @@ function clearNomadState(code: string): void {
   }
 }
 
+function requestProvisioning(command: Extract<RuntimeCommand, { type: 'requestProvisioning' }>): void {
+  const destinationHash = normalizeDestinationHash(command.destinationHash);
+  const publicKey = command.publicKey.trim().toLowerCase();
+  if (!node || !identity || !destinationHash || !/^[0-9a-f]{128}$/.test(publicKey) || command.payload.byteLength === 0) {
+    emit({ type: 'provisioningFailed', requestId: command.requestId, code: 'PROVISIONING_DESTINATION_UNKNOWN' });
+    return;
+  }
+  const job: ProvisioningJob = {
+    requestId: command.requestId,
+    destinationHash,
+    publicKey,
+    payload: new Uint8Array(command.payload),
+    safeToRetry: command.safeToRetry,
+    responseTimeoutMs: command.responseTimeoutMs,
+    recoveryAttempts: 0,
+  };
+  armProvisioningDeadline(job);
+  const link = provisioningLinksByDestination.get(destinationHash);
+  if (link?.established && link.identified) {
+    sendProvisioningRequest(link, job);
+    return;
+  }
+  const pending = provisioningPendingJobs.get(destinationHash) ?? [];
+  pending.push(job);
+  provisioningPendingJobs.set(destinationHash, pending);
+  if (link) {
+    emitProvisioningProgress(job, link.established ? 'identifying' : 'establishingLink');
+    return;
+  }
+  try {
+    const destinationBytes = hexToBytes(destinationHash);
+    if (node.hasPath(destinationBytes)) beginProvisioningLink(job);
+    else {
+      emitProvisioningProgress(job, 'findingPath');
+      armProvisioningPathTimeout(job);
+      processOutput(node.requestPath(destinationBytes) as WasmOutput);
+      log('debug', 'wasm', 'RETICULUM_PATH_REQUESTED', {
+        destinationHash,
+        purpose: 'provisioning',
+        recoveryAttempt: 0,
+      });
+    }
+  } catch {
+    failProvisioningDestination(destinationHash, 'PROVISIONING_PATH_REQUEST_FAILED');
+  }
+}
+
+function beginProvisioningLink(job: ProvisioningJob): void {
+  if (!node || provisioningLinksByDestination.has(job.destinationHash)) return;
+  for (const pending of provisioningPendingJobs.get(job.destinationHash) ?? []) {
+    clearProvisioningPathTimer(pending);
+    emitProvisioningProgress(pending, 'establishingLink');
+  }
+  try {
+    const result = connectReticulumDestination(job.destinationHash, job.publicKey);
+    const link: ProvisioningLinkState = {
+      destinationHash: job.destinationHash,
+      linkId: new Uint8Array(result.linkId),
+      established: false,
+      everEstablished: false,
+      identified: false,
+    };
+    provisioningLinksByDestination.set(link.destinationHash, link);
+    provisioningLinksById.set(bytesToHex(link.linkId), link);
+    processOutput(result.output);
+    log('debug', 'wasm', 'PROVISIONING_LINK_ESTABLISHING', {
+      destinationHash: link.destinationHash,
+      linkId: bytesToHex(link.linkId),
+    });
+  } catch {
+    failProvisioningDestination(job.destinationHash, 'PROVISIONING_LINK_FAILED');
+  }
+}
+
+function sendProvisioningRequest(link: ProvisioningLinkState, job: ProvisioningJob): void {
+  if (!node) return failProvisioningJob(job, 'PROVISIONING_RUNTIME_UNAVAILABLE');
+  clearProvisioningPathTimer(job);
+  try {
+    const result = node.sendRequest(link.linkId, '/provision', job.payload, undefined) as {
+      hash: Uint8Array;
+      output: WasmOutput;
+    };
+    const requestHash = bytesToHex(new Uint8Array(result.hash));
+    job.linkId = bytesToHex(link.linkId);
+    provisioningRequests.set(requestHash, job);
+    if (job.responseTimeoutMs !== undefined) {
+      job.pathTimer = setTimeout(
+        () => failProvisioningJob(job, 'PROVISIONING_REQUEST_TIMEOUT'),
+        Math.max(1_000, Math.min(job.responseTimeoutMs, provisioningRequestDeadlineMs)),
+      );
+    }
+    processOutput(result.output);
+    emitProvisioningProgress(job, 'requesting');
+    log('info', 'wasm', 'PROVISIONING_REQUEST_SENT', {
+      destinationHash: job.destinationHash,
+      linkId: job.linkId,
+      requestHash,
+      bytes: job.payload.byteLength,
+      recoveryAttempt: job.recoveryAttempts,
+    });
+  } catch {
+    failProvisioningJob(job, 'PROVISIONING_REQUEST_FAILED');
+  }
+}
+
+function cancelProvisioning(destination: string, closeLink: boolean): void {
+  const destinationHash = normalizeDestinationHash(destination);
+  if (!destinationHash) return;
+  const jobs = provisioningJobsForDestination(destinationHash);
+  for (const job of jobs) failProvisioningJob(job, 'PROVISIONING_CANCELLED');
+  const link = provisioningLinksByDestination.get(destinationHash);
+  if (link && closeLink) retireProvisioningLink(destinationHash, bytesToHex(link.linkId));
+  else if (link && node) {
+    try { processOutput(node.rejectResource(link.linkId) as WasmOutput); } catch { /* no pending Resource */ }
+  }
+}
+
+function emitProvisioningProgress(
+  job: ProvisioningJob,
+  stage: Extract<RuntimeEvent, { type: 'provisioningProgress' }>['stage'],
+  details: { progress?: number; dataSize?: number } = {},
+): void {
+  emit({ type: 'provisioningProgress', requestId: job.requestId, stage, ...details });
+}
+
+function armProvisioningPathTimeout(job: ProvisioningJob): void {
+  clearProvisioningPathTimer(job);
+  job.pathTimer = setTimeout(
+    () => failProvisioningJob(job, 'PROVISIONING_PATH_REQUEST_TIMEOUT'),
+    provisioningPathDiscoveryTimeoutMs,
+  );
+}
+
+function armProvisioningDeadline(job: ProvisioningJob): void {
+  job.deadlineTimer = setTimeout(() => {
+    failProvisioningJob(job, 'PROVISIONING_REQUEST_TIMEOUT');
+    const link = provisioningLinksByDestination.get(job.destinationHash);
+    if (link && !provisioningDestinationHasJobs(job.destinationHash)) {
+      retireProvisioningLink(job.destinationHash, bytesToHex(link.linkId));
+    }
+  }, provisioningRequestDeadlineMs);
+}
+
+function clearProvisioningPathTimer(job: ProvisioningJob): void {
+  if (job.pathTimer === undefined) return;
+  clearTimeout(job.pathTimer);
+  job.pathTimer = undefined;
+}
+
+function clearProvisioningTimers(job: ProvisioningJob): void {
+  clearProvisioningPathTimer(job);
+  if (job.deadlineTimer !== undefined) clearTimeout(job.deadlineTimer);
+  job.deadlineTimer = undefined;
+}
+
+function removeProvisioningJob(job: ProvisioningJob): void {
+  for (const [destinationHash, jobs] of provisioningPendingJobs) {
+    const remaining = jobs.filter((candidate) => candidate !== job);
+    if (remaining.length) provisioningPendingJobs.set(destinationHash, remaining);
+    else provisioningPendingJobs.delete(destinationHash);
+  }
+  for (const [requestHash, candidate] of provisioningRequests) {
+    if (candidate === job) provisioningRequests.delete(requestHash);
+  }
+}
+
+function provisioningJobsForDestination(destinationHash: string): Set<ProvisioningJob> {
+  const jobs = new Set(provisioningPendingJobs.get(destinationHash) ?? []);
+  for (const job of provisioningRequests.values()) if (job.destinationHash === destinationHash) jobs.add(job);
+  return jobs;
+}
+
+function provisioningDestinationHasJobs(destinationHash: string): boolean {
+  return provisioningJobsForDestination(destinationHash).size > 0;
+}
+
+function failProvisioningJob(job: ProvisioningJob, code: string): void {
+  clearProvisioningTimers(job);
+  removeProvisioningJob(job);
+  emit({ type: 'provisioningFailed', requestId: job.requestId, code });
+  log('warning', 'wasm', code, { destinationHash: job.destinationHash });
+}
+
+function failProvisioningDestination(destinationHash: string, code: string): void {
+  for (const job of provisioningJobsForDestination(destinationHash)) failProvisioningJob(job, code);
+}
+
+function retireProvisioningLink(destinationHash: string, expectedLinkId?: string): void {
+  const link = provisioningLinksByDestination.get(destinationHash);
+  if (!link || (expectedLinkId && bytesToHex(link.linkId) !== expectedLinkId)) return;
+  provisioningLinksByDestination.delete(destinationHash);
+  provisioningLinksById.delete(bytesToHex(link.linkId));
+  try { processOutput(node?.closeLink(link.linkId) as WasmOutput | undefined); } catch { /* already closed */ }
+}
+
+function recoverProvisioningJob(job: ProvisioningJob): boolean {
+  if (!node || !job.safeToRetry || job.recoveryAttempts >= 1) return false;
+  clearProvisioningPathTimer(job);
+  removeProvisioningJob(job);
+  retireProvisioningLink(job.destinationHash, job.linkId);
+  job.recoveryAttempts += 1;
+  const pending = provisioningPendingJobs.get(job.destinationHash) ?? [];
+  pending.push(job);
+  provisioningPendingJobs.set(job.destinationHash, pending);
+  try {
+    const destinationBytes = hexToBytes(job.destinationHash);
+    emitProvisioningProgress(job, 'findingPath');
+    armProvisioningPathTimeout(job);
+    processOutput(node.requestPath(destinationBytes) as WasmOutput);
+    log('warning', 'wasm', 'PROVISIONING_READ_RECOVERY_STARTED', {
+      destinationHash: job.destinationHash,
+      attempt: job.recoveryAttempts,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearProvisioningState(code: string): void {
+  const jobs = new Set<ProvisioningJob>();
+  for (const pending of provisioningPendingJobs.values()) pending.forEach((job) => jobs.add(job));
+  for (const job of provisioningRequests.values()) jobs.add(job);
+  provisioningPendingJobs.clear();
+  provisioningRequests.clear();
+  provisioningLinksByDestination.clear();
+  provisioningLinksById.clear();
+  for (const job of jobs) {
+    clearProvisioningTimers(job);
+    emit({ type: 'provisioningFailed', requestId: job.requestId, code });
+  }
+}
+
 function scheduleAutomaticAnnounce(minimumDelayMs = 0): void {
   if (autoAnnounceTimer !== undefined) clearTimeout(autoAnnounceTimer);
   autoAnnounceTimer = undefined;
@@ -1508,16 +1790,25 @@ function handleWasmEvent(event: Record<string, unknown>): void {
   if (event.type === 'lxmfPropagationSyncState') handlePropagationSyncState(event);
   if (event.type === 'lxmfPropagationSyncComplete') handlePropagationSyncComplete(event);
   if (event.type === 'pathFound') handleNomadPathFound(event);
+  if (event.type === 'pathFound') handleProvisioningPathFound(event);
   if (event.type === 'linkEstablished') handleNomadLinkEstablished(event);
+  if (event.type === 'linkEstablished') handleProvisioningLinkEstablished(event);
   if (event.type === 'linkClosed') handleNomadLinkClosed(event);
+  if (event.type === 'linkClosed') handleProvisioningLinkClosed(event);
   if (event.type === 'linkStale') handleNomadLinkStale(event);
+  if (event.type === 'linkStale') handleProvisioningLinkStale(event);
   if (event.type === 'linkRecovered') handleNomadLinkRecovered(event);
+  if (event.type === 'linkRecovered') handleProvisioningLinkRecovered(event);
   if (event.type === 'resourceAdvertised') handleNomadResourceAdvertised(event);
+  if (event.type === 'resourceAdvertised') handleProvisioningResourceAdvertised(event);
   if (event.type === 'resourceTransferStarted' || event.type === 'resourceProgress') {
     handleNomadResourceProgress(event);
+    handleProvisioningResourceProgress(event);
   }
   if (event.type === 'responseReceived') handleNomadResponse(event);
+  if (event.type === 'responseReceived') handleProvisioningResponse(event);
   if (event.type === 'requestTimedOut') handleNomadRequestTimeout(event);
+  if (event.type === 'requestTimedOut') handleProvisioningRequestTimeout(event);
 }
 
 function handleChatTransferEvent(event: Record<string, unknown>): void {
@@ -1755,7 +2046,6 @@ function handleNomadLinkEstablished(event: Record<string, unknown>): void {
   if (!link) return;
   link.established = true;
   link.everEstablished = true;
-  link.lastUsedAt = Date.now();
   const jobs = nomadPendingJobs.get(link.destinationHash) ?? [];
   nomadPendingJobs.delete(link.destinationHash);
   for (const job of jobs) sendNomadRequest(link, job);
@@ -1776,7 +2066,6 @@ function handleNomadLinkRecovered(event: Record<string, unknown>): void {
   if (!link) return;
   link.established = true;
   link.everEstablished = true;
-  link.lastUsedAt = Date.now();
 }
 
 function handleNomadLinkClosed(event: Record<string, unknown>): void {
@@ -1919,6 +2208,139 @@ function handleNomadRequestTimeout(event: Record<string, unknown>): void {
   failNomadJob(job, 'NOMAD_REQUEST_TIMEOUT');
 }
 
+function handleProvisioningPathFound(event: Record<string, unknown>): void {
+  const destinationHash = eventBytes(event, 'destinationHash');
+  if (!destinationHash) return;
+  const pending = provisioningPendingJobs.get(bytesToHex(destinationHash));
+  if (pending?.[0]) beginProvisioningLink(pending[0]);
+}
+
+function handleProvisioningLinkEstablished(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (!node || !linkId) return;
+  const link = provisioningLinksById.get(bytesToHex(linkId));
+  if (!link) return;
+  link.established = true;
+  link.everEstablished = true;
+  const jobs = provisioningPendingJobs.get(link.destinationHash) ?? [];
+  for (const job of jobs) emitProvisioningProgress(job, 'identifying');
+  try {
+    processOutput(node.identifyLink(link.linkId) as WasmOutput);
+    link.identified = true;
+  } catch {
+    for (const job of jobs) failProvisioningJob(job, 'PROVISIONING_IDENTIFY_FAILED');
+    retireProvisioningLink(link.destinationHash, bytesToHex(link.linkId));
+    return;
+  }
+  provisioningPendingJobs.delete(link.destinationHash);
+  for (const job of jobs) sendProvisioningRequest(link, job);
+  log('info', 'wasm', 'PROVISIONING_LINK_ESTABLISHED', {
+    destinationHash: link.destinationHash,
+    linkId: bytesToHex(link.linkId),
+  });
+}
+
+function handleProvisioningLinkStale(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (!linkId) return;
+  const link = provisioningLinksById.get(bytesToHex(linkId));
+  if (link) link.established = false;
+}
+
+function handleProvisioningLinkRecovered(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (!linkId) return;
+  const link = provisioningLinksById.get(bytesToHex(linkId));
+  if (!link) return;
+  link.established = true;
+  link.everEstablished = true;
+}
+
+function handleProvisioningLinkClosed(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (!linkId) return;
+  const linkHex = bytesToHex(linkId);
+  const link = provisioningLinksById.get(linkHex);
+  if (!link) return;
+  provisioningLinksById.delete(linkHex);
+  provisioningLinksByDestination.delete(link.destinationHash);
+  const jobs = provisioningJobsForDestination(link.destinationHash);
+  provisioningPendingJobs.delete(link.destinationHash);
+  for (const job of jobs) {
+    removeProvisioningJob(job);
+    if (link.everEstablished && recoverProvisioningJob(job)) continue;
+    failProvisioningJob(job, link.everEstablished ? 'PROVISIONING_LINK_CLOSED' : 'PROVISIONING_LINK_ESTABLISHMENT_FAILED');
+  }
+}
+
+function handleProvisioningResourceAdvertised(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (!node || !linkId) return;
+  const link = provisioningLinksById.get(bytesToHex(linkId));
+  if (!link) return;
+  const jobs = Array.from(provisioningRequests.values()).filter((job) => job.destinationHash === link.destinationHash);
+  const dataSize = eventNumber(event, 'dataSize') ?? 0;
+  if (jobs.length === 0 || dataSize > maxProvisioningResponseBytes) {
+    try { processOutput(node.rejectResource(linkId) as WasmOutput); } catch { /* already handled */ }
+    if (dataSize > maxProvisioningResponseBytes) {
+      for (const job of jobs) failProvisioningJob(job, 'PROVISIONING_RESPONSE_TOO_LARGE');
+    }
+    return;
+  }
+  for (const job of jobs) emitProvisioningProgress(job, 'receiving', { progress: 0, dataSize });
+  try {
+    processOutput(node.acceptResource(linkId) as WasmOutput);
+  } catch {
+    for (const job of jobs) failProvisioningJob(job, 'PROVISIONING_RESOURCE_FAILED');
+  }
+}
+
+function handleProvisioningResourceProgress(event: Record<string, unknown>): void {
+  const linkId = eventBytes(event, 'linkId');
+  if (!linkId) return;
+  const link = provisioningLinksById.get(bytesToHex(linkId));
+  if (!link) return;
+  const progress = eventNumber(event, 'progress');
+  const dataSize = eventNumber(event, 'dataSize');
+  for (const job of provisioningRequests.values()) {
+    if (job.destinationHash !== link.destinationHash) continue;
+    emitProvisioningProgress(job, 'receiving', {
+      ...(progress === undefined ? {} : { progress: Math.min(1, Math.max(0, progress)) }),
+      ...(dataSize === undefined ? {} : { dataSize }),
+    });
+  }
+}
+
+function handleProvisioningResponse(event: Record<string, unknown>): void {
+  const requestId = eventBytes(event, 'requestId');
+  const responseData = eventBytes(event, 'responseData');
+  if (!requestId || !responseData) return;
+  const requestHash = bytesToHex(requestId);
+  const job = provisioningRequests.get(requestHash);
+  if (!job) return;
+  provisioningRequests.delete(requestHash);
+  if (responseData.byteLength > maxProvisioningResponseBytes) {
+    failProvisioningJob(job, 'PROVISIONING_RESPONSE_TOO_LARGE');
+    return;
+  }
+  clearProvisioningTimers(job);
+  removeProvisioningJob(job);
+  emit({ type: 'provisioningResponse', requestId: job.requestId, data: new Uint8Array(responseData) });
+  log('info', 'wasm', 'PROVISIONING_RESPONSE_RECEIVED', {
+    destinationHash: job.destinationHash,
+    bytes: responseData.byteLength,
+  });
+}
+
+function handleProvisioningRequestTimeout(event: Record<string, unknown>): void {
+  const requestId = eventBytes(event, 'requestId');
+  if (!requestId) return;
+  const job = provisioningRequests.get(bytesToHex(requestId));
+  if (!job) return;
+  provisioningRequests.delete(bytesToHex(requestId));
+  failProvisioningJob(job, 'PROVISIONING_REQUEST_TIMEOUT');
+}
+
 function handleLxmfMessageState(event: Record<string, unknown>): void {
   if (!identity) return;
   const messageId = eventBytes(event, 'messageId');
@@ -2001,6 +2423,24 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
     : undefined;
   const heardAt = new Date().toISOString();
   emitDestinationPathStatus(destinationHash, hops !== undefined, hops);
+
+  if (managementNodeNameHash && equalBytes(nameHash, managementNodeNameHash)
+    && publicKey?.byteLength === 64) {
+    const destinationHashHex = bytesToHex(destinationHash);
+    emit({
+      type: 'managementAnnounce',
+      id: destinationHashHex,
+      destinationHash: destinationHashHex,
+      publicKey: bytesToHex(publicKey),
+      interfaceId,
+      hops,
+      heardAt,
+    });
+    log('debug', 'wasm', 'PROVISIONING_MANAGEMENT_ANNOUNCE_PROJECTED', {
+      destinationHash: destinationHashHex,
+    });
+    return;
+  }
 
   if (nomadNodeNameHash && equalBytes(nameHash, nomadNodeNameHash)) {
     emit({

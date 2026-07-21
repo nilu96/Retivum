@@ -1,5 +1,5 @@
 const databaseName = 'retivum';
-const databaseVersion = 8;
+const databaseVersion = 9;
 
 export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -34,6 +34,8 @@ export async function openRetivumDatabase(): Promise<IDBDatabase> {
     }
     if (database.objectStoreNames.contains('propagationNodes')) database.deleteObjectStore('propagationNodes');
     if (!database.objectStoreNames.contains('networkState')) database.createObjectStore('networkState');
+    if (!database.objectStoreNames.contains('provisioningNodes')) database.createObjectStore('provisioningNodes', { keyPath: 'id' });
+    if (!database.objectStoreNames.contains('provisioningSchemas')) database.createObjectStore('provisioningSchemas', { keyPath: 'id' });
   };
   return requestResult(request);
 }
