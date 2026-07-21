@@ -204,7 +204,7 @@
         onclick={announceFromMobileActions}
       ><Icon name="announce" size={19} /></button>
       <button
-        class="icon-button"
+        class="icon-button mobile-address-button"
         type="button"
         disabled={!lxmaAddress}
         title={$t('identity.address.open')}
