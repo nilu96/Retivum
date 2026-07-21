@@ -9,6 +9,7 @@ export interface DestinationProbeActivityOptions {
   fullDestinationName: string;
   timeoutMs: number;
   probeSizeBytes?: number;
+  liveHistory?: boolean;
 }
 
 /** Starts a cancellable probe and presents its lifecycle in the toast viewport. */
@@ -23,6 +24,7 @@ export function showDestinationProbeActivity(options: DestinationProbeActivityOp
     options.fullDestinationName,
     options.timeoutMs,
     options.probeSizeBytes ?? 8,
+    { liveHistory: options.liveHistory },
   );
   if (!pendingProbe) return false;
 

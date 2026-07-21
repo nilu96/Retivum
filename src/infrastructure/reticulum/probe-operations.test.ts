@@ -73,4 +73,50 @@ describe('probe operations', () => {
     expect(get(pendingProbeDestinationHashes).has(destinationHash)).toBe(false);
     expect(get(probeHistory)).toEqual([]);
   });
+
+  it('adds live history immediately and resolves cancellation in place', async () => {
+    const destinationHash = 'd'.repeat(32);
+    vi.spyOn(reticulumRuntime, 'probeDestination').mockImplementation((
+      destination,
+      fullDestinationName,
+      _timeoutMs,
+      probeSizeBytes,
+      signal,
+    ) => new Promise((resolve) => {
+      signal?.addEventListener('abort', () => resolve({
+        ok: false,
+        destinationHash: destination,
+        fullDestinationName,
+        probeSizeBytes,
+        code: 'PROBE_CANCELLED',
+      }), { once: true });
+    }));
+
+    const operation = startDestinationProbe(
+      destinationHash,
+      'lxmf.delivery',
+      20_000,
+      8,
+      { liveHistory: true },
+    );
+    const pendingEntry = get(probeHistory)[0];
+
+    expect(pendingEntry).toEqual(expect.objectContaining({
+      status: 'pending',
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 8,
+    }));
+
+    operation?.cancel();
+    await operation?.result;
+
+    expect(get(probeHistory)).toHaveLength(1);
+    expect(get(probeHistory)[0]).toEqual(expect.objectContaining({
+      id: pendingEntry.id,
+      status: 'completed',
+      ok: false,
+      code: 'PROBE_CANCELLED',
+    }));
+  });
 });

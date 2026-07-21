@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   knownDestinationHashes,
@@ -6,12 +6,15 @@ import {
   runtimeStatus,
 } from '../../infrastructure/reticulum/runtime';
 import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history';
+import ToastViewport from '../../lib/components/ToastViewport.svelte';
+import { clearToasts } from '../../lib/notifications/toasts';
 import ProbeView from './ProbeView.svelte';
 
 describe('ProbeView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearProbeHistory();
+    clearToasts();
     runtimeStatus.set('online');
     knownDestinationHashes.set(['1'.repeat(32), '2'.repeat(32)]);
   });
@@ -82,6 +85,52 @@ describe('ProbeView', () => {
 
     expect(dropDestinationPath).toHaveBeenCalledWith(destination);
     expect(screen.getByRole('status')).toHaveTextContent('The cached path was dropped.');
+  });
+
+  it('shows cancellable pending entries and only blocks their destinations', async () => {
+    const firstDestination = 'c'.repeat(32);
+    const secondDestination = 'd'.repeat(32);
+    vi.spyOn(reticulumRuntime, 'probeDestination').mockImplementation((
+      destination,
+      fullDestinationName,
+      _timeoutMs,
+      probeSizeBytes,
+      signal,
+    ) => new Promise((resolve) => {
+      signal?.addEventListener('abort', () => resolve({
+        ok: false,
+        destinationHash: destination,
+        fullDestinationName,
+        probeSizeBytes,
+        code: 'PROBE_CANCELLED',
+      }), { once: true });
+    }));
+    render(ProbeView);
+    render(ToastViewport);
+
+    const destinationInput = screen.getByLabelText('Destination hash');
+    await fireEvent.input(destinationInput, { target: { value: firstDestination } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
+
+    const history = screen.getByRole('list', { name: 'Probe results, newest first' });
+    expect(within(history).getByText('Waiting for proof…')).toBeInTheDocument();
+    expect(within(history).getByRole('listitem').querySelector('time')).toBeNull();
+    expect(screen.getByText(`Probing <${'c'.repeat(8)}…${'c'.repeat(6)}>. Waiting for a response ...`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Waiting for proof…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Drop path' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Cancel probe' })).toBeInTheDocument();
+
+    await fireEvent.input(destinationInput, { target: { value: secondDestination } });
+    expect(screen.getByRole('button', { name: 'Send probe' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Drop path' })).toBeEnabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
+    expect(within(history).getAllByText('Waiting for proof…')).toHaveLength(2);
+
+    for (const cancelButton of screen.getAllByRole('button', { name: 'Cancel probe' })) {
+      await fireEvent.click(cancelButton);
+    }
+    await waitFor(() => expect(screen.getAllByText('Probe failed')).toHaveLength(2));
+    expect(screen.getAllByText('Error code: PROBE_CANCELLED')).toHaveLength(2);
   });
 
   it('returns to the tools directory', async () => {
