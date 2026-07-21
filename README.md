@@ -2,9 +2,9 @@
 
 Retivum is a local-first Reticulum and LXMF messenger built with Svelte. The same application is intended to run in current browsers, Capacitor on iOS and Android, and Electron on macOS, Windows, and Linux.
 
-The architecture and implementation plan live in [docs/architecture.md](docs/architecture.md).
+The durable product and system architecture lives in [docs/architecture.md](docs/architecture.md). Repository-specific implementation guidance lives in [AGENTS.md](AGENTS.md).
 
-The `leviculum_wasm` folder contains the built WebAssembly artifacts from [Leviculum](https://codeberg.org/nilu96/leviculum.git).
+The `leviculum_wasm` folder contains the built WebAssembly artifacts from [Leviculum](https://codeberg.org/Lew_Palm/leviculum).
 
 ## Current implementation status
 

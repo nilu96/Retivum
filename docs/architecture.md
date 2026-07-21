@@ -1,9 +1,9 @@
-# Retivum architecture and implementation plan
+# Retivum architecture
 
 | Field | Value |
 | --- | --- |
-| Status | Proposal for review |
-| Last updated | 2026-07-16 |
+| Status | Current architecture baseline |
+| Last updated | 2026-07-21 |
 | Product name | **Retivum — A Reticulum Messenger** |
 | Application ID | `de.nilu96.retivum` |
 | License | `AGPL-3.0-or-later` |
@@ -11,25 +11,7 @@
 | Native targets | iOS, Android, macOS, Windows, Linux |
 | Browser target | Current Chrome-class browsers; other modern browsers where practical |
 
-This document is the implementation baseline, not a record of completed work. Decisions labelled **proposed** should be confirmed before the application scaffold is committed. Later decisions should be captured as short ADRs under `docs/adr/` and linked back here.
-
-## Review first
-
-The most consequential review choices are collected here; the complete decision table is in [section 22](#22-decisions-and-feedback-requested-before-scaffolding).
-
-| Choice/gate | Proposal or required proof |
-| --- | --- |
-| Desktop packaging | Use the application-owned direct Electron shell for macOS, Windows, and Linux; do not use Tauri |
-| Protocol runtime | Use the supplied WASM in a worker initially; prove worker loading, WebSocket traffic, suspension/recovery, CSP, and persistence in browsers, mobile WebViews, and Electron |
-| Transport behavior | Browser/mobile routing remains foreground-only; Electron may continue while minimized/hidden with background throttling disabled, but is not an OS daemon |
-| Durable storage | IndexedDB in browsers; native SQLite/file-backed repositories in packaged apps; protect identity snapshots with a platform vault key |
-| Identity model | Generate one default identity on first run; manage multiple persistent identities with exactly one active WASM identity at a time |
-| Identity security | No identity passphrase in v1. Native identity material is vault-key encrypted; the browser uses origin-bound storage with an explicit warning. Other application data remains plaintext inside the app sandbox |
-| Source license | Retivum and the combined distributed application use `AGPL-3.0-or-later` |
-| Localization | All user-facing UI text is resolved through an offline localization layer; English is the only initial release catalog |
-| Interoperability | Freeze the WebSocket framing/config contract and NomadNet/Micron subset against reference implementations before feature estimates |
-
-Phase 0 is complete only when the supplied WASM has provenance and these cross-platform/interoperability proofs pass. Do not freeze scaffold dependencies before those results.
+This document records durable product boundaries and system design. Current implementation status and development commands live in `README.md`; repository-specific working guidance belongs in `AGENTS.md`. Superseding architecture decisions should be captured as short ADRs under `docs/adr/` and linked back here.
 
 ## 1. Outcome and guiding decisions
 
@@ -100,31 +82,11 @@ Transport mode may still be toggled on every platform, but the UI must show the 
 - Arbitrary browser TCP/UDP, serial, Bluetooth, or radio access
 - Plugins or scripts supplied by NomadNet pages
 
-## 3. Current repository and artifact assessment
+## 3. Protocol engine
 
-At the start of this planning task, the repository was a blank application scaffold: `README.md` and `docs/` had no project guidance, and there was no package manifest, application source, test setup, CI, or native wrapper. This file is the first project document. At assessment time, the directory was not a Git worktree.
+Retivum ships generated `wasm-bindgen` output from Leviculum as a local application asset. The generated files are immutable build inputs: changes originate in Leviculum, are rebuilt through its toolchain, and enter Retivum with recorded source provenance, license metadata, toolchain/profile/features, API version, and generated hashes.
 
-The only implementation artifact is generated `wasm-bindgen` output under `leviculum_wasm/`:
-
-| Artifact | Purpose | Current fingerprint |
-| --- | --- | --- |
-| `leviculum_wasm.js` | Generated ESM/JavaScript facade | SHA-256 `11a2164f25f952e0d4a91c6699f67cace35b542ddb0c4bad46761eba5550bf9d` |
-| `leviculum_wasm_bg.wasm` | Reticulum/LXMF engine, 6,717,334 bytes | SHA-256 `5fb2381d5c599cb63b190275dda5924796c696efb22081f1371e82ac0e4462bb` |
-| `leviculum_wasm.d.ts` | Generated public declarations | SHA-256 `f812229acb6174da259ac2659da20de7729fc65f573245ba5f7c2a1544d523ed` |
-| `leviculum_wasm_bg.wasm.d.ts` | Low-level generated declarations | SHA-256 `b274a53dc99e4c55079b1471a8d372b3c48b6b35666fc517571524f0f29d1cda` |
-
-These files are vendored/generated inputs and must not be hand-edited. They were generated directly into `leviculum_wasm/` from the local Leviculum checkout at `/Users/nils-lucas/Downloads/leviculum`, upstream `https://codeberg.org/Lew_Palm/leviculum`, workspace version `0.7.1`, license `AGPL-3.0-or-later`, and current Git `HEAD` `8fab402dd6232ce4a1c01cd4f9e78cec4165bcc3` dated 2026-07-19. The build used Rust 1.95.0 and `wasm-bindgen` 0.2.126.
-
-That checkout is caught up with its upstream branch and has one rebased local commit, but it is not a reproducible revision yet: it contains modified files plus untracked `leviculum-wasm`, `leviculum-lxmf`, and browser-test sources. The artifact therefore must not be attributed to `HEAD` alone. Phase 0 must either commit/tag the exact source or create a content-addressed source archive including untracked inputs. The documented current build path is:
-
-```sh
-cargo build -p leviculum-wasm --target wasm32-unknown-unknown
-wasm-bindgen --target web --out-dir /path/to/ReticulumChat/leviculum_wasm target/wasm32-unknown-unknown/debug/leviculum_wasm.wasm
-```
-
-Before release, `vendor/leviculum-wasm/provenance.json` must contain that immutable source reference/archive hash, AGPL license metadata, exact toolchain, feature flags/profile, commands, API version, generated-file hashes, and update procedure.
-
-Relevant capabilities already visible in the generated API include:
+The generated API provides:
 
 - `ReticulumNode` construction with identity, persistent state, and `transportEnabled`.
 - Interface registration, receive, online/offline state, runtime `tick()`, and a next deadline.
@@ -133,17 +95,17 @@ Relevant capabilities already visible in the generated API include:
 - Generic link, resource, and request primitives needed by a future NomadNet client.
 - Export/import of persistent Reticulum state.
 
-Important constraints found in the artifact:
+The host architecture accounts for these API constraints:
 
 1. `transportEnabled` is constructor-only. Changing it requires a controlled node restart unless the WASM API is extended.
 2. Interfaces can be added and toggled online, but no remove/update method is exposed. Editing or deleting a live interface also requires a controlled node restart.
 3. Stable application interface IDs must be separate from runtime numeric interface indexes returned by `addInterface()`.
-4. WebSocket address/TLS fields and the fixed automatic-reconnection behavior are owned by the host interface driver, not WASM. Generic WASM fields currently include `name`, `mode`, `hwMtu`, `bitrateBps`, `localClient`, `ingressControl`, and `maxAirtimeMs`.
+4. WebSocket address/TLS fields and automatic reconnection are owned by the host interface driver, not WASM.
 5. Persistent state includes identity private material. Exported snapshots cannot be treated as ordinary non-sensitive settings.
-6. WASM storage is memory-backed. The generated engine expects its host to persist exported snapshots; its diagnostic text suggests IndexedDB/local storage, but a native repository adapter can persist the same validated envelope in SQLite or an application data file.
+6. WASM storage is memory-backed. The host persists exported snapshots through the platform repository.
 7. CPU-heavy stamp work and frequent ticks must not block rendering.
 8. The WASM bundle exposes Reticulum primitives, not a complete NomadNet client.
-9. One `ReticulumNode` owns one identity and one LXMF router. The supplied browser harness manages many stored identities by persisting the old snapshot and rebuilding one node for the newly active identity; concurrent active identities would require multiple runtime owners and are deferred.
+9. One `ReticulumNode` owns one identity and one LXMF router; concurrent active identities would require multiple runtime owners and are deferred.
 
 ## 4. Platform packaging
 
@@ -174,13 +136,13 @@ The user has selected Electron and Tauri is not an option for this project. No a
 
 ### 4.3 Electron process and asset model
 
-The repository owns the small Electron main/preload boundary. Its initial implementation loads the built local asset graph, provides localized RNode device selection, and exposes raw TCP through validated allowlisted calls. It deliberately does not expose a generic Capacitor or Electron bridge.
+The repository owns the small Electron main/preload boundary. It loads the built local asset graph, provides localized RNode device selection, and exposes raw sockets through validated allowlisted calls. It deliberately does not expose a generic Capacitor or Electron bridge.
 
 - The Electron **main-process boundary** owns application lifecycle, windows/tray, single-instance handling, the local asset protocol, native database/vault access, and narrowly validated plugin/IPC handlers.
 - The application-owned **preload/bridge** exposes explicit, typed methods. It never exports raw `ipcRenderer`, filesystem, shell, process, or database objects.
 - The **renderer** runs only the locally packaged Svelte application with `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, and `webSecurity: true`.
 - The **Reticulum dedicated worker** remains renderer-owned for maximum reuse. It owns WASM and WebSockets but has no Node.js or unrestricted native access.
-- The current development shell loads `dist/index.html` directly without a server. Production packages must move to a registered secure local scheme (for example `app://`) with correct JavaScript/WASM MIME types and a stable origin before release. No localhost server is started in production.
+- Production packages load assets through a registered secure local scheme (for example `app://`) with correct JavaScript/WASM MIME types and a stable origin. No localhost server is started in production.
 - While transport mode is enabled, the app applies `backgroundThrottling: false` through the platform's window-created hook and retains a hidden window. Closing the last visible window hides the app to the tray/menu instead of quitting; explicit Quit performs a final snapshot and clean shutdown. With transport disabled, default throttling remains in force and Close exits normally.
 - Deny unexpected navigation, new-window creation, permission requests, and downloads. Validated external links open through the narrow external-navigation adapter.
 
@@ -508,11 +470,11 @@ The minimal shell in `electron/main.mjs` loads only the packaged `dist/index.htm
 
 There is no product-owned WebSocket bridge, bundled endpoint, or default server address. The default `localhost` value belongs only to a newly opened editor draft and must not connect until the user saves and enables that interface. Authentication can use only mechanisms supported and explicitly validated by the selected endpoint contract; credentials must not be placed in the ordinary query field. Browser code cannot choose an arbitrary `Origin`, and Capacitor/Electron supply their own application origins. Subprotocols remain an optional advanced field. The **Test interface** action reports Origin, subprotocol, authentication, TLS, or framing incompatibilities without weakening browser or TLS security.
 
-The initial adapter contract is derived from `/Users/nils-lucas/Downloads/leviculum/leviculum-browser-test/websocket-interface.js`. Outbound traffic is one binary WebSocket message per Reticulum packet. The socket sets `binaryType = "arraybuffer"`; inbound `ArrayBuffer`, `Blob`, and typed-array views become packet bytes. For compatibility with the reference, bounded text frames may contain hexadecimal (optional `0x`) or base64 packet bytes; invalid/oversized text is rejected with a diagnostic event and never reaches WASM. The production protocol fixture must confirm whether text compatibility is needed by the intended bridge before it is advertised.
+Outbound WebSocket traffic is one binary message per Reticulum packet. The socket sets `binaryType = "arraybuffer"`; inbound `ArrayBuffer`, `Blob`, and typed-array views become packet bytes. Bounded compatibility text frames may contain hexadecimal (optional `0x`) or base64 packet bytes; invalid or oversized text is rejected with a diagnostic event and never reaches WASM. Interoperability fixtures define whether an intended bridge supports that compatibility behavior.
 
 Socket and core state move together: after WebSocket `OPEN`, call `setInterfaceOnline(runtimeIndex, true)` and process its output before normal sends; every decoded packet calls `receive(runtimeIndex, bytes)` and processes its output; close/failure calls `setInterfaceOnline(runtimeIndex, false)` exactly once and processes the resulting `interfaceDown` event. A connection-generation token prevents late events from an old socket changing a replacement connection. `send` actions target their runtime interface ID; `broadcast` actions fan out to every online WebSocket driver except all excluded IDs, matching the supplied reference. The interoperability fixture must freeze which Origin values a compatible user-supplied bridge accepts for browser, Capacitor, and Electron, subprotocol behavior, peer authentication expectations, and whether reconnect should preserve or reset peer-side state. It is a development/reference fixture, not a Retivum production backend.
 
-### 7.4 Interface status
+### 7.5 Interface status
 
 Every saved record derives a live status:
 
@@ -554,8 +516,6 @@ Selecting a contact or announce opens its existing conversation or creates an em
 Delivery announces feed a peer directory after Core verifies the announce and remembers its complete Reticulum identity. The protocol contract must define key discovery, trust-on-first-use or verification behavior, conspicuous handling of peer-key changes, and when a manually entered destination becomes sendable. It must also freeze UTF-8/title/content mapping, application LXMF fields, timestamps, delivery-method mapping, propagation-node validation, and unknown-field preservation.
 
 An incoming message from a source identity that has not announced yet is delivered and displayed with `unverified` verification state, matching Python LXMF `SOURCE_UNKNOWN` behavior. This is required for the normal first-contact flow in which only the recipient has announced. A signature that can be checked against a known source identity and is cryptographically invalid is rejected and never projected into chat history. Reticulum transport delivery proofs are not equivalent to this application-level verification decision.
-
-Current browser implementation note: the worker classifies `announceReceived` events with the bundled LXMF delivery-announce parser and immediately projects recognized destinations into the active identity's reactive Chat directory before persisting them in the `chatAnnounces` IndexedDB store. It applies the same UI-first, durable-follow-up flow to `lxmfMessageReceived` events and `chatMessages`. Outbound messages use the WASM LXMF router queue, retain queued/sending/sent/delivered/failed state locally, and reuse active direct or identified backchannel links. When propagation fallback is active, a message is first queued with the selected direct or opportunistic method; only a terminal primary failure queues the propagated attempt. The retry reuses the signed payload timestamp and therefore normally preserves the LXMF message ID for recipient deduplication, while the persistence layer atomically replaces the attempt record if a different ID is ever returned. Contacts are stored separately in `chatContacts`; their local names take precedence over untrusted announce labels and are never transmitted. An overlapping identity-directory load merges rather than replaces live events. Message IDs are the persistence/deduplication key, conversations group incoming messages by source and outgoing messages by recipient. Diagnostics distinguish a generic Reticulum announce, a recognized LXMF projection, and successful or failed Chat persistence.
 
 ### 8.3 LXMF delivery and propagation preferences
 
@@ -645,7 +605,7 @@ Do not inject remote content with `{@html}`, an unrestricted iframe, `eval`, dyn
 
 ### 9.3 Scope gate
 
-Before implementation, write protocol fixtures for:
+Protocol fixtures cover:
 
 - destination and path syntax
 - link establishment and request paths
@@ -655,9 +615,7 @@ Before implementation, write protocol fixtures for:
 - relative links and included resources
 - text encoding and maximum sizes
 
-The existing WASM artifact proves that generic requests/resources are possible; it does not yet prove full NomadNet interoperability. Phase 0 must fetch and render one known reference page before this feature is estimated in detail.
-
-Current implementation note: Retivum requests `/page/index.mu` for a destination's root address, establishes and reuses destination links in the Reticulum worker, accepts page resources up to 1 MiB, unwraps the Reticulum MessagePack response value, decodes its binary or string payload as UTF-8, and renders Micron with the installed `micron-parser` package. Rendered links are intercepted by an application policy layer: same-node links resolve against the current destination, and cross-node links require a previously heard announce containing that destination's public key. Bookmarks persist the complete normalized page address, including Micron request parameters, and may opt into sending `LINKIDENTIFY` over the established link immediately before the page request. Browser navigation and script execution are not exposed. The NomadNet view remains mounted while another primary tab is visible, preserving the active loading state, loaded page, in-memory page history, and scrollable browser DOM; the worker can therefore finish an active request in the background. Established links remain live only in worker memory and are not serialized across application or runtime restarts. Micron request-field/form submission and persistent page caching remain future work.
+The generic request/resource API is necessary but does not by itself prove NomadNet interoperability. Release tests must fetch and render known reference pages and cover the supported Micron subset.
 
 ### 9.4 Remote node provisioning
 
@@ -888,9 +846,9 @@ All adapters implement the same repository behavior, migrations, and failure sem
 
 ### 12.4 Secret handling
 
-Each Reticulum snapshot and managed private key contains sensitive identity material. Native apps encrypt every identity-bound envelope with an application data-encryption key held by a platform vault. Electron generates and wraps that key in the main process with `safeStorage`; only wrapped key material and ciphertext are persisted. Prefer Electron's asynchronous encrypt/decrypt APIs where supported, and prove key rotation, temporary vault unavailability, and weak-provider detection together during Phase 0. This protection has residual platform limits: Windows DPAPI prevents other OS users from decrypting the value but does not isolate it from another process running as the same user, and Linux's `basic_text` backend uses weak hardcoded protection. Retivum v1 has no identity passphrase fallback: when a packaged platform cannot provide an approved secure vault, durable private identity use fails closed with a localized remediation message rather than storing plaintext or claiming weak storage is protected.
+Each Reticulum snapshot and managed private key contains sensitive identity material. Native apps encrypt every identity-bound envelope with an application data-encryption key held by a platform vault. Electron generates and wraps that key in the main process with `safeStorage`; only wrapped key material and ciphertext are persisted. Prefer Electron's asynchronous encrypt/decrypt APIs where supported, and verify key rotation, temporary vault unavailability, and weak-provider detection before release. This protection has residual platform limits: Windows DPAPI prevents other OS users from decrypting the value but does not isolate it from another process running as the same user, and Linux's `basic_text` backend uses weak hardcoded protection. Retivum v1 has no identity passphrase fallback: when a packaged platform cannot provide an approved secure vault, durable private identity use fails closed with a localized remediation message rather than storing plaintext or claiming weak storage is protected.
 
-Stable vault access, bridge availability outside the worker, application-origin stability, reinstall/upgrade behavior, key rotation, and recovery when the vault entry is lost are Phase 0 tests. Private material must never appear in renderer IPC errors, logs, crash reports, URLs, clipboard operations without explicit action, or support bundles.
+Release tests cover stable vault access, bridge availability outside the worker, application-origin stability, reinstall/upgrade behavior, key rotation, and recovery when the vault entry is lost. Private material must never appear in renderer IPC errors, logs, crash reports, URLs, clipboard operations without explicit action, or support bundles.
 
 For v1, messages, contacts, heard-announce observations, settings, Nomad cache, and redacted diagnostics are deliberately stored unencrypted in the application sandbox/database. Managed private keys and identity runtime snapshots are encrypted. A user-requested interoperable identity export is the standard raw 64-byte Reticulum private identity file and is necessarily unencrypted; it requires an explicit warning and must never be created automatically. A future full application/state backup must use an approved protected envelope. This limitation must be stated in the localized privacy/security UI. Full database encryption is deferred and is not an implied property of SQLite or IndexedDB.
 
@@ -930,74 +888,13 @@ Native apps must pass airplane-mode cold-start tests after installation. Develop
 - Document platform network policy exceptions. Do not disable TLS verification globally to support a test endpoint.
 - Apply dependency and lockfile review, WASM provenance verification, and reproducible release hashes.
 
-A threat model is a Phase 1 artifact and must cover XSS/content injection, malicious peers/pages, local database theft, supply chain, unsafe deep links, malicious imports, denial of service, and platform bridge abuse.
+A release threat model must cover XSS/content injection, malicious peers/pages, local database theft, supply chain, unsafe deep links, malicious imports, denial of service, and platform bridge abuse.
 
-## 15. Proposed source layout
+## 15. Source boundaries
 
-```text
-ReticulumChat/
-├── README.md
-├── package.json
-├── pnpm-lock.yaml
-├── capacitor.config.ts
-├── svelte.config.js
-├── vite.config.ts
-├── tsconfig.json
-├── index.html
-├── src/
-│   ├── app/                    # composition root, routes, app lifecycle
-│   ├── features/
-│   │   ├── chat/
-│   │   ├── nomadnet/
-│   │   └── settings/
-│   ├── domain/                 # app-owned types and state machines
-│   ├── i18n/
-│   │   ├── index.ts            # app-owned localization service
-│   │   ├── generated.ts        # generated typed keys/parameter contracts
-│   │   └── locales/
-│   │       └── en.json         # bundled English source catalog
-│   ├── infrastructure/
-│   │   ├── database/
-│   │   ├── interfaces/
-│   │   ├── platform/
-│   │   └── reticulum/
-│   ├── lib/
-│   │   ├── components/
-│   │   ├── layout/
-│   │   ├── styles/
-│   │   └── utilities/
-│   ├── workers/
-│   │   └── reticulum.worker.ts
-│   ├── App.svelte
-│   └── main.ts
-├── vendor/
-│   └── leviculum-wasm/         # generated bundle + provenance manifest
-├── public/                     # icons, manifest, offline metadata
-├── android/                    # generated/maintained by Capacitor
-├── ios/                        # generated/maintained by Capacitor
-├── electron/                   # direct sandboxed desktop shell
-│   ├── main.mjs                # window, navigation, and bridge registration
-│   ├── preload.cjs             # narrow context-isolated renderer API
-│   ├── device-access.mjs       # Web Bluetooth/Web Serial selection policy
-│   ├── desktop-sockets.mjs     # validated node:net TCP ownership
-│   └── desktop-datagrams.mjs   # validated node:dgram UDP ownership
-├── tests/
-│   ├── contract/
-│   ├── fixtures/
-│   ├── integration/
-│   ├── electron/               # protocol traversal, IPC, lifecycle, vault, packaging
-│   └── e2e/
-└── docs/
-    ├── architecture.md
-    ├── adr/
-    ├── protocol-contract.md
-    ├── threat-model.md
-    └── release.md
-```
+Retivum remains one application rather than a monorepo. The Svelte feature layer depends on application-owned domain, runtime, persistence, and platform ports. Browser, Capacitor, Electron, and generated-WASM details stay behind those ports. Platform shells own their privileged runtime internals, while Retivum owns the narrow validated adapters exposed to application code.
 
-The selected platform package remains the owner of its runtime, preload, protocol, and IPC internals; application code does not copy or fork them into this tree. Database, vault, export, and external-navigation capabilities are app-owned Electron plugin implementations reached through the platform-generated bridge. The nested Electron dependencies are installed and locked independently. If Phase 0 selects direct Electron instead, this section must be replaced with an app-owned main/preload/config layout before implementation starts.
-
-This is one application, not a monorepo. Introduce workspaces/packages only when a second independently versioned deliverable exists. Move the current generated artifact only as part of a reviewed scaffold commit so provenance is preserved.
+Generated protocol artifacts remain separate from handwritten application source and enter release builds with reproducible provenance. Introduce a workspace or independently versioned package only when a genuinely separate deliverable requires it.
 
 ## 16. Quality strategy
 
@@ -1017,9 +914,9 @@ This is one application, not a monorepo. Introduce workspaces/packages only when
 ### 16.2 Required platform matrix
 
 - Chromium current and previous major release
-- iOS minimum selected by the Phase 0 compatibility spike. Capacitor 8 permits iOS 15+, but Vite's current default production target starts at Safari 16.4; supporting the lower shell floor requires an explicit build target, API audit/polyfills, and device tests.
+- The selected iOS minimum. Capacitor 8 permits iOS 15+, but Vite's current default production target starts at Safari 16.4; supporting the lower shell floor requires an explicit build target, API audit/polyfills, and device tests.
 - Android API 24+ shell support with an explicitly documented minimum Android System WebView/Chrome version and at least one low-memory device profile
-- The pinned supported Electron major and its bundled Chromium on macOS, Windows, and Linux. The initial candidate release architectures are macOS `arm64` and `x64`, Windows `x64`, and Linux `x64`; Windows/Linux `arm64` are added only if selected as release targets during Phase 0
+- The pinned supported Electron major and its bundled Chromium on macOS, Windows, and Linux. The initial candidate release architectures are macOS `arm64` and `x64`, Windows `x64`, and Linux `x64`; Windows/Linux `arm64` are added only if selected as release targets.
 - Electron on the documented minimum macOS and Windows versions
 - Electron on at least two documented Linux distribution baselines and the supported X11/Wayland combinations
 
@@ -1083,7 +980,7 @@ Automatic application updates are not required for the first functional mileston
 | Desktop/platform ADR | Architecture | Direct Electron ownership and the main-preload-renderer boundary, local protocol, close/tray/quit behavior, background promise, storage/vault, packaging, and supported targets are signed off |
 | `vendor/leviculum-wasm/provenance.json` plus build note | Protocol/build | Source commit, license, toolchain, command, API version, hashes, and reproducible update path are recorded |
 | `docs/protocol-contract.md` | Protocol/runtime | Typed WASM options/outputs, deadlines, persistence events, LXMF peer/message/delivery/propagation mapping, WebSocket wire behavior, and NomadNet subset have golden fixtures |
-| Supplied WebSocket adapter plus reference peer/fixture | Protocol/runtime | The supplied `websocket-interface.js` is preserved as a behavior fixture; CI proves binary and bounded text decoding, platform Origin/subprotocol/auth rules for user-configured endpoints, broadcast exclusions, reconnect, multiple interfaces, and failure cases |
+| WebSocket reference peer/fixture | Protocol/runtime | CI proves binary and bounded compatibility-text decoding, platform Origin/subprotocol/auth rules for user-configured endpoints, broadcast exclusions, reconnect, multiple interfaces, and failure cases |
 | Snapshot envelope/migration specification | Data/security | Typed-array-safe codec, encryption/authentication, artifact compatibility, rollback, and golden round trips are fixed |
 | Data retention/encryption policy | Product/security | The accepted plaintext app-data/encrypted identity-state split, browser warning, cache/history limits, backup, deletion, and recovery behavior are user-visible and tested |
 | Localization contract and English catalog | Product/UI | Stable message/error codes, typed keys and variables, fallback/formatting rules, hardcoded-text exemptions, and pseudo-locale checks are documented and validated |
@@ -1093,11 +990,11 @@ Automatic application updates are not required for the first functional mileston
 | `docs/threat-model.md` | Security | Trust boundaries, threats, controls, residual risks, and release blockers are reviewed |
 | `docs/release.md` | Release/platform | Builds, signing, permissions/privacy, packages/stores, migrations, rollback, and checksums are reproducible |
 
-### 18.2 Scaffold dependency gates
+### 18.2 Dependency selection gates
 
-Do not select dependencies merely because they are common in a starter template. Record the maintained version, license, alternatives, and proof for each before Phase 1:
+Do not select dependencies merely because they are common in a starter template. Record the maintained version, license, alternatives, and required proof:
 
-| Concern | Current proposal/gate |
+| Concern | Requirement |
 | --- | --- |
 | Routing | Small app-owned typed hash router based on `hashchange`; reconsider only if route complexity grows |
 | Browser database | Select a maintained IndexedDB transaction/migration wrapper after the repository contract tests exist |
@@ -1120,90 +1017,11 @@ The commonly named “MIT License” (more precisely the Expat license) is permi
 
 Use MIT/Expat only for a deliberately separable reusable component when there is a concrete reason. Do not label the Retivum binary, app-store package, or whole repository “MIT” while it ships the current AGPL WASM. A different whole-application license strategy requires a written linking exception or alternative license from all relevant Leviculum copyright holders and a legal review; architecture alone cannot create that permission.
 
-## 19. Implementation phases
+## 19. Release readiness
 
-### Phase 0 — decisions and feasibility spikes
+The shared application foundation, runtime, interface registry, identity management, LXMF chat, NomadNet client, and remote provisioning are implemented. Release work remains focused on the PWA offline cache, native vault-backed identity storage, reproducible Leviculum artifact provenance, packaged Electron secure-origin and lifecycle verification, complete platform/interoperability testing, accessibility and performance review, encrypted backup/recovery, signing/notarization, privacy and permission artifacts, and clean upgrade/data-migration tests.
 
-Deliverables:
-
-1. Pin and audit the direct Electron shell and its narrow app-owned preload/main bridges; Tauri and the unmaintained community Capacitor Electron platform are not considered. Record the exact Electron version and update every source-tree, CI, license, and packaging artifact before distribution.
-2. Freeze the exact dirty local Leviculum source as a commit/tag or content-addressed archive and record its Codeberg upstream, `AGPL-3.0-or-later` license metadata, build profile/features, exact Rust/`wasm-bindgen` toolchain, rebuild instructions, and matching generated hashes.
-3. Replace guessed `any` shapes with captured fixtures and a typed facade, including output ordering, absolute deadlines, errors, modes/defaults/ranges, and persistence events.
-4. Prove bundled WASM initialization and WebSocket traffic in a module worker in Chrome, Capacitor on both iOS and Android, and packaged Electron on macOS, Windows, and Linux. Exercise custom origin/MIME/CSP/ASAR behavior, renderer sandboxing, minimize/hide, close-to-tray, suspend/resume, forced renderer/worker termination, snapshot recovery, and absence of Node/Electron globals in renderer and worker.
-5. Preserve the supplied `websocket-interface.js` behavior as a fixture and prove multiple persistent drivers against user-configured reference Reticulum endpoints, including binary and compatibility text framing, platform Origin/subprotocol/auth behavior, online-state coordination, broadcast exclusions, backpressure, and reconnect. Do not create a product backend or bundled endpoint.
-6. Define the identity-bound snapshot envelope and prove export/reload plus identity switching preserves the correct identity, paths, and LXMF outbox through browser IndexedDB and native SQLite/file adapters without cross-identity leakage, including encryption, vault loss/error, and rollback.
-7. Prove the browser profile cold-starts offline with WASM cached, and prove the native profile has no service-worker registration.
-8. Fetch and safely render one known NomadNet reference page.
-9. Select the supported browser, mobile OS/WebView, and Electron/Chromium/desktop OS/architecture matrix plus explicit Vite target/polyfills; prove the oldest supported combinations.
-
-Exit: no unresolved feasibility issue invalidates the shared WASM/worker architecture, and a one-hour hidden/minimized soak on all three desktop OSes proves the advertised in-process transport behavior. Any requirement beyond the retained Electron process/window has an approved utility-process or daemon design instead.
-
-### Phase 1 — application foundation
-
-Deliverables:
-
-- Svelte/TypeScript/Vite scaffold and hash routes
-- design tokens, adaptive AppShell, persistent desktop sidebar, mobile bottom tab bar, shared controls, light/dark themes
-- offline localization service, generated typed message keys, bundled English catalog, locale-aware formatters, pseudo-locale checks, and hardcoded-UI-text enforcement
-- dependency injection/composition root and platform capability ports
-- shared repository contract, browser IndexedDB and packaged-app SQLite/file migrations, plus native vault proof
-- worker bridge, lifecycle, diagnostics, error boundaries
-- PWA, Capacitor mobile, and Electron development plus packaged-offline builds
-- threat model and initial CI
-
-Exit: all targets launch locally in airplane mode and show the same adaptive shell.
-
-### Phase 2 — network settings and runtime
-
-Deliverables:
-
-- typed WASM facade and scheduler
-- generated default identity named “Anonymous”, plus identity generate/import/export/rename/activate/remove manager and controlled single-active-identity switching
-- registry-driven WebSocket, RNode, TCP, and UDP interface editors/drivers with platform capability filtering
-- zero-interface first run; multiple persistent heterogeneous interfaces with enabled-state restoration and independent live status
-- transport-mode controlled restart
-- native encrypted identity-state persistence, browser origin-bound encrypted identity records with explicit warning, plaintext sandboxed v1 application-data policy, persistence recovery, and redacted diagnostics
-- local reference-peer integration tests
-
-Exit: a clean profile has one generated active identity and no interfaces; identities and supported interface types can be managed safely, and every enabled interface reconnects from durable configuration after restart on its supported targets.
-
-### Phase 3 — LXMF chat
-
-Deliverables:
-
-- active-identity LXMF delivery destination initialization and announce
-- recent-chat overview, all contacts, persisted heard-announces view, contact naming/editing, conversations/history/drafts
-- identity-wide, conversation, and per-message direct/opportunistic/propagated selection; independent propagation fallback toggle plus optional preferred node with automatic selection
-- durable outbox and delivery-state reconciliation
-- send/receive interoperability with a reference LXMF implementation
-- adaptive chat layouts and notifications where locally available
-
-Exit: two installations can exchange messages, recover through disconnect/restart, and show truthful state without an application server.
-
-### Phase 4 — NomadNet client
-
-Deliverables:
-
-- address/history/bookmarks/cache
-- request/link orchestration
-- bounded Micron parser and safe component renderer
-- forms/links subset agreed during Phase 0
-- malicious/oversized fixture tests
-
-Exit: reference pages render and navigate safely; unsupported content fails visibly without compromising the app.
-
-### Phase 5 — hardening and distribution
-
-Deliverables:
-
-- full target matrix, accessibility review, performance profiling
-- encrypted backup/restore and recovery UX
-- permission/privacy/license artifacts
-- signing, notarization, store/package builds, release checklist
-- Electron installer/package formats, all released architectures, secure local protocol, sandbox/IPC audit, ASAR/WASM completeness, and hidden-transport soak tests
-- clean installation/upgrade/data-migration tests
-
-Exit: signed release candidates satisfy the acceptance criteria below.
+The acceptance criteria below define completion; historical implementation sequencing is intentionally not part of the architecture contract.
 
 ## 20. Release-level acceptance criteria
 
@@ -1242,9 +1060,9 @@ Exit: signed release candidates satisfy the acceptance criteria below.
 | --- | --- | --- |
 | Capacitor officially lacks desktop support | Separate desktop lifecycle and packaging path | Keep shared feature/runtime ports, pin direct Electron, and test the local asset graph plus bridges on every desktop target |
 | Application-owned Electron shell | Security or lifecycle defects become project responsibility | Keep the renderer sandboxed, expose only narrow validated bridges, pin Electron, and require cross-platform packaged security/lifecycle tests |
-| Current WASM source is identified but comes from a dirty checkout with untracked crates, and declarations use `any` | Irreproducible binaries, licensing ambiguity, compatibility/runtime failures | Freeze an immutable full source snapshot, record selected AGPL metadata and toolchain, then add typed facade, fixtures, and contract tests before features |
+| Generated WASM lacks immutable source provenance or exposes unvalidated `any` declarations | Irreproducible binaries, licensing ambiguity, compatibility/runtime failures | Freeze an immutable full source snapshot, record AGPL metadata and toolchain, and keep typed facade, fixtures, and contract tests at the boundary |
 | Leviculum and the bundled WASM are `AGPL-3.0-or-later` | Retivum distribution and source-release obligations constrain the release process | Enforce Retivum's selected `AGPL-3.0-or-later` license, preserve notices/corresponding source, and complete a license review before distribution |
-| Worker/WASM/asset behavior differs across browsers, mobile WebViews, and Electron's local scheme | A target may fail to start | Cross-platform and packaged Electron Phase 0 matrix before UI investment |
+| Worker/WASM/asset behavior differs across browsers, mobile WebViews, and Electron's local scheme | A target may fail to start | Cross-platform browser, native, and packaged Electron test matrix |
 | WebSocket wire contract differs from proposed packet framing | No interoperability | Test against intended peer and freeze a protocol fixture |
 | Browser/mobile lifecycle suspends routing; Electron stops on sleep/quit/crash | Misleading transport feature | Capability messaging, Electron background throttling disabled, close-to-tray policy, recovery tests, utility-process/daemon ADR for stronger requirements |
 | Core cannot mutate/remove interfaces or transport mode live | Settings changes disrupt networking | Durable controlled restart with rollback |
@@ -1263,37 +1081,19 @@ Exit: signed release candidates satisfy the acceptance criteria below.
 | Electron `safeStorage` has platform limits | Same-user Windows processes may reach protected data, and weak Linux backends cannot meet the identity policy | Document Windows residual risk; detect Linux backend and fail closed for durable identity state when an approved secure vault is unavailable |
 | Hidden transport consumes desktop CPU/network and tray behavior varies | Battery/resource or UX problems | One-hour soak, measured budgets, automatic transport-enabled close policy/status, Linux desktop coverage, clear Quit action |
 | No preferred propagation node is reachable | Propagated messages cannot leave or use an unexpectedly expensive node | Filter discovered nodes by enabled/reachable state, rank deterministically by hops and advertised costs, log the selected node, and fail explicitly when no candidate exists |
-| English strings leak into components or later translations overflow layouts | Translation becomes expensive and accessibility/status text diverges | Typed catalogs from Phase 1, stable error codes, locale-aware formatting, hardcoded-text CI rule, pseudo-locale and direction tests |
+| English strings leak into components or later translations overflow layouts | Translation becomes expensive and accessibility/status text diverges | Typed catalogs, stable error codes, locale-aware formatting, hardcoded-text CI rule, pseudo-locale and direction tests |
 
-## 22. Decisions and feedback requested before scaffolding
+## 22. Open release decisions
 
-| ID | Question | Proposed answer |
-| --- | --- | --- |
-| D-01 | Desktop wrapper | **Decided by user and implemented:** direct Electron for macOS/Windows/Linux; no Tauri and no third-party Capacitor Electron platform in the privileged bridge path |
-| D-02 | Native protocol backend for v1 | Use the existing WASM renderer worker everywhere; retain a port for a future Electron utility-process/native backend |
-| D-03 | Transport guarantee | Browser/mobile foreground only; Electron continues while its process/retained window runs and the OS is awake, including minimized/hidden; no daemon guarantee |
-| D-04 | Browser identity protection | **Decided by user:** no identity passphrase in v1. Encrypt origin-bound records, disclose that same-origin code can access the wrapping key, and provide backup guidance; do not claim native-vault-equivalent protection |
-| D-05 | WebSocket wire/config contract | **Decided by user:** the endpoint is a user-configured Reticulum interface; Retivum ships no server/default endpoint. Preserve `websocket-interface.js` semantics as a development fixture and prove each platform's Origin/subprotocol/auth/framing compatibility |
-| D-06 | NomadNet scope | Client navigation plus an agreed safe Micron subset; no node hosting |
-| D-07 | Visual direction | Neutral, low-noise system theme first; apply supplied branding/reference during wireframe review |
-| D-08 | Initial distribution | Decide app stores vs direct packages and supported Linux formats before Phase 5 |
-| D-09 | Identity compatibility | **Decided from supplied compatibility fixture:** identity interchange imports/exports the standard raw 64-byte Reticulum private identity format; raw imports derive and validate their hash in WASM, duplicates are rejected, and no display name or identity-scoped application state travels in this file. Full protected application backup remains a separate future format |
-| D-10 | Propagation defaults | **Decided by user:** no propagation node by default; the active identity may store a user-configured propagation-node destination hash |
-| D-11 | Minimum platform versions | Choose browser/mobile OS-WebView floors plus the pinned Electron/Chromium desktop OS/architecture matrix |
-| D-12 | Data encryption scope | **Decided by user:** messages, contacts, announces, settings, and Nomad cache remain plaintext in the v1 app sandbox/database; private identity state is encrypted |
-| D-13 | Electron close behavior | Proposed: Close hides to tray/menu while transport is enabled; otherwise Close exits normally after a snapshot |
-| D-14 | Linux vault fallback | **Derived from the accepted no-passphrase/encrypted-identity requirements:** fail closed for durable identity state when no approved secure vault is available; never use Electron `basic_text` as protected storage |
-| D-15 | Primary navigation | **Revised by user:** persistent left sidebar on desktop and bottom tab bar on mobile, sharing the same Chat/NomadNet/Tools/Settings route model |
-| D-16 | Product name | **Decided by user:** **Retivum — A Reticulum Messenger** |
-| D-17 | First-run network defaults | **Decided by user:** generate a default identity, create no interfaces, and persist every later interface definition/enabled state across restart |
-| D-18 | Identity activation model | **Decided by user:** manage multiple stored identities with exactly one active identity/node/LXMF router at a time; others remain durable and inactive until selected |
-| D-19 | Interface type scope | **Revised by user:** WebSocket, RNode (BLE/serial), TCP, and UDP are registered variants; the picker exposes only variants supported by the current platform |
-| D-20 | Retivum source license | **Decided by user:** the combined application is licensed `AGPL-3.0-or-later` |
-| D-21 | Application identifiers | **Decided by user:** `de.nilu96.retivum` for Android, iOS, and Electron; use `/retivum` as the PWA's origin-relative manifest ID |
-| D-22 | LXMF delivery method | **Revised by user:** direct and opportunistic are the only primary methods. Propagation is an independent opt-in fallback attempted after primary failure when enabled with a valid configured node |
-| D-23 | Localization | **Decided by user:** no hardcoded GUI text; use an offline localization architecture from the first scaffold, with English as the only initial catalog |
+The implementation must settle the remaining distribution and support-policy choices before a signed release:
 
-## 23. Initial architecture decision log
+- app-store distribution versus direct packages, including supported Linux formats;
+- minimum supported browser, mobile OS/WebView, desktop OS, and architecture versions;
+- the final Electron close/tray behavior and its platform-specific accessibility fallback.
+
+Accepted product and architecture choices are recorded in the decision log below instead of repeated as historical scaffold questions.
+
+## 23. Architecture decision log
 
 | ADR | Status | Decision |
 | --- | --- | --- |
@@ -1313,7 +1113,7 @@ Exit: signed release candidates satisfy the acceptance criteria below.
 | ADR-014 | **Accepted by user** | Retivum and the combined application use `AGPL-3.0-or-later`; individually separable utility code may use MIT/Expat only when explicitly documented |
 | ADR-015 | **Accepted by user** | Native identity state is vault-key encrypted; browser identity records use an origin-held wrapping key and explicit weaker-protection warning; no identity passphrase exists in v1; other v1 application data is sandboxed plaintext |
 | ADR-016 | **Accepted by user, revised** | No preferred propagation node exists by default. Users may choose direct, opportunistic, or propagated delivery; configured nodes are preferred and the router otherwise selects the best reachable announced node |
-| ADR-017 | **Accepted by user** | All GUI text uses bundled typed localization catalogs and locale-aware formatting from Phase 1; English ships first and no runtime translation service is required |
+| ADR-017 | **Accepted by user** | All GUI text uses bundled typed localization catalogs and locale-aware formatting; English ships first and no runtime translation service is required |
 | ADR-018 | **Accepted by user** | Native application identifiers use `de.nilu96.retivum`; the PWA manifest ID is `/retivum` |
 
 ## 24. Primary references
@@ -1352,5 +1152,3 @@ Exit: signed release candidates satisfy the acceptance criteria below.
 - [Reticulum reference implementation](https://github.com/markqvist/Reticulum)
 - [LXMF reference implementation and format overview](https://github.com/markqvist/LXMF)
 - [Nomad Network reference implementation and page/browser overview](https://github.com/markqvist/NomadNet)
-
-The source repository and matching local generated output are now identified, but the exact build comes from a dirty/untracked local source snapshot rather than reproducible committed `HEAD`. The exact Reticulum/LXMF/NomadNet specification coverage also remains to be pinned. Phase 0 must freeze both before assuming compatibility with the latest upstream references above.
