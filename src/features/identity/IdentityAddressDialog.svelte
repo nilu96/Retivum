@@ -4,6 +4,7 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import ModalDialog from '../../lib/components/ModalDialog.svelte';
+  import { copyText } from '../../lib/clipboard';
   import { toast } from '../../lib/notifications/toasts';
 
   let {
@@ -31,24 +32,8 @@
   });
 
   async function copyAddress(): Promise<void> {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(address);
-      } else {
-        const input = document.createElement('textarea');
-        input.value = address;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.append(input);
-        input.select();
-        const copiedWithFallback = document.execCommand('copy');
-        input.remove();
-        if (!copiedWithFallback) throw new Error('COPY_FAILED');
-      }
-      toast.success('common.copied');
-    } catch {
-      toast.error('common.copyFailed');
-    }
+    if (await copyText(address)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
   }
 </script>
 

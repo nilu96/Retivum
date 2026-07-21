@@ -36,8 +36,11 @@
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
+  import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
+  import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
+  import { copyText } from '../../lib/clipboard';
   import ContactEditor from './ContactEditor.svelte';
   import ChatDeleteConfirmation from './ChatDeleteConfirmation.svelte';
   import NewConversationEditor from './NewConversationEditor.svelte';
@@ -100,13 +103,6 @@
     | { kind: 'conversation'; destinationHash: string; displayName: string }
     | undefined
   >();
-  let suppressConversationClick = false;
-  let pressedChatDestination = $state<string | undefined>();
-  let longPressTimer: ReturnType<typeof setTimeout> | undefined;
-  let longPressPointerId: number | undefined;
-  let longPressOrigin: { x: number; y: number } | undefined;
-  let longPressTriggered = false;
-  let suppressNativeContextMenuUntil = 0;
   const scopes: Array<{ id: ChatScope; label: MessageKey }> = [
     { id: 'chats', label: 'chat.scope.chats' },
     { id: 'contacts', label: 'chat.scope.contacts' },
@@ -256,7 +252,6 @@
     window.addEventListener('resize', updateOverflow);
     window.visualViewport?.addEventListener('resize', updateOverflow);
     return () => {
-      cancelMessageLongPress();
       stopRecordingResources();
       window.removeEventListener('resize', updateOverflow);
       window.visualViewport?.removeEventListener('resize', updateOverflow);
@@ -343,16 +338,11 @@
   }
 
   function openMessageActions(message: ChatMessage, clientX: number, clientY: number): void {
-    const displayStatus = chatMessageDisplayStatus(message);
-    const deliveryActionVisible = chatMessageDirection(message) === 'outgoing'
-      && (displayStatus === 'failed' || displayStatus === 'queued' || displayStatus === 'sending');
-    const menuWidth = 210;
-    const menuHeight = deliveryActionVisible ? 104 : 56;
     closeChatActions();
     messageActions = {
       message,
-      x: Math.max(12, Math.min(clientX, window.innerWidth - menuWidth - 12)),
-      y: Math.max(12, Math.min(clientY, window.innerHeight - menuHeight - 12)),
+      x: clientX,
+      y: clientY,
     };
   }
 
@@ -371,109 +361,21 @@
   }
 
   function openChatActions(target: DestinationActionTarget, clientX: number, clientY: number): void {
-    const menuWidth = 210;
-    const contactActionVisible = $chatContacts.some(
-      (contact) => contact.destinationHash === target.destinationHash,
-    );
-    const deleteActionVisible = conversations.some(
-      (conversation) => conversation.destinationHash === target.destinationHash && conversation.messageCount > 0,
-    );
-    const menuHeight = (deleteActionVisible ? 200 : 152) + (contactActionVisible ? 48 : 0);
     messageActions = undefined;
     chatActions = {
       ...target,
       blocked: blockedDestinationHashes.has(target.destinationHash),
-      x: Math.max(12, Math.min(clientX, window.innerWidth - menuWidth - 12)),
-      y: Math.max(12, Math.min(clientY, window.innerHeight - menuHeight - 12)),
+      x: clientX,
+      y: clientY,
     };
   }
 
   function closeChatActions(): void {
     chatActions = undefined;
-    suppressConversationClick = false;
-  }
-
-  function chatContextMenu(event: MouseEvent, target: DestinationActionTarget): void {
-    event.preventDefault();
-    if (Date.now() < suppressNativeContextMenuUntil) return;
-    cancelMessageLongPress();
-    openChatActions(target, event.clientX, event.clientY);
-  }
-
-  function chatPointerDown(event: PointerEvent, target: DestinationActionTarget): void {
-    if (event.pointerType !== 'touch' || event.button !== 0) return;
-    cancelMessageLongPress();
-    pressedChatDestination = target.destinationHash;
-    longPressPointerId = event.pointerId;
-    longPressOrigin = { x: event.clientX, y: event.clientY };
-    longPressTimer = setTimeout(() => {
-      longPressTimer = undefined;
-      longPressTriggered = true;
-      suppressNativeContextMenuUntil = Date.now() + 1_000;
-      suppressConversationClick = true;
-      openChatActions(target, event.clientX, event.clientY);
-    }, 550);
-  }
-
-  function chatActionsKeydown(event: KeyboardEvent, target: DestinationActionTarget): void {
-    if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
-    event.preventDefault();
-    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    openChatActions(target, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
   }
 
   async function chatRowClick(destinationHash: string): Promise<void> {
-    if (suppressConversationClick) {
-      suppressConversationClick = false;
-      return;
-    }
     await selectDestination(destinationHash);
-  }
-
-  function messageContextMenu(event: MouseEvent, message: ChatMessage): void {
-    event.preventDefault();
-    if (Date.now() < suppressNativeContextMenuUntil) return;
-    cancelMessageLongPress();
-    openMessageActions(message, event.clientX, event.clientY);
-  }
-
-  function messagePointerDown(event: PointerEvent, message: ChatMessage): void {
-    if (event.pointerType !== 'touch' || event.button !== 0) return;
-    cancelMessageLongPress();
-    longPressPointerId = event.pointerId;
-    longPressOrigin = { x: event.clientX, y: event.clientY };
-    longPressTimer = setTimeout(() => {
-      longPressTimer = undefined;
-      longPressTriggered = true;
-      suppressNativeContextMenuUntil = Date.now() + 1_000;
-      openMessageActions(message, event.clientX, event.clientY);
-    }, 550);
-  }
-
-  function messagePointerMove(event: PointerEvent): void {
-    if (event.pointerId !== longPressPointerId || !longPressOrigin) return;
-    if (Math.hypot(event.clientX - longPressOrigin.x, event.clientY - longPressOrigin.y) > 10) {
-      pressedChatDestination = undefined;
-      cancelMessageLongPress();
-    }
-  }
-
-  function cancelMessageLongPress(event?: PointerEvent): void {
-    if (event && longPressPointerId !== undefined && event.pointerId !== longPressPointerId) return;
-    if (longPressTimer !== undefined) clearTimeout(longPressTimer);
-    longPressTimer = undefined;
-    longPressPointerId = undefined;
-    longPressOrigin = undefined;
-    longPressTriggered = false;
-    pressedChatDestination = undefined;
-  }
-
-  function messageActionsKeydown(event: KeyboardEvent, message: ChatMessage): void {
-    if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'ContextMenu'
-      && !(event.shiftKey && event.key === 'F10')) return;
-    event.preventDefault();
-    const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    openMessageActions(message, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
   }
 
   async function deleteMessage(message: ChatMessage): Promise<void> {
@@ -563,24 +465,8 @@
 
   async function copyDestinationHash(destinationHash: string): Promise<void> {
     closeChatActions();
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(destinationHash);
-      } else {
-        const input = document.createElement('textarea');
-        input.value = destinationHash;
-        input.style.position = 'fixed';
-        input.style.opacity = '0';
-        document.body.append(input);
-        input.select();
-        const copiedWithFallback = document.execCommand('copy');
-        input.remove();
-        if (!copiedWithFallback) throw new Error('COPY_FAILED');
-      }
-      toast.success('common.copied');
-    } catch {
-      toast.error('common.copyFailed');
-    }
+    if (await copyText(destinationHash)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
   }
 
   function openContactEditor(destinationHash: string): void {
@@ -902,19 +788,14 @@
             <button
               class="chat-directory-row"
               class:active={selectedDestination === conversation.destinationHash}
-              class:touch-active={pressedChatDestination === conversation.destinationHash}
               aria-haspopup="menu"
               title={$t('chat.conversation.actions.open', {
                 name: conversation.displayName ?? shortHash(conversation.destinationHash),
               })}
               onclick={() => { void chatRowClick(conversation.destinationHash); }}
-              oncontextmenu={(event) => chatContextMenu(event, actionTarget)}
-              onpointerdown={(event) => chatPointerDown(event, actionTarget)}
-              onpointermove={messagePointerMove}
-              onpointerup={cancelMessageLongPress}
-              onpointercancel={cancelMessageLongPress}
-              onpointerleave={cancelMessageLongPress}
-              onkeydown={(event) => chatActionsKeydown(event, actionTarget)}
+              use:contextMenuTrigger={{
+                onopen: (x, y) => openChatActions(actionTarget, x, y),
+              }}
             >
               <span class="chat-peer-avatar">{(conversation.displayName ?? conversation.destinationHash).slice(0, 1).toUpperCase()}</span>
               <span class="chat-row-copy">
@@ -947,16 +828,11 @@
             <div class="chat-contact-row" class:active={selectedDestination === contact.destinationHash}>
               <button
                 class="chat-directory-row"
-                class:touch-active={pressedChatDestination === contact.destinationHash}
                 aria-haspopup="menu"
                 onclick={() => { void chatRowClick(contact.destinationHash); }}
-                oncontextmenu={(event) => chatContextMenu(event, actionTarget)}
-                onpointerdown={(event) => chatPointerDown(event, actionTarget)}
-                onpointermove={messagePointerMove}
-                onpointerup={cancelMessageLongPress}
-                onpointercancel={cancelMessageLongPress}
-                onpointerleave={cancelMessageLongPress}
-                onkeydown={(event) => chatActionsKeydown(event, actionTarget)}
+                use:contextMenuTrigger={{
+                  onopen: (x, y) => openChatActions(actionTarget, x, y),
+                }}
               >
                 <span class="chat-peer-avatar">{contact.name.slice(0, 1).toUpperCase()}</span>
                 <span class="chat-row-copy">
@@ -1002,16 +878,11 @@
             <button
               class="chat-directory-row"
               class:active={selectedDestination === announce.destinationHash}
-              class:touch-active={pressedChatDestination === announce.destinationHash}
               aria-haspopup="menu"
               onclick={() => { void chatRowClick(announce.destinationHash); }}
-              oncontextmenu={(event) => chatContextMenu(event, actionTarget)}
-              onpointerdown={(event) => chatPointerDown(event, actionTarget)}
-              onpointermove={messagePointerMove}
-              onpointerup={cancelMessageLongPress}
-              onpointercancel={cancelMessageLongPress}
-              onpointerleave={cancelMessageLongPress}
-              onkeydown={(event) => chatActionsKeydown(event, actionTarget)}
+              use:contextMenuTrigger={{
+                onopen: (x, y) => openChatActions(actionTarget, x, y),
+              }}
             >
               <span class="chat-peer-avatar announce">{(announce.displayName ?? announce.destinationHash).slice(0, 1).toUpperCase()}</span>
               <span class="chat-row-copy">
@@ -1103,13 +974,10 @@
               tabindex="0"
               aria-haspopup="menu"
               aria-label={$t('chat.message.actions.open', { message: chatMessagePreview(message) })}
-              oncontextmenu={(event) => messageContextMenu(event, message)}
-              onpointerdown={(event) => messagePointerDown(event, message)}
-              onpointermove={messagePointerMove}
-              onpointerup={cancelMessageLongPress}
-              onpointercancel={cancelMessageLongPress}
-              onpointerleave={cancelMessageLongPress}
-              onkeydown={(event) => messageActionsKeydown(event, message)}
+              use:contextMenuTrigger={{
+                onopen: (x, y) => openMessageActions(message, x, y),
+                openOnActivate: true,
+              }}
             >
               {#if isOpenedUnread}
                 <span class="message-new-badge">{$t('chat.message.new')}</span>
@@ -1293,17 +1161,12 @@
 {/if}
 
 {#if messageActions}
-  <button
-    class="message-actions-dismiss"
-    aria-label={$t('chat.message.actions.close')}
-    onclick={() => { messageActions = undefined; }}
-  ></button>
-  <div
-    class="message-actions-menu"
-    role="menu"
-    aria-label={$t('chat.message.actions.label')}
-    style:left={`${messageActions.x}px`}
-    style:top={`${messageActions.y}px`}
+  <ContextMenu
+    x={messageActions.x}
+    y={messageActions.y}
+    label={$t('chat.message.actions.label')}
+    closeLabel={$t('chat.message.actions.close')}
+    onclose={() => { messageActions = undefined; }}
   >
     {#if chatMessageDirection(messageActions.message) === 'outgoing'
       && (chatMessageDisplayStatus(messageActions.message) === 'queued'
@@ -1329,21 +1192,16 @@
     >
       <Icon name="trash" size={17} />{$t('chat.message.actions.delete')}
     </button>
-  </div>
+  </ContextMenu>
 {/if}
 
 {#if chatActions}
-  <button
-    class="message-actions-dismiss"
-    aria-label={$t('chat.conversation.actions.close')}
-    onclick={closeChatActions}
-  ></button>
-  <div
-    class="message-actions-menu"
-    role="menu"
-    aria-label={$t('chat.conversation.actions.label')}
-    style:left={`${chatActions.x}px`}
-    style:top={`${chatActions.y}px`}
+  <ContextMenu
+    x={chatActions.x}
+    y={chatActions.y}
+    label={$t('chat.conversation.actions.label')}
+    closeLabel={$t('chat.conversation.actions.close')}
+    onclose={closeChatActions}
   >
     <button
       role="menuitem"
@@ -1394,7 +1252,7 @@
         <Icon name="trash" size={17} />{$t('chat.conversation.actions.delete')}
       </button>
     {/if}
-  </div>
+  </ContextMenu>
 {/if}
 
 {#if deleteConfirmation}

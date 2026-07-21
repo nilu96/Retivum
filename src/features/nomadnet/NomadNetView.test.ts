@@ -190,6 +190,85 @@ describe('NomadNetView', () => {
     ));
   });
 
+  it('copies an announced destination hash and offers to add it as a bookmark', async () => {
+    const destinationHash = 'b'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'c'.repeat(32),
+      publicKeyHex: 'd'.repeat(128),
+    });
+    nomadAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      displayName: 'Fresh node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const addBookmark = vi.spyOn(reticulumRuntime, 'addNomadBookmark').mockResolvedValue(true);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(NomadNetView);
+      const row = screen.getByRole('button', { name: /Fresh node/ });
+
+      await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+      expect(screen.getByRole('menu', { name: 'NomadNet destination actions' })).toBeInTheDocument();
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
+      expect(writeText).toHaveBeenCalledWith(destinationHash);
+
+      await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Add bookmark' }));
+      expect(screen.getByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
+      expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Fresh node');
+      await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
+        `${destinationHash}:/page/index.mu`,
+        'Fresh node',
+        false,
+      ));
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('offers edit and remove actions for a bookmarked destination', async () => {
+    const destinationHash = 'c'.repeat(32);
+    nomadBookmarks.set([{
+      id: 'identity:context-menu-bookmark',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/community.mu',
+      label: 'Community page',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const removeBookmark = vi.spyOn(reticulumRuntime, 'deleteNomadBookmark').mockResolvedValue(undefined);
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
+    const row = screen.getByRole('button', { name: /Community page/ });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+
+    expect(screen.queryByRole('menuitem', { name: 'Add bookmark' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Edit bookmark' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Remove bookmark' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Edit bookmark' }));
+    expect(screen.getByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Community page');
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Remove bookmark' }));
+    expect(removeBookmark).toHaveBeenCalledWith('identity:context-menu-bookmark');
+  });
+
   it('renames an existing bookmark', async () => {
     const destinationHash = 'd'.repeat(32);
     nomadBookmarks.set([{

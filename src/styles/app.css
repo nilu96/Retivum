@@ -393,19 +393,19 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .message-verification-badge { padding: 2px 7px; border-radius: 999px; color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); font-size: .62rem; font-weight: 750; line-height: 1.3; text-transform: uppercase; }
 .message-verification-badge.invalid { color: var(--danger); background: var(--danger-soft); }
 .message-bubble footer .failed { color: var(--danger); }
-.message-actions-dismiss { position: fixed; z-index: 64; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; opacity: 0; background: transparent; cursor: default; }
-.message-actions-menu { position: fixed; z-index: 65; display: grid; min-width: 190px; padding: 5px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 11px; background: var(--surface-1); box-shadow: var(--shadow); }
-.message-actions-menu button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 9px 11px; border: 0; border-radius: 7px; color: var(--text); background: transparent; font-size: .75rem; font-weight: 650; text-align: start; }
-.message-actions-menu button:focus-visible { background: var(--surface-hover); }
-.message-actions-menu button.danger { color: var(--danger); }
-.message-actions-menu button.danger:focus-visible { background: var(--danger-soft); }
+.context-menu-dismiss { position: fixed; z-index: 64; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; opacity: 0; background: transparent; cursor: default; }
+.context-menu { position: fixed; z-index: 65; display: grid; min-width: 190px; padding: 5px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 11px; background: var(--surface-1); box-shadow: var(--shadow); }
+.context-menu button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 9px 11px; border: 0; border-radius: 7px; color: var(--text); background: transparent; font-size: .75rem; font-weight: 650; text-align: start; }
+.context-menu button:focus-visible { background: var(--surface-hover); }
+.context-menu button.danger { color: var(--danger); }
+.context-menu button.danger:focus-visible { background: var(--danger-soft); }
 @media (hover: hover) and (pointer: fine) {
-  .message-actions-menu button:hover { background: var(--surface-hover); }
-  .message-actions-menu button.danger:hover { background: var(--danger-soft); }
+  .context-menu button:hover { background: var(--surface-hover); }
+  .context-menu button.danger:hover { background: var(--danger-soft); }
 }
 @media (hover: none) and (pointer: coarse) {
-  .message-bubble, .chat-directory-row[aria-haspopup="menu"] { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; }
-  .message-actions-dismiss, .message-actions-menu button { -webkit-tap-highlight-color: transparent; }
+  .message-bubble, .chat-directory-row[aria-haspopup="menu"], .nomad-destination[aria-haspopup="menu"] { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; }
+  .context-menu-dismiss, .context-menu button { -webkit-tap-highlight-color: transparent; }
 }
 .conversation-detail-empty { display: grid; width: 100%; min-height: 100%; flex: 1; place-items: center; padding: 24px; }
 .message-composer { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; padding: 12px 16px; border-block-start: 1px solid var(--border); background: var(--surface-1); }
@@ -506,6 +506,7 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .nomad-destination { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px; color: var(--text); text-align: start; }
 .nomad-destination:hover { border-color: var(--border-strong); background: var(--surface-hover); }
 .nomad-destination.active { border-color: var(--border-strong); background: var(--accent-soft); }
+.nomad-destination.touch-active { border-color: var(--border-strong); background: var(--surface-hover); }
 .nomad-destination > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .nomad-destination strong { font-size: .78rem; }
 .nomad-destination code { overflow: hidden; color: var(--text-muted); font-size: .65rem; text-overflow: ellipsis; white-space: nowrap; }

@@ -20,13 +20,23 @@
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
+  import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
+  import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
+  import { copyText } from '../../lib/clipboard';
   import MicronPage from './MicronPage.svelte';
   import NomadBookmarkEditor from './NomadBookmarkEditor.svelte';
   import { toast } from '../../lib/notifications/toasts';
 
   type LoadedNomadPage = NomadPage & { identifyBeforeLoad?: boolean };
+  type DestinationActionTarget = {
+    destinationHash: string;
+    path: string;
+    requestData: NomadRequestData;
+    suggestedName: string;
+    bookmarkId?: string;
+  };
 
   let address = $state('');
   let scope = $state<'announces' | 'bookmarks'>('announces');
@@ -56,6 +66,7 @@
     currentIdentifyBeforeLoad: boolean;
     bookmarkId?: string;
   }>();
+  let destinationActions = $state<(DestinationActionTarget & { x: number; y: number }) | undefined>();
 
   const parsedAddress = $derived(parseNomadAddress(address));
   const currentPageTarget = $derived(pendingPageRequest ?? loadedPage);
@@ -87,6 +98,9 @@
     scope === 'announces' ? filteredAnnounces.length : filteredBookmarks.length,
   );
   const heardAtFormatter = $derived(createDateFormatter($locale));
+  const destinationActionBookmark = $derived(destinationActions?.bookmarkId
+    ? $nomadBookmarks.find((bookmark) => bookmark.id === destinationActions?.bookmarkId)
+    : undefined);
 
   const scopes: Array<{ id: 'announces' | 'bookmarks'; label: MessageKey; searchName: MessageKey }> = [
     { id: 'announces', label: 'nomadnet.scope.announces', searchName: 'nomadnet.scope.announces.searchName' },
@@ -116,6 +130,62 @@
       item.destinationHash === destinationHash
         && nomadRequestPath(item.path) === nomadRequestPath(path)
         && sameRequestData(item.requestData ?? {}, requestData));
+  }
+
+  function destinationActionTarget(
+    destinationHash: string,
+    path = '/',
+    requestData: NomadRequestData = {},
+    suggestedName = '',
+    bookmarkId?: string,
+  ): DestinationActionTarget {
+    return {
+      destinationHash,
+      path: nomadRequestPath(path),
+      requestData: { ...requestData },
+      suggestedName,
+      bookmarkId,
+    };
+  }
+
+  function openDestinationActions(
+    target: DestinationActionTarget,
+    clientX: number,
+    clientY: number,
+  ): void {
+    const bookmarkId = target.bookmarkId
+      ?? bookmarkForPage(target.destinationHash, target.path, target.requestData)?.id;
+    destinationActions = {
+      ...target,
+      bookmarkId,
+      x: clientX,
+      y: clientY,
+    };
+  }
+
+  function closeDestinationActions(): void {
+    destinationActions = undefined;
+  }
+
+  function destinationRowClick(target: DestinationActionTarget): void {
+    openDirectoryDestination(target.destinationHash, target.path, target.requestData);
+  }
+
+  async function copyDestinationHash(destinationHash: string): Promise<void> {
+    closeDestinationActions();
+    if (await copyText(destinationHash)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
+  function addDestinationBookmark(): void {
+    if (!destinationActions || !$activeIdentity) return;
+    const target = destinationActions;
+    closeDestinationActions();
+    bookmarkEditor = {
+      address: formatNomadAddress(target.destinationHash, target.path, target.requestData),
+      currentName: target.suggestedName,
+      currentIdentifyBeforeLoad: false,
+    };
   }
 
   async function openDestination(
@@ -589,11 +659,22 @@
           <div class="nomad-destination-list">
             {#each filteredAnnounces as announce (announce.id)}
               {@const current = isCurrentDestination(announce.destinationHash)}
+              {@const actionTarget = destinationActionTarget(
+                announce.destinationHash,
+                '/',
+                {},
+                announce.displayName ?? '',
+              )}
               <button
                 class="nomad-destination"
                 class:active={current}
                 aria-current={current ? 'page' : undefined}
-                onclick={() => openDirectoryDestination(announce.destinationHash)}
+                aria-haspopup="menu"
+                title={$t('nomadnet.destination.actions.open')}
+                onclick={() => destinationRowClick(actionTarget)}
+                use:contextMenuTrigger={{
+                  onopen: (x, y) => openDestinationActions(actionTarget, x, y),
+                }}
               >
                 <span class="destination-mark"><Icon name="network" size={17} /></span>
                 <span>
@@ -612,15 +693,23 @@
           <div class="nomad-destination-list">
             {#each filteredBookmarks as bookmark (bookmark.id)}
               {@const current = isCurrentPage(bookmark.destinationHash, bookmark.path, bookmark.requestData ?? {})}
+              {@const actionTarget = destinationActionTarget(
+                bookmark.destinationHash,
+                bookmark.path,
+                bookmark.requestData ?? {},
+                bookmark.label ?? '',
+                bookmark.id,
+              )}
               <div class="nomad-bookmark-row" class:active={current}>
                 <button
                   class="nomad-destination"
                   aria-current={current ? 'page' : undefined}
-                  onclick={() => openDirectoryDestination(
-                    bookmark.destinationHash,
-                    bookmark.path,
-                    bookmark.requestData ?? {},
-                  )}
+                  aria-haspopup="menu"
+                  title={$t('nomadnet.destination.actions.open')}
+                  onclick={() => destinationRowClick(actionTarget)}
+                  use:contextMenuTrigger={{
+                    onopen: (x, y) => openDestinationActions(actionTarget, x, y),
+                  }}
                 >
                   <span class="destination-mark"><Icon name="bookmark" size={17} /></span>
                   <span>
@@ -703,4 +792,52 @@
     oncancel={() => { bookmarkEditor = undefined; }}
     onsave={saveBookmark}
   />
+{/if}
+
+{#if destinationActions}
+  <ContextMenu
+    x={destinationActions.x}
+    y={destinationActions.y}
+    label={$t('nomadnet.destination.actions.label')}
+    closeLabel={$t('nomadnet.destination.actions.close')}
+    onclose={closeDestinationActions}
+  >
+    <button
+      role="menuitem"
+      onclick={() => { void copyDestinationHash(destinationActions!.destinationHash); }}
+    >
+      <Icon name="copy" size={17} />{$t('nomadnet.destination.actions.copyHash')}
+    </button>
+    {#if destinationActionBookmark}
+      <button
+        role="menuitem"
+        onclick={() => {
+          const bookmark = destinationActionBookmark;
+          closeDestinationActions();
+          if (bookmark) editBookmark(bookmark);
+        }}
+      >
+        <Icon name="edit" size={17} />{$t('nomadnet.destination.actions.editBookmark')}
+      </button>
+      <button
+        class="danger"
+        role="menuitem"
+        onclick={() => {
+          const bookmarkId = destinationActionBookmark?.id;
+          closeDestinationActions();
+          if (bookmarkId) void removeBookmark(bookmarkId);
+        }}
+      >
+        <Icon name="trash" size={17} />{$t('nomadnet.destination.actions.removeBookmark')}
+      </button>
+    {:else}
+      <button
+        role="menuitem"
+        disabled={!$activeIdentity}
+        onclick={addDestinationBookmark}
+      >
+        <Icon name="bookmark" size={17} />{$t('nomadnet.destination.actions.addBookmark')}
+      </button>
+    {/if}
+  </ContextMenu>
 {/if}
