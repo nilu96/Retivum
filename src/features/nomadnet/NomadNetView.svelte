@@ -30,6 +30,14 @@
   import { toast } from '../../lib/notifications/toasts';
 
   type LoadedNomadPage = NomadPage & { identifyBeforeLoad?: boolean };
+  type NomadPageRequest = {
+    destinationHash: string;
+    path: string;
+    requestData: NomadRequestData;
+    identifyBeforeLoad: boolean;
+    mode: 'push' | 'replace';
+    freshLink: boolean;
+  };
   type DestinationActionTarget = {
     destinationHash: string;
     path: string;
@@ -44,12 +52,8 @@
   let directoryExpanded = $state(true);
   let loadedPage = $state<LoadedNomadPage>();
   let loadingPage = $state(false);
-  let pendingPageRequest = $state<{
-    destinationHash: string;
-    path: string;
-    requestData: NomadRequestData;
-    identifyBeforeLoad: boolean;
-  }>();
+  let pendingPageRequest = $state<NomadPageRequest>();
+  let failedPageRequest = $state<NomadPageRequest>();
   let sharingIdentity = $state(false);
   let pageError = $state<'load' | 'link'>();
   let pageErrorCode = $state<string>();
@@ -69,10 +73,13 @@
   let destinationActions = $state<(DestinationActionTarget & { x: number; y: number }) | undefined>();
 
   const parsedAddress = $derived(parseNomadAddress(address));
-  const currentPageTarget = $derived(pendingPageRequest ?? loadedPage);
+  const currentPageTarget = $derived(pendingPageRequest ?? failedPageRequest ?? loadedPage);
+  const canGoBack = $derived(loadingPage
+    ? Boolean(loadedPage)
+    : Boolean((pageError === 'load' && failedPageRequest && loadedPage) || navigationHistory.length));
   const canGoHome = $derived(Boolean(
-    (pendingPageRequest ?? loadedPage)
-      && nomadRequestPath((pendingPageRequest ?? loadedPage)?.path ?? '/') !== NOMAD_DEFAULT_PAGE_PATH,
+    currentPageTarget
+      && nomadRequestPath(currentPageTarget.path) !== NOMAD_DEFAULT_PAGE_PATH,
   ));
   const currentBookmark = $derived(parsedAddress
     ? $nomadBookmarks.find((item) =>
@@ -203,12 +210,16 @@
     address = formatNomadAddress(destinationHash, requestPath, plainRequestData);
     const previousPage = loadedPage;
     const sequence = ++navigationSequence;
-    pendingPageRequest = {
+    const request: NomadPageRequest = {
       destinationHash,
       path: requestPath,
       requestData: plainRequestData,
       identifyBeforeLoad,
+      mode,
+      freshLink,
     };
+    pendingPageRequest = request;
+    failedPageRequest = undefined;
     loadingPage = true;
     loadingStage = 'preparing';
     loadingProgress = undefined;
@@ -252,6 +263,7 @@
       if (sequence !== navigationSequence) return false;
       if (!nextPage) {
         pageError = 'load';
+        failedPageRequest = request;
         return false;
       }
       const nextRequestData = nextPage.requestData ?? {};
@@ -276,6 +288,7 @@
       if (sequence === navigationSequence) {
         pageError = 'load';
         pageErrorCode = 'NOMAD_REQUEST_FAILED';
+        failedPageRequest = request;
       }
       return false;
     } finally {
@@ -330,18 +343,19 @@
   }
 
   function retryPage(): void {
-    if (parsedAddress) void openDestination(
-      parsedAddress.destinationHash,
-      parsedAddress.path,
-      'push',
-      parsedAddress.requestData,
-      false,
-      currentBookmark?.identifyBeforeLoad === true,
+    if (failedPageRequest) void openDestination(
+      failedPageRequest.destinationHash,
+      failedPageRequest.path,
+      failedPageRequest.mode,
+      failedPageRequest.requestData,
+      failedPageRequest.freshLink,
+      failedPageRequest.identifyBeforeLoad,
     );
   }
 
   function reloadPage(): void {
-    const target = pendingPageRequest ?? (loadedPage ? {
+    const activeRequest = pendingPageRequest ?? failedPageRequest;
+    const target = activeRequest ?? (loadedPage ? {
       destinationHash: loadedPage.destinationHash,
       path: loadedPage.path,
       requestData: loadedPage.requestData,
@@ -351,7 +365,7 @@
     void openDestination(
       target.destinationHash,
       target.path,
-      'replace',
+      activeRequest?.mode ?? 'replace',
       target.requestData,
       true,
       target.identifyBeforeLoad === true,
@@ -391,11 +405,24 @@
 
   function goBack(): void {
     if (cancelPendingLoadAndRestorePage()) return;
+    if (pageError === 'load' && failedPageRequest && loadedPage) {
+      failedPageRequest = undefined;
+      pageError = undefined;
+      pageErrorCode = undefined;
+      directoryExpanded = false;
+      address = formatNomadAddress(
+        loadedPage.destinationHash,
+        loadedPage.path,
+        loadedPage.requestData ?? {},
+      );
+      return;
+    }
     const previous = navigationHistory.at(-1);
     if (!previous) return;
     navigationSequence += 1;
     navigationHistory = navigationHistory.slice(0, -1);
     pendingPageRequest = undefined;
+    failedPageRequest = undefined;
     loadingPage = false;
     pageError = undefined;
     pageErrorCode = undefined;
@@ -492,7 +519,7 @@
   }
 
   function goHome(): void {
-    const target = pendingPageRequest ?? loadedPage;
+    const target = pendingPageRequest ?? failedPageRequest ?? loadedPage;
     if (!target || !canGoHome) return;
     if (
       pendingPageRequest
@@ -571,7 +598,7 @@
         class="icon-button"
         aria-label={$t('nomadnet.page.reload')}
         title={$t('nomadnet.page.reload')}
-        disabled={!loadedPage && !pendingPageRequest}
+        disabled={!loadedPage && !pendingPageRequest && !failedPageRequest}
         onclick={reloadPage}
       ><Icon name="sync" size={19} /></button>
       <button
@@ -592,7 +619,7 @@
         type="button"
         aria-label={$t('nomadnet.page.back')}
         title={$t('nomadnet.page.back')}
-        disabled={loadingPage ? !loadedPage : !navigationHistory.length}
+        disabled={!canGoBack}
         onclick={goBack}
       ><Icon name="arrow-left" size={19} /></button>
       <button
@@ -763,7 +790,7 @@
                 : $t('nomadnet.page.error.hint')
               : undefined}
           />
-          {#if pageError === 'load' && parsedAddress}
+          {#if pageError === 'load' && failedPageRequest}
             <button class="button secondary" onclick={retryPage}>{$t('common.retry')}</button>
           {/if}
         </div>

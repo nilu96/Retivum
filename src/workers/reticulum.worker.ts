@@ -95,7 +95,7 @@ interface NomadPageJob {
   destinationHash: string;
   path: string;
   requestData: NomadRequestData;
-  publicKey: string;
+  publicKey?: string;
   identifyBeforeLoad: boolean;
   recoveryAttempts: number;
   startedAt: number;
@@ -1020,8 +1020,8 @@ function emitNomadPageProgress(
 
 function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomadPage' }>): void {
   const destinationHash = normalizeDestinationHash(command.destinationHash);
-  const publicKey = command.publicKey.trim().toLowerCase();
-  if (!node || !identity || !destinationHash || !/^[0-9a-f]{128}$/.test(publicKey)) {
+  const publicKey = command.publicKey?.trim().toLowerCase();
+  if (!node || !identity || !destinationHash || (publicKey !== undefined && !/^[0-9a-f]{128}$/.test(publicKey))) {
     emit({ type: 'nomadPageFailed', requestId: command.requestId, code: 'NOMAD_DESTINATION_UNKNOWN' });
     return;
   }
@@ -1066,7 +1066,7 @@ function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomad
   }
   try {
     const destinationBytes = hexToBytes(destinationHash);
-    if (node.hasPath(destinationBytes)) beginNomadLink(job);
+    if (job.publicKey && node.hasPath(destinationBytes)) beginNomadLink(job);
     else {
       emitNomadPageProgress(job, 'findingPath');
       armNomadPathDiscoveryTimeout(job);
@@ -1152,7 +1152,7 @@ function identifyNomadLink(command: Extract<RuntimeCommand, { type: 'identifyNom
 }
 
 function beginNomadLink(job: NomadPageJob): void {
-  if (!node || nomadLinksByDestination.has(job.destinationHash)) return;
+  if (!node || !job.publicKey || nomadLinksByDestination.has(job.destinationHash)) return;
   for (const pending of nomadPendingJobs.get(job.destinationHash) ?? []) {
     clearNomadJobTimer(pending);
     emitNomadPageProgress(pending, 'establishingLink');
@@ -1241,7 +1241,7 @@ function sendNomadRequest(link: NomadLinkState, job: NomadPageJob): void {
 function armNomadPathDiscoveryTimeout(job: NomadPageJob): void {
   clearNomadJobTimer(job);
   job.timer = setTimeout(
-    () => failNomadJob(job, 'NOMAD_PATH_REQUEST_TIMEOUT'),
+    () => failNomadJob(job, job.publicKey ? 'NOMAD_PATH_REQUEST_TIMEOUT' : 'NOMAD_DESTINATION_UNKNOWN'),
     nomadPathDiscoveryTimeoutMs,
   );
 }
@@ -2036,7 +2036,7 @@ function handleNomadPathFound(event: Record<string, unknown>): void {
   const pending = nomadPendingJobs.get(bytesToHex(destinationHash));
   const hops = node?.hopsTo(destinationHash);
   for (const job of pending ?? []) armNomadPageDeadline(job, hops);
-  if (pending?.[0]) beginNomadLink(pending[0]);
+  if (pending?.[0]?.publicKey) beginNomadLink(pending[0]);
 }
 
 function handleNomadLinkEstablished(event: Record<string, unknown>): void {
@@ -2443,16 +2443,23 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
   }
 
   if (nomadNodeNameHash && equalBytes(nameHash, nomadNodeNameHash)) {
+    const destinationHashHex = bytesToHex(destinationHash);
+    const publicKeyHex = publicKey?.byteLength === 64 ? bytesToHex(publicKey) : undefined;
     emit({
       type: 'nomadAnnounce',
       identityId: identity.id,
-      destinationHash: bytesToHex(destinationHash),
+      destinationHash: destinationHashHex,
       displayName: decodeNomadNodeName(appData),
-      publicKey: publicKey?.byteLength === 64 ? bytesToHex(publicKey) : undefined,
+      publicKey: publicKeyHex,
       interfaceId,
       hops,
       heardAt,
     });
+    const pending = nomadPendingJobs.get(destinationHashHex) ?? [];
+    if (publicKeyHex && pending.length) {
+      for (const job of pending) job.publicKey = publicKeyHex;
+      if (node?.hasPath(destinationHash)) beginNomadLink(pending[0]);
+    }
   }
 
   if (appData) {

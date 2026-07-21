@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { blockedChatDestinations, chatMessages } from './chat-state';
-import { activeIdentity, chatInboundTransfers, reticulumLogs, reticulumRuntime } from './runtime';
+import { activeIdentity, chatInboundTransfers, nomadAnnounces, reticulumLogs, reticulumRuntime } from './runtime';
 
 type RuntimeInternals = {
   cancelChatMessageDelivery(messageId: string): Promise<boolean>;
@@ -26,6 +26,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     chatMessages.set([]);
     chatInboundTransfers.set([]);
     blockedChatDestinations.set([]);
+    nomadAnnounces.set([]);
     reticulumLogs.set([]);
     (reticulumRuntime as unknown as RuntimeInternals).worker = undefined;
   });
@@ -75,6 +76,38 @@ describe('ReticulumRuntimeController chat deletion', () => {
       source: 'wasm',
       code: 'NOMAD_REQUEST_TIMEOUT',
     })]);
+  });
+
+  it('asks the worker to discover an unknown NomadNet destination before failing', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '6'.repeat(32);
+    const onUpdate = vi.fn();
+
+    const pending = reticulumRuntime.requestNomadPage(
+      destinationHash,
+      '/page/index.mu',
+      {},
+      onUpdate,
+    );
+    const command = postMessage.mock.calls[0][0] as { requestId: string; publicKey?: string };
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'requestNomadPage',
+      destinationHash,
+      path: '/page/index.mu',
+    }));
+    expect(command).not.toHaveProperty('publicKey');
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    await internals.handleEvent({
+      type: 'nomadPageFailed',
+      requestId: command.requestId,
+      code: 'NOMAD_DESTINATION_UNKNOWN',
+    });
+    await expect(pending).resolves.toBeUndefined();
+    expect(onUpdate).toHaveBeenCalledWith({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
   });
 
   it('cancels every pending outbound message before deleting the conversation', async () => {

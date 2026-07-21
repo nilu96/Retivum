@@ -402,6 +402,167 @@ describe('NomadNetView', () => {
     expect(screen.getByText('Error code: NOMAD_PATH_REQUEST_TIMEOUT')).toBeInTheDocument();
   });
 
+  it('retries the failed page even after the address input is changed', async () => {
+    const previousHash = '1'.repeat(32);
+    const failedHash = '2'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${previousHash}`,
+      identityId: 'identity',
+      destinationHash: previousHash,
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash: previousHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Previous page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockImplementationOnce((_destination, _path, _requestData, onUpdate) => {
+        onUpdate?.({ type: 'failed', code: 'NOMAD_REQUEST_TIMEOUT' });
+        return Promise.resolve(undefined);
+      })
+      .mockResolvedValueOnce({
+        destinationHash: failedHash,
+        path: '/page/missing.mu',
+        requestData: {},
+        content: '> Retried page',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      });
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(previousHash) }));
+    expect(await screen.findByText('Previous page')).toBeInTheDocument();
+    const addressInput = screen.getByPlaceholderText('destination:/page/path');
+    await fireEvent.input(addressInput, { target: { value: `${failedHash}:/page/missing.mu` } });
+    await fireEvent.submit(addressInput.closest('form')!);
+    expect(await screen.findByText('The destination did not complete the page request before it timed out.')).toBeInTheDocument();
+
+    await fireEvent.input(addressInput, { target: { value: 'not a destination' } });
+    const retry = screen.getByRole('button', { name: 'Try again' });
+    expect(retry).toBeInTheDocument();
+    await fireEvent.click(retry);
+
+    expect(await screen.findByText('Retried page')).toBeInTheDocument();
+    expect(addressInput).toHaveValue(`${failedHash}:/page/missing.mu`);
+    expect(requestPage).toHaveBeenNthCalledWith(
+      3,
+      failedHash,
+      '/page/missing.mu',
+      {},
+      expect.any(Function),
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
+    expect(screen.getByText('Previous page')).toBeInTheDocument();
+  });
+
+  it('reloads the failed destination and preserves the page it was opened from', async () => {
+    const previousHash = '3'.repeat(32);
+    const failedHash = '4'.repeat(32);
+    const unrelatedHash = '5'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${previousHash}`,
+      identityId: 'identity',
+      destinationHash: previousHash,
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash: previousHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Page before failure',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockImplementationOnce((_destination, _path, _requestData, onUpdate) => {
+        onUpdate?.({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
+        return Promise.resolve(undefined);
+      })
+      .mockResolvedValueOnce({
+        destinationHash: failedHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Discovered page',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      });
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(previousHash) }));
+    expect(await screen.findByText('Page before failure')).toBeInTheDocument();
+    const addressInput = screen.getByPlaceholderText('destination:/page/path');
+    await fireEvent.input(addressInput, { target: { value: `${failedHash}:/` } });
+    await fireEvent.submit(addressInput.closest('form')!);
+    expect(await screen.findByText('The destination identity key is unavailable. Wait for a fresh NomadNet announce and try again.'))
+      .toBeInTheDocument();
+
+    await fireEvent.input(addressInput, { target: { value: `${unrelatedHash}:/other` } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
+
+    expect(await screen.findByText('Discovered page')).toBeInTheDocument();
+    expect(addressInput).toHaveValue(`${failedHash}:/page/index.mu`);
+    expect(requestPage).toHaveBeenNthCalledWith(
+      3,
+      failedHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+      true,
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
+    expect(screen.getByText('Page before failure')).toBeInTheDocument();
+  });
+
+  it('keeps existing history intact when an unknown destination fails', async () => {
+    const firstHash = '6'.repeat(32);
+    const secondHash = '7'.repeat(32);
+    const unknownHash = '8'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${firstHash}`,
+      identityId: 'identity',
+      destinationHash: firstHash,
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash: firstHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> First history page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash: secondHash,
+        path: '/page/second.mu',
+        requestData: {},
+        content: '> Second history page',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      })
+      .mockImplementationOnce((_destination, _path, _requestData, onUpdate) => {
+        onUpdate?.({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
+        return Promise.resolve(undefined);
+      });
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(firstHash) }));
+    expect(await screen.findByText('First history page')).toBeInTheDocument();
+    const addressInput = screen.getByPlaceholderText('destination:/page/path');
+    await fireEvent.input(addressInput, { target: { value: `${secondHash}:/page/second.mu` } });
+    await fireEvent.submit(addressInput.closest('form')!);
+    expect(await screen.findByText('Second history page')).toBeInTheDocument();
+
+    await fireEvent.input(addressInput, { target: { value: `${unknownHash}:/page/index.mu` } });
+    await fireEvent.submit(addressInput.closest('form')!);
+    expect(await screen.findByText('The destination identity key is unavailable. Wait for a fresh NomadNet announce and try again.'))
+      .toBeInTheDocument();
+
+    const back = screen.getByRole('button', { name: 'Back one page' });
+    await fireEvent.click(back);
+    expect(screen.getByText('Second history page')).toBeInTheDocument();
+    await fireEvent.click(back);
+    expect(screen.getByText('First history page')).toBeInTheDocument();
+  });
+
   it('reloads the currently displayed page', async () => {
     const destinationHash = '9'.repeat(32);
     activeIdentity.set({

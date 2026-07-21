@@ -646,12 +646,6 @@ class ReticulumRuntimeController {
     const announce = get(nomadAnnounces).find((item) => (
       item.identityId === identity.id && item.destinationHash === normalizedDestination && item.publicKey
     ));
-    if (!announce?.publicKey) {
-      appendLocalLog('warning', 'runtime', 'NOMAD_DESTINATION_KEY_UNKNOWN', { destinationHash: normalizedDestination });
-      onUpdate?.({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
-      return undefined;
-    }
-    const publicKey = announce.publicKey;
     const requestId = crypto.randomUUID();
     return new Promise((resolve) => {
       this.nomadPageWaiters.set(requestId, { resolve, onUpdate });
@@ -661,7 +655,7 @@ class ReticulumRuntimeController {
         destinationHash: normalizedDestination,
         path: nomadRequestPath(path),
         requestData,
-        publicKey,
+        ...(announce?.publicKey ? { publicKey: announce.publicKey } : {}),
         ...(freshLink ? { freshLink: true } : {}),
         ...(identifyBeforeLoad ? { identifyBeforeLoad: true } : {}),
       });

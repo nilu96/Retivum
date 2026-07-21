@@ -92,7 +92,7 @@ export type RuntimeCommand =
       destinationHash: string;
       path: string;
       requestData: NomadRequestData;
-      publicKey: string;
+      publicKey?: string;
       freshLink?: boolean;
       identifyBeforeLoad?: boolean;
     }
