@@ -1111,7 +1111,7 @@ class ReticulumRuntimeController {
       };
       const isNewMessage = !get(chatMessages).some((item) => item.id === message.id);
       chatMessages.update((items) => upsertChatMessage(items, message));
-      if (isNewMessage) noteUnreadChatMessage(message.sourceHash);
+      if (isNewMessage) noteUnreadChatMessage(message.sourceHash, message.id);
       try {
         await this.chatRepository.saveMessage(message);
         appendLocalLog('debug', 'persistence', 'CHAT_MESSAGE_PERSISTED', { messageId: message.messageId });

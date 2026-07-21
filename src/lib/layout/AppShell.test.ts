@@ -15,8 +15,8 @@ describe('AppShell Chat unread indicator', () => {
   });
 
   it('shows the unread count in desktop and mobile navigation', () => {
-    noteUnreadChatMessage('alice');
-    noteUnreadChatMessage('bob');
+    noteUnreadChatMessage('alice', 'alice-1');
+    noteUnreadChatMessage('bob', 'bob-1');
     render(AppShell, { current: 'nomadnet', children: emptyChildren });
 
     expect(screen.getAllByRole('button', { name: 'Chat, 2 new messages' })).toHaveLength(2);
@@ -105,7 +105,7 @@ describe('AppShell Chat unread indicator', () => {
   });
 
   it('keeps the navigation count until a conversation is marked read', async () => {
-    noteUnreadChatMessage('alice');
+    noteUnreadChatMessage('alice', 'alice-1');
     render(AppShell, { current: 'chat', children: emptyChildren });
 
     expect(screen.getAllByRole('button', { name: 'Chat, 1 new message' })).toHaveLength(2);

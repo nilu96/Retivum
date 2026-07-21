@@ -26,6 +26,7 @@
     chatContacts,
     chatMessages,
     markChatMessagesRead,
+    unreadChatMessageIds,
     unreadChatMessageCounts,
   } from '../../infrastructure/reticulum/chat-state';
   import {
@@ -44,6 +45,11 @@
   import { toast } from '../../lib/notifications/toasts';
 
   type ChatScope = 'chats' | 'contacts' | 'announces';
+  type DestinationActionTarget = {
+    destinationHash: string;
+    displayName: string;
+    canDeleteConversation: boolean;
+  };
 
   let scope = $state<ChatScope>('chats');
   let query = $state('');
@@ -76,6 +82,7 @@
   let followLatestMessageLayout = false;
   let deletingContactId = $state<string | undefined>();
   let propagationSyncRequested = $state(false);
+  let openedUnreadMessageIds = $state<string[]>([]);
   let observedIncomingDestination = $state<string | undefined>();
   let observedIncomingMessageId = $state<string | undefined>();
   let messageActions = $state<{ message: ChatMessage; x: number; y: number } | undefined>();
@@ -83,6 +90,7 @@
     destinationHash: string;
     displayName: string;
     blocked: boolean;
+    canDeleteConversation: boolean;
     x: number;
     y: number;
   } | undefined>();
@@ -127,6 +135,13 @@
     failed: 'chat.message.status.failed',
   };
 
+  const verificationKeys: Record<string, MessageKey> = {
+    valid: 'chat.message.verification.valid',
+    verified: 'chat.message.verification.valid',
+    invalid: 'chat.message.verification.invalid',
+    unverified: 'chat.message.verification.unverified',
+  };
+
   const conversations = $derived(chatConversationSummaries($chatMessages, $chatAnnounces, $chatContacts));
   const blockedDestinationHashes = $derived(new Set($blockedChatDestinations.map((item) => item.destinationHash)));
   const normalizedQuery = $derived(query.trim().toLowerCase());
@@ -152,6 +167,9 @@
   ));
   const contactEditorContact = $derived($chatContacts.find(
     (contact) => contact.destinationHash === contactEditorDestination,
+  ));
+  const chatActionContact = $derived($chatContacts.find(
+    (contact) => contact.destinationHash === chatActions?.destinationHash,
   ));
   const selectedName = $derived(selectedContact?.name ?? selectedAnnounce?.displayName);
   const selectedDestinationBlocked = $derived(Boolean(
@@ -191,6 +209,7 @@
     }
     if (!destination || !latestIncomingId || latestIncomingId === observedIncomingMessageId) return;
     observedIncomingMessageId = latestIncomingId;
+    openedUnreadMessageIds = [latestIncomingId];
     void scrollToLatestMessage();
   });
 
@@ -289,8 +308,19 @@
   }
 
   async function selectDestination(destinationHash: string): Promise<void> {
+    const incomingMessageIds = new Set($chatMessages
+      .filter((message) => chatMessagePeerHash(message) === destinationHash
+        && chatMessageDirection(message) === 'incoming')
+      .map((message) => message.id));
+    openedUnreadMessageIds = ($unreadChatMessageIds[destinationHash] ?? [])
+      .filter((messageId) => incomingMessageIds.has(messageId));
     selectedDestination = destinationHash;
     await scrollToLatestMessage();
+  }
+
+  function closeConversation(): void {
+    openedUnreadMessageIds = [];
+    selectedDestination = undefined;
   }
 
   async function saveContact(name: string): Promise<boolean> {
@@ -325,14 +355,21 @@
     };
   }
 
-  function openChatActions(conversation: ChatConversationSummary, clientX: number, clientY: number): void {
-    const menuWidth = 210;
-    const menuHeight = 104;
-    messageActions = undefined;
-    chatActions = {
+  function conversationActionTarget(conversation: ChatConversationSummary): DestinationActionTarget {
+    return {
       destinationHash: conversation.destinationHash,
       displayName: conversation.displayName ?? shortHash(conversation.destinationHash),
-      blocked: blockedDestinationHashes.has(conversation.destinationHash),
+      canDeleteConversation: true,
+    };
+  }
+
+  function openChatActions(target: DestinationActionTarget, clientX: number, clientY: number): void {
+    const menuWidth = 210;
+    const menuHeight = target.canDeleteConversation ? 200 : 152;
+    messageActions = undefined;
+    chatActions = {
+      ...target,
+      blocked: blockedDestinationHashes.has(target.destinationHash),
       x: Math.max(12, Math.min(clientX, window.innerWidth - menuWidth - 12)),
       y: Math.max(12, Math.min(clientY, window.innerHeight - menuHeight - 12)),
     };
@@ -343,17 +380,17 @@
     suppressConversationClick = false;
   }
 
-  function chatContextMenu(event: MouseEvent, conversation: ChatConversationSummary): void {
+  function chatContextMenu(event: MouseEvent, target: DestinationActionTarget): void {
     event.preventDefault();
     if (Date.now() < suppressNativeContextMenuUntil) return;
     cancelMessageLongPress();
-    openChatActions(conversation, event.clientX, event.clientY);
+    openChatActions(target, event.clientX, event.clientY);
   }
 
-  function chatPointerDown(event: PointerEvent, conversation: ChatConversationSummary): void {
+  function chatPointerDown(event: PointerEvent, target: DestinationActionTarget): void {
     if (event.pointerType !== 'touch' || event.button !== 0) return;
     cancelMessageLongPress();
-    pressedChatDestination = conversation.destinationHash;
+    pressedChatDestination = target.destinationHash;
     longPressPointerId = event.pointerId;
     longPressOrigin = { x: event.clientX, y: event.clientY };
     longPressTimer = setTimeout(() => {
@@ -361,24 +398,15 @@
       longPressTriggered = true;
       suppressNativeContextMenuUntil = Date.now() + 1_000;
       suppressConversationClick = true;
-      openChatActions(conversation, event.clientX, event.clientY);
+      openChatActions(target, event.clientX, event.clientY);
     }, 550);
   }
 
-  function directoryPointerDown(event: PointerEvent, destinationHash: string): void {
-    if (event.pointerType !== 'touch' || event.button !== 0) return;
-    pressedChatDestination = destinationHash;
-  }
-
-  function directoryPointerEnd(event: PointerEvent): void {
-    if (event.pointerType === 'touch') pressedChatDestination = undefined;
-  }
-
-  function chatActionsKeydown(event: KeyboardEvent, conversation: ChatConversationSummary): void {
+  function chatActionsKeydown(event: KeyboardEvent, target: DestinationActionTarget): void {
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
     event.preventDefault();
     const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-    openChatActions(conversation, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    openChatActions(target, bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
   }
 
   async function chatRowClick(destinationHash: string): Promise<void> {
@@ -462,7 +490,7 @@
         return;
       }
       deleteConfirmation = undefined;
-      if (selectedDestination === destinationHash) selectedDestination = undefined;
+      if (selectedDestination === destinationHash) closeConversation();
     } catch {
       toast.error('chat.conversation.actions.deleteError');
     } finally {
@@ -520,6 +548,33 @@
     }
   }
 
+  async function copyDestinationHash(destinationHash: string): Promise<void> {
+    closeChatActions();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(destinationHash);
+      } else {
+        const input = document.createElement('textarea');
+        input.value = destinationHash;
+        input.style.position = 'fixed';
+        input.style.opacity = '0';
+        document.body.append(input);
+        input.select();
+        const copiedWithFallback = document.execCommand('copy');
+        input.remove();
+        if (!copiedWithFallback) throw new Error('COPY_FAILED');
+      }
+      toast.success('common.copied');
+    } catch {
+      toast.error('common.copyFailed');
+    }
+  }
+
+  function openContactEditor(destinationHash: string): void {
+    closeChatActions();
+    contactEditorDestination = destinationHash;
+  }
+
   async function sendMessage(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const content = composerContent.trim();
@@ -528,6 +583,7 @@
     try {
       const result = await reticulumRuntime.sendChatMessage(selectedDestination, content, '', composerAttachments);
       if (result.ok) {
+        openedUnreadMessageIds = [];
         composerContent = '';
         composerAttachments = [];
         attachmentMenuOpen = false;
@@ -829,6 +885,7 @@
         <div class="chat-directory-list">
           {#each visibleConversations as conversation (conversation.destinationHash)}
             {@const unreadCount = $unreadChatMessageCounts[conversation.destinationHash] ?? 0}
+            {@const actionTarget = conversationActionTarget(conversation)}
             <button
               class="chat-directory-row"
               class:active={selectedDestination === conversation.destinationHash}
@@ -838,13 +895,13 @@
                 name: conversation.displayName ?? shortHash(conversation.destinationHash),
               })}
               onclick={() => { void chatRowClick(conversation.destinationHash); }}
-              oncontextmenu={(event) => chatContextMenu(event, conversation)}
-              onpointerdown={(event) => chatPointerDown(event, conversation)}
+              oncontextmenu={(event) => chatContextMenu(event, actionTarget)}
+              onpointerdown={(event) => chatPointerDown(event, actionTarget)}
               onpointermove={messagePointerMove}
               onpointerup={cancelMessageLongPress}
               onpointercancel={cancelMessageLongPress}
               onpointerleave={cancelMessageLongPress}
-              onkeydown={(event) => chatActionsKeydown(event, conversation)}
+              onkeydown={(event) => chatActionsKeydown(event, actionTarget)}
             >
               <span class="chat-peer-avatar">{(conversation.displayName ?? conversation.destinationHash).slice(0, 1).toUpperCase()}</span>
               <span class="chat-row-copy">
@@ -873,15 +930,24 @@
       {:else if scope === 'contacts' && visibleContacts.length > 0}
         <div class="chat-directory-list">
           {#each visibleContacts as contact (contact.id)}
+            {@const actionTarget = {
+              destinationHash: contact.destinationHash,
+              displayName: contact.name,
+              canDeleteConversation: false,
+            }}
             <div class="chat-contact-row" class:active={selectedDestination === contact.destinationHash}>
               <button
                 class="chat-directory-row"
                 class:touch-active={pressedChatDestination === contact.destinationHash}
-                onclick={() => { selectDestination(contact.destinationHash); }}
-                onpointerdown={(event) => directoryPointerDown(event, contact.destinationHash)}
-                onpointerup={directoryPointerEnd}
-                onpointercancel={directoryPointerEnd}
-                onpointerleave={directoryPointerEnd}
+                aria-haspopup="menu"
+                onclick={() => { void chatRowClick(contact.destinationHash); }}
+                oncontextmenu={(event) => chatContextMenu(event, actionTarget)}
+                onpointerdown={(event) => chatPointerDown(event, actionTarget)}
+                onpointermove={messagePointerMove}
+                onpointerup={cancelMessageLongPress}
+                onpointercancel={cancelMessageLongPress}
+                onpointerleave={cancelMessageLongPress}
+                onkeydown={(event) => chatActionsKeydown(event, actionTarget)}
               >
                 <span class="chat-peer-avatar">{contact.name.slice(0, 1).toUpperCase()}</span>
                 <span class="chat-row-copy">
@@ -920,15 +986,24 @@
       {:else if scope === 'announces' && visibleAnnounces.length > 0}
         <div class="chat-directory-list">
           {#each visibleAnnounces as announce (announce.id)}
+            {@const actionTarget = {
+              destinationHash: announce.destinationHash,
+              displayName: announce.displayName ?? shortHash(announce.destinationHash),
+              canDeleteConversation: false,
+            }}
             <button
               class="chat-directory-row"
               class:active={selectedDestination === announce.destinationHash}
               class:touch-active={pressedChatDestination === announce.destinationHash}
-              onclick={() => { selectDestination(announce.destinationHash); }}
-              onpointerdown={(event) => directoryPointerDown(event, announce.destinationHash)}
-              onpointerup={directoryPointerEnd}
-              onpointercancel={directoryPointerEnd}
-              onpointerleave={directoryPointerEnd}
+              aria-haspopup="menu"
+              onclick={() => { void chatRowClick(announce.destinationHash); }}
+              oncontextmenu={(event) => chatContextMenu(event, actionTarget)}
+              onpointerdown={(event) => chatPointerDown(event, actionTarget)}
+              onpointermove={messagePointerMove}
+              onpointerup={cancelMessageLongPress}
+              onpointercancel={cancelMessageLongPress}
+              onpointerleave={cancelMessageLongPress}
+              onkeydown={(event) => chatActionsKeydown(event, actionTarget)}
             >
               <span class="chat-peer-avatar announce">{(announce.displayName ?? announce.destinationHash).slice(0, 1).toUpperCase()}</span>
               <span class="chat-row-copy">
@@ -965,7 +1040,7 @@
         <button
           class="icon-button conversation-back"
           aria-label={$t('common.back')}
-          onclick={() => { selectedDestination = undefined; }}
+          onclick={closeConversation}
         ><Icon name="arrow-right" size={19} /></button>
         <div class="conversation-peer">
           <strong>{selectedName ?? shortHash(selectedDestination)}</strong>
@@ -1010,10 +1085,12 @@
         {#if selectedMessages.length > 0 || selectedInboundTransfers.length > 0}
           {#each selectedMessages as message (message.id)}
             {@const displayStatus = chatMessageDisplayStatus(message)}
+            {@const isOpenedUnread = openedUnreadMessageIds.includes(message.id)}
             <div
               class="message-bubble"
               class:outgoing={chatMessageDirection(message) === 'outgoing'}
               class:incoming={chatMessageDirection(message) === 'incoming'}
+              class:has-new={isOpenedUnread}
               role="button"
               tabindex="0"
               aria-haspopup="menu"
@@ -1026,8 +1103,13 @@
               onpointerleave={cancelMessageLongPress}
               onkeydown={(event) => messageActionsKeydown(event, message)}
             >
-              {#if message.title}<strong>{message.title}</strong>{/if}
-              {#if message.content}<p>{message.content}</p>{/if}
+              {#if isOpenedUnread}
+                <span class="message-new-badge">{$t('chat.message.new')}</span>
+              {/if}
+              <div class="message-copy">
+                {#if message.title}<strong>{message.title}</strong>{/if}
+                {#if message.content}<p>{message.content}</p>{/if}
+              </div>
               {#if message.attachments?.length}
                 <div class="message-attachments">
                   {#each message.attachments as attachment, index (`${attachment.name}:${index}`)}
@@ -1052,6 +1134,17 @@
               {/if}
               <footer>
                 <time>{displayDate(message)}</time>
+                {#if chatMessageDirection(message) === 'incoming'
+                  && message.verification
+                  && message.verification !== 'valid'
+                  && message.verification !== 'verified'}
+                  <span
+                    class="message-verification-badge"
+                    class:invalid={message.verification === 'invalid'}
+                  >
+                    {$t(verificationKeys[message.verification] ?? 'chat.message.verification.unverified')}
+                  </span>
+                {/if}
                 {#if chatMessageDirection(message) === 'outgoing' && displayStatus}
                   <span class:failed={displayStatus === 'failed'}>
                     {#if displayStatus === 'sending' && message.attempts !== undefined && message.maxAttempts !== undefined}
@@ -1062,8 +1155,6 @@
                       {$t(statusKeys[displayStatus])}
                     {/if}
                   </span>
-                {:else if message.verification}
-                  <span>{$t('chat.message.verification', { state: message.verification })}</span>
                 {/if}
               </footer>
             </div>

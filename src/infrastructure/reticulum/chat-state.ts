@@ -8,27 +8,34 @@ export const chatAnnounces = writable<ChatAnnounce[]>([]);
 export const chatContacts = writable<ChatContact[]>([]);
 export const chatMessages = writable<ChatMessage[]>([]);
 export const blockedChatDestinations = writable<ChatBlockedDestination[]>([]);
-export const unreadChatMessageCounts = writable<Record<string, number>>({});
+export const unreadChatMessageIds = writable<Record<string, string[]>>({});
+export const unreadChatMessageCounts = derived(
+  unreadChatMessageIds,
+  (messages) => Object.fromEntries(
+    Object.entries(messages).map(([destinationHash, messageIds]) => [destinationHash, messageIds.length]),
+  ),
+);
 export const unreadChatMessageCount = derived(
-  unreadChatMessageCounts,
-  (counts) => Object.values(counts).reduce((total, count) => total + count, 0),
+  unreadChatMessageIds,
+  (messages) => Object.values(messages).reduce((total, messageIds) => total + messageIds.length, 0),
 );
 
-export function noteUnreadChatMessage(destinationHash: string): void {
-  unreadChatMessageCounts.update((counts) => ({
-    ...counts,
-    [destinationHash]: (counts[destinationHash] ?? 0) + 1,
-  }));
+export function noteUnreadChatMessage(destinationHash: string, messageId: string): void {
+  unreadChatMessageIds.update((messages) => {
+    const current = messages[destinationHash] ?? [];
+    if (current.includes(messageId)) return messages;
+    return { ...messages, [destinationHash]: [...current, messageId] };
+  });
 }
 
 export function markChatMessagesRead(destinationHash?: string): void {
   if (!destinationHash) {
-    unreadChatMessageCounts.set({});
+    unreadChatMessageIds.set({});
     return;
   }
-  unreadChatMessageCounts.update((counts) => {
-    if (!(destinationHash in counts)) return counts;
-    const remaining = { ...counts };
+  unreadChatMessageIds.update((messages) => {
+    if (!(destinationHash in messages)) return messages;
+    const remaining = { ...messages };
     delete remaining[destinationHash];
     return remaining;
   });

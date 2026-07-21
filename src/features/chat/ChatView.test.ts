@@ -134,7 +134,39 @@ describe('ChatView', () => {
     expect(screen.getByRole('log', { name: 'Conversation messages' })).toBeInTheDocument();
     expect(screen.getByText('Greeting')).toBeInTheDocument();
     expect(screen.getAllByText('Hello from LXMF')).toHaveLength(2);
-    expect(screen.getByText('Verification: verified')).toBeInTheDocument();
+    expect(screen.queryByText('Valid')).not.toBeInTheDocument();
+  });
+
+  it('colors unverified and invalid message badges by verification state', async () => {
+    const sourceHash = 'f'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:unverified-message',
+      identityId: 'identity',
+      messageId: 'unverified-message',
+      sourceHash,
+      destinationHash: 'd'.repeat(32),
+      title: '',
+      content: 'Unverified message',
+      verification: 'unverified',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: 'identity:invalid-message',
+      identityId: 'identity',
+      messageId: 'invalid-message',
+      sourceHash,
+      destinationHash: 'd'.repeat(32),
+      title: '',
+      content: 'Invalid message',
+      verification: 'invalid',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Invalid message/ }));
+
+    expect(screen.getByText('Unverified')).toHaveClass('message-verification-badge');
+    expect(screen.getByText('Unverified')).not.toHaveClass('valid', 'invalid');
+    expect(screen.getByText('Invalid')).toHaveClass('message-verification-badge', 'invalid');
   });
 
   it('scrolls to the latest message when a conversation is opened', async () => {
@@ -736,8 +768,8 @@ describe('ChatView', () => {
       content: 'Second unread',
       receivedAt: '2026-07-16T10:01:00.000Z',
     }]);
-    noteUnreadChatMessage(sourceHash);
-    noteUnreadChatMessage(sourceHash);
+    noteUnreadChatMessage(sourceHash, 'identity:unread-1');
+    noteUnreadChatMessage(sourceHash, 'identity:unread-2');
     render(ChatView);
 
     const conversation = screen.getByRole('button', { name: /Second unread/ });
@@ -746,6 +778,75 @@ describe('ChatView', () => {
 
     await fireEvent.click(conversation);
     await waitFor(() => expect(screen.queryByLabelText('2 unread messages')).not.toBeInTheDocument());
+    expect(screen.getAllByText('New')).toHaveLength(2);
+
+    chatMessages.update((messages) => [...messages, {
+      id: 'identity:unread-3',
+      identityId: 'identity',
+      messageId: 'unread-3',
+      sourceHash,
+      destinationHash: '5'.repeat(32),
+      title: '',
+      content: 'Received while open',
+      receivedAt: '2026-07-16T10:02:00.000Z',
+    }]);
+    noteUnreadChatMessage(sourceHash, 'identity:unread-3');
+
+    await waitFor(() => expect(screen.getAllByText('New')).toHaveLength(1));
+    const receivedMessage = screen.getAllByText('Received while open').find((element) => element.tagName === 'P');
+    expect(receivedMessage?.closest('.message-bubble')).toHaveTextContent('New');
+    expect(screen.getByText('First unread').closest('.message-bubble')).not.toHaveTextContent('New');
+    expect(screen.getByText('Second unread').closest('.message-bubble')).not.toHaveTextContent('New');
+  });
+
+  it('clears open-chat unread markers after sending a new message', async () => {
+    const sourceHash = '7'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:send-marker',
+      identityId: 'identity',
+      messageId: 'send-marker',
+      sourceHash,
+      destinationHash: '5'.repeat(32),
+      title: '',
+      content: 'Unread before reply',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    noteUnreadChatMessage(sourceHash, 'identity:send-marker');
+    vi.spyOn(reticulumRuntime, 'sendChatMessage').mockResolvedValue({ ok: true });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Unread before reply/ }));
+    expect(screen.getByText('New')).toBeInTheDocument();
+
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Reply' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
+
+    await waitFor(() => expect(screen.queryByText('New')).not.toBeInTheDocument());
+  });
+
+  it('does not restore unread markers after the conversation is closed', async () => {
+    const sourceHash = '8'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:close-marker',
+      identityId: 'identity',
+      messageId: 'close-marker',
+      sourceHash,
+      destinationHash: '5'.repeat(32),
+      title: '',
+      content: 'Unread before close',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    noteUnreadChatMessage(sourceHash, 'identity:close-marker');
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Unread before close/ }));
+    expect(screen.getByText('New')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Unread before close/ }));
+
+    expect(screen.queryByText('New')).not.toBeInTheDocument();
   });
 
   it('reacts to announces and messages received after the view is mounted', async () => {
