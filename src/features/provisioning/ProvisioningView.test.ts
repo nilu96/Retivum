@@ -226,7 +226,7 @@ describe('ProvisioningView', () => {
       expect.any(AbortSignal),
     );
     expect(await screen.findByRole('status')).toHaveTextContent(
-      `Probing Workshop router <${announcedNode.destinationHash.slice(0, 8)}…${announcedNode.destinationHash.slice(-6)}>. Waiting for a response ...`,
+      `Probe sent to Workshop router <${announcedNode.destinationHash.slice(0, 8)}…${announcedNode.destinationHash.slice(-6)}>. Waiting for a response…`,
     );
     expect(screen.getByRole('button', { name: 'Cancel activity' })).toBeInTheDocument();
 

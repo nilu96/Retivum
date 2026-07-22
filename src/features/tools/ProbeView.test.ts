@@ -113,10 +113,10 @@ describe('ProbeView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
 
     const history = screen.getByRole('list', { name: 'Probe results, newest first' });
-    expect(within(history).getByText('Waiting for proof…')).toBeInTheDocument();
+    expect(within(history).getByText('Waiting for response…')).toBeInTheDocument();
     expect(within(history).getByRole('listitem').querySelector('time')).toBeNull();
-    expect(screen.getByText(`Probing <${'c'.repeat(8)}…${'c'.repeat(6)}>. Waiting for a response ...`)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Waiting for proof…' })).toBeDisabled();
+    expect(screen.getByText(`Probe sent to <${'c'.repeat(8)}…${'c'.repeat(6)}>. Waiting for a response…`)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Waiting for response…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Drop path' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel probe' })).toBeInTheDocument();
 
@@ -124,7 +124,7 @@ describe('ProbeView', () => {
     expect(screen.getByRole('button', { name: 'Send probe' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Drop path' })).toBeEnabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
-    expect(within(history).getAllByText('Waiting for proof…')).toHaveLength(2);
+    expect(within(history).getAllByText('Waiting for response…')).toHaveLength(2);
 
     for (const cancelButton of screen.getAllByRole('button', { name: 'Cancel probe' })) {
       await fireEvent.click(cancelButton);

@@ -680,7 +680,7 @@ describe('ChatView', () => {
 
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
     expect(probe).toHaveBeenCalledWith(destinationHash, 'lxmf.delivery', 22_000, 8, expect.any(AbortSignal));
-    expect(await screen.findByRole('status')).toHaveTextContent(`Probing Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}>. Waiting for a response ...`);
+    expect(await screen.findByRole('status')).toHaveTextContent(`Probe sent to Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}>. Waiting for a response…`);
     expect(screen.getByRole('button', { name: 'Cancel activity' })).toBeInTheDocument();
     await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
     expect(screen.getByRole('menuitem', { name: 'Probe destination' })).toBeDisabled();

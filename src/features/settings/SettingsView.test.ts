@@ -25,7 +25,7 @@ describe('SettingsView blocked destinations', () => {
   it('shows two blocked destinations until the list is expanded', async () => {
     render(SettingsView);
 
-    expect(screen.getByRole('switch', { name: /Only receive messages from contacts/ })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Only accept messages from contacts/ })).toBeInTheDocument();
 
     expect(screen.getByText('1'.repeat(32))).toBeInTheDocument();
     expect(screen.queryByText('3'.repeat(32))).not.toBeInTheDocument();

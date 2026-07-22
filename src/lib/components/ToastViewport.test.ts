@@ -30,7 +30,7 @@ describe('ToastViewport', () => {
 
     const activity = liveActivity.start('probe.activity.pending', { destination: '1234…abcd' });
     const pending = await screen.findByRole('status');
-    expect(pending).toHaveTextContent('Probing <1234…abcd>. Waiting for a response ...');
+    expect(pending).toHaveTextContent('Probe sent to <1234…abcd>. Waiting for a response…');
     expect(pending).toHaveAttribute('aria-busy', 'true');
     expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument();
 
