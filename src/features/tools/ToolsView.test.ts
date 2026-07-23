@@ -8,13 +8,13 @@ describe('ToolsView', () => {
 
     expect(screen.getByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Reticulum logs' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Path table management' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Path management' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Probing' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Status details' })).toBeInTheDocument();
     expect(screen.getAllByText('Coming soon')).toHaveLength(1);
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Remote provisioning',
-      'Path table management',
+      'Path management',
       'Probing',
       'Status details',
       'Reticulum logs',

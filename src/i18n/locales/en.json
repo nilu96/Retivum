@@ -564,7 +564,7 @@
   "tools.provisioning.description": "Discover and configure authorized microReticulum devices over native Reticulum links.",
   "tools.logs.title": "Reticulum logs",
   "tools.logs.description": "Inspect current-session events from the Reticulum worker and interfaces.",
-  "tools.pathTable.title": "Path table management",
+  "tools.pathTable.title": "Path management",
   "tools.pathTable.description": "Inspect and manage the Reticulum destinations and paths currently known to this device.",
   "tools.probe.title": "Probing",
   "tools.probe.description": "Probe a Reticulum destination to examine reachability and path behavior.",
