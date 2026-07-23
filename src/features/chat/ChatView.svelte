@@ -601,6 +601,16 @@
     else toast.error('common.copyFailed');
   }
 
+  function messageText(message: ChatMessage): string {
+    return [message.title, message.content].filter(Boolean).join('\n\n');
+  }
+
+  async function copyMessageText(message: ChatMessage): Promise<void> {
+    messageActions = undefined;
+    if (await copyText(messageText(message))) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
   function probeDestination(destinationHash: string, displayName: string): void {
     closeChatActions();
     showDestinationProbeActivity({
@@ -1435,6 +1445,14 @@
     closeLabel={$t('chat.message.actions.close')}
     onclose={() => { messageActions = undefined; }}
   >
+    {#if messageText(messageActions.message)}
+      <button
+        role="menuitem"
+        onclick={() => { void copyMessageText(messageActions!.message); }}
+      >
+        <Icon name="copy" size={17} />{$t('chat.message.actions.copyText')}
+      </button>
+    {/if}
     {#if chatMessageDirection(messageActions.message) === 'outgoing'
       && (chatMessageDisplayStatus(messageActions.message) === 'queued'
         || chatMessageDisplayStatus(messageActions.message) === 'sending')}

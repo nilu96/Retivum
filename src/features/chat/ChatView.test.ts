@@ -547,6 +547,45 @@ describe('ChatView', () => {
     expect(retry).toHaveBeenCalledWith('failed-message');
   });
 
+  it('copies a message title and body from its context menu', async () => {
+    const destinationHash = '5'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:copy-message',
+      identityId: 'identity',
+      messageId: 'copy-message',
+      sourceHash: destinationHash,
+      destinationHash: '6'.repeat(32),
+      title: 'Message title',
+      content: 'Message body',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(ChatView);
+
+      await fireEvent.click(screen.getByRole('button', { name: /Message body/ }));
+      await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Message body'), {
+        clientX: 100,
+        clientY: 100,
+      });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy message text' }));
+
+      expect(writeText).toHaveBeenCalledWith('Message title\n\nMessage body');
+      expect(screen.queryByRole('menu', { name: 'Message actions' })).not.toBeInTheDocument();
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
   it('aborts a sending message without deleting it and then offers retry', async () => {
     const destinationHash = '6'.repeat(32);
     chatMessages.set([{

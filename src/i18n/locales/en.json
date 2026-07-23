@@ -112,6 +112,7 @@
   "chat.message.actions.open": "Open actions for message: {message}",
   "chat.message.actions.label": "Message actions",
   "chat.message.actions.close": "Close message actions",
+  "chat.message.actions.copyText": "Copy message text",
   "chat.message.actions.abort": "Abort sending",
   "chat.message.actions.retry": "Retry sending",
   "chat.message.actions.delete": "Delete message",
