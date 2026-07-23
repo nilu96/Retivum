@@ -22,6 +22,7 @@ import ChatView from './ChatView.svelte';
 
 describe('ChatView', () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     chatAnnounces.set([]);
     chatContacts.set([]);
     chatMessages.set([]);
@@ -1203,5 +1204,134 @@ describe('ChatView', () => {
       name: 'notes.txt',
       mimeType: 'text/plain',
     })]);
+  });
+
+  it('keeps text and attachment drafts scoped to their conversation', async () => {
+    const aliceHash = 'a'.repeat(32);
+    const bobHash = 'b'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:alice-message',
+      identityId: 'identity',
+      messageId: 'alice-message',
+      sourceHash: aliceHash,
+      destinationHash: '1'.repeat(32),
+      title: '',
+      content: 'Message from Alice',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: 'identity:bob-message',
+      identityId: 'identity',
+      messageId: 'bob-message',
+      sourceHash: bobHash,
+      destinationHash: '1'.repeat(32),
+      title: '',
+      content: 'Message from Bob',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message from Alice/ }));
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    await fireEvent.input(composer, { target: { value: 'Draft for Alice' } });
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]:not([accept])');
+    const file = new File(['alice attachment'], 'alice-notes.txt', { type: 'text/plain' });
+    Object.defineProperty(file, 'arrayBuffer', {
+      value: async () => new TextEncoder().encode('alice attachment').buffer,
+    });
+    expect(input).not.toBeNull();
+    if (input) await fireEvent.change(input, { target: { files: [file] } });
+    expect(await screen.findByText('alice-notes.txt')).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message from Bob/ }));
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('');
+    expect(screen.queryByText('alice-notes.txt')).not.toBeInTheDocument();
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Draft for Bob' },
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message from Alice/ }));
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Draft for Alice');
+    expect(screen.getByText('alice-notes.txt')).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message from Bob/ }));
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Draft for Bob');
+    expect(screen.queryByText('alice-notes.txt')).not.toBeInTheDocument();
+  });
+
+  it('stops a voice recording when its conversation closes and keeps the audio in that draft', async () => {
+    const destinationHash = 'c'.repeat(32);
+    const stopTrack = vi.fn();
+    const stopRecording = vi.fn();
+
+    class MockFile extends Blob {
+      readonly name: string;
+      readonly lastModified: number;
+
+      constructor(parts: BlobPart[], name: string, options?: FilePropertyBag) {
+        super(parts, options);
+        this.name = name;
+        this.lastModified = options?.lastModified ?? Date.now();
+      }
+    }
+
+    class MockMediaRecorder {
+      static isTypeSupported(mimeType: string): boolean {
+        return mimeType === 'audio/mp4';
+      }
+
+      state: RecordingState = 'inactive';
+      ondataavailable: ((event: BlobEvent) => void) | null = null;
+      onstop: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      start(): void {
+        this.state = 'recording';
+      }
+
+      stop(): void {
+        stopRecording();
+        this.state = 'inactive';
+        this.ondataavailable?.({
+          data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/mp4' }),
+        } as BlobEvent);
+        this.onstop?.();
+      }
+    }
+
+    vi.stubGlobal('File', MockFile);
+    vi.stubGlobal('MediaRecorder', MockMediaRecorder);
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn().mockResolvedValue({
+          getTracks: () => [{ stop: stopTrack }],
+        }),
+      },
+    });
+    chatMessages.set([{
+      id: 'identity:recording-message',
+      identityId: 'identity',
+      messageId: 'recording-message',
+      sourceHash: destinationHash,
+      destinationHash: '1'.repeat(32),
+      title: '',
+      content: 'Conversation with recording',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    const conversation = screen.getByRole('button', { name: /Conversation with recording/ });
+    await fireEvent.click(conversation);
+    await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Record audio message' }));
+    expect(await screen.findByRole('button', { name: 'Stop recording' })).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(stopRecording).toHaveBeenCalledOnce();
+    expect(stopTrack).toHaveBeenCalledOnce();
+
+    await fireEvent.click(conversation);
+    expect(await screen.findByText(/voice-message-.*\.m4a/)).toBeInTheDocument();
   });
 });

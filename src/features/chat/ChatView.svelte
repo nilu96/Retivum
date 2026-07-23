@@ -58,12 +58,17 @@
     destinationHash: string;
     displayName: string;
   };
+  type ConversationDraft = {
+    content: string;
+    attachments: ChatAttachment[];
+  };
 
   let scope = $state<ChatScope>('chats');
   let query = $state('');
   let selectedDestination = $state<string | undefined>();
   let contactEditorDestination = $state<string | undefined>();
   let newConversationOpen = $state(false);
+  const conversationDrafts = new Map<string, ConversationDraft>();
   let composerContent = $state('');
   let composerAttachments = $state<ChatAttachment[]>([]);
   let attachmentMenuOpen = $state(false);
@@ -76,6 +81,7 @@
   let recordingTimer: ReturnType<typeof setTimeout> | undefined;
   let recordingChunks: Blob[] = [];
   let recordingMimeType = '';
+  let recordingDestination: string | undefined;
   let recordingAudioContext: AudioContext | undefined;
   let recordingAudioSource: MediaStreamAudioSourceNode | undefined;
   let recordingAnalyser: AnalyserNode | undefined;
@@ -317,6 +323,43 @@
     messageFeedAtBottom = !messageFeedScrollable || remainingScroll <= 2;
   }
 
+  function storeConversationDraft(
+    destinationHash: string,
+    content: string,
+    attachments: ChatAttachment[],
+  ): void {
+    if (!content && attachments.length === 0) {
+      conversationDrafts.delete(destinationHash);
+      return;
+    }
+    conversationDrafts.set(destinationHash, {
+      content,
+      attachments: [...attachments],
+    });
+  }
+
+  function storeSelectedConversationDraft(): void {
+    if (!selectedDestination) return;
+    storeConversationDraft(selectedDestination, composerContent, composerAttachments);
+  }
+
+  function restoreConversationDraft(destinationHash: string): void {
+    const draft = conversationDrafts.get(destinationHash);
+    composerContent = draft?.content ?? '';
+    composerAttachments = draft ? [...draft.attachments] : [];
+    attachmentMenuOpen = false;
+    void tick().then(() => resizeComposer());
+  }
+
+  function stopConversationRecording(destinationHash: string | undefined): void {
+    if (!destinationHash || recordingDestination !== destinationHash) return;
+    if (recording) {
+      if (mediaRecorder?.state === 'recording') mediaRecorder.stop();
+      return;
+    }
+    recordingDestination = undefined;
+  }
+
   async function selectDestination(destinationHash: string): Promise<void> {
     const incomingMessageIds = new Set($chatMessages
       .filter((message) => chatMessagePeerHash(message) === destinationHash
@@ -324,13 +367,23 @@
       .map((message) => message.id));
     openedUnreadMessageIds = ($unreadChatMessageIds[destinationHash] ?? [])
       .filter((messageId) => incomingMessageIds.has(messageId));
-    selectedDestination = destinationHash;
+    if (selectedDestination !== destinationHash) {
+      stopConversationRecording(selectedDestination);
+      storeSelectedConversationDraft();
+      selectedDestination = destinationHash;
+      restoreConversationDraft(destinationHash);
+    }
     await scrollToLatestMessage();
   }
 
   function closeConversation(): void {
+    stopConversationRecording(selectedDestination);
+    storeSelectedConversationDraft();
     openedUnreadMessageIds = [];
     selectedDestination = undefined;
+    composerContent = '';
+    composerAttachments = [];
+    attachmentMenuOpen = false;
   }
 
   async function saveContact(name: string): Promise<boolean> {
@@ -434,6 +487,7 @@
       }
       deleteConfirmation = undefined;
       if (selectedDestination === destinationHash) closeConversation();
+      conversationDrafts.delete(destinationHash);
     } catch {
       toast.error('chat.conversation.actions.deleteError');
     } finally {
@@ -514,19 +568,24 @@
 
   async function sendMessage(event: SubmitEvent): Promise<void> {
     event.preventDefault();
+    const destinationHash = selectedDestination;
     const content = composerContent.trim();
-    if (!selectedDestination || (!content && composerAttachments.length === 0) || sending || recording) return;
+    const attachments = [...composerAttachments];
+    if (!destinationHash || (!content && attachments.length === 0) || sending || recording) return;
     sending = true;
     try {
-      const result = await reticulumRuntime.sendChatMessage(selectedDestination, content, '', composerAttachments);
+      const result = await reticulumRuntime.sendChatMessage(destinationHash, content, '', attachments);
       if (result.ok) {
-        openedUnreadMessageIds = [];
-        composerContent = '';
-        composerAttachments = [];
-        attachmentMenuOpen = false;
-        await tick();
-        resizeComposer();
-        await scrollToLatestMessage();
+        conversationDrafts.delete(destinationHash);
+        if (selectedDestination === destinationHash) {
+          openedUnreadMessageIds = [];
+          composerContent = '';
+          composerAttachments = [];
+          attachmentMenuOpen = false;
+          await tick();
+          resizeComposer();
+          await scrollToLatestMessage();
+        }
       } else {
         toast.error(result.code === 'LXMF_ATTACHMENTS_TOO_LARGE'
           ? 'chat.attachment.tooLarge'
@@ -590,7 +649,11 @@
     textarea.style.overflowY = contentHeight > maximumHeight ? 'auto' : 'hidden';
   }
 
-  async function addFiles(files: FileList | File[]): Promise<void> {
+  async function addFiles(
+    files: FileList | File[],
+    destinationHash = selectedDestination,
+  ): Promise<void> {
+    if (!destinationHash) return;
     const additions: ChatAttachment[] = [];
     for (const file of Array.from(files)) {
       const mimeType = file.type.toLowerCase().split(';', 1)[0] || 'application/octet-stream';
@@ -600,8 +663,15 @@
       additions.push({ kind, name: file.name || 'attachment.bin', mimeType, data: new Uint8Array(await file.arrayBuffer()) });
     }
     try {
-      composerAttachments = normalizeChatAttachments([...composerAttachments, ...additions]);
-      attachmentMenuOpen = false;
+      const existingDraft = selectedDestination === destinationHash
+        ? { content: composerContent, attachments: composerAttachments }
+        : conversationDrafts.get(destinationHash) ?? { content: '', attachments: [] };
+      const attachments = normalizeChatAttachments([...existingDraft.attachments, ...additions]);
+      storeConversationDraft(destinationHash, existingDraft.content, attachments);
+      if (selectedDestination === destinationHash) {
+        composerAttachments = attachments;
+        attachmentMenuOpen = false;
+      }
     } catch {
       toast.error('chat.attachment.tooLarge', { size: Math.round(MAX_CHAT_ATTACHMENT_BYTES / 1024 / 1024) });
     }
@@ -609,12 +679,15 @@
 
   function fileSelectionChanged(event: Event): void {
     const input = event.currentTarget as HTMLInputElement;
-    if (input.files?.length) void addFiles(input.files);
+    if (input.files?.length) void addFiles(input.files, selectedDestination);
     input.value = '';
   }
 
   function removeAttachment(index: number): void {
     composerAttachments = composerAttachments.filter((_, itemIndex) => itemIndex !== index);
+    if (selectedDestination) {
+      storeConversationDraft(selectedDestination, composerContent, composerAttachments);
+    }
   }
 
   function startRecordingLevelMeter(stream: MediaStream): void {
@@ -698,8 +771,16 @@
       toast.error('chat.attachment.recordingUnsupported');
       return;
     }
+    const destinationHash = selectedDestination;
+    if (!destinationHash) return;
+    recordingDestination = destinationHash;
     try {
-      recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (recordingDestination !== destinationHash || selectedDestination !== destinationHash) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      recordingStream = stream;
       recordingChunks = [];
       mediaRecorder = new MediaRecorder(recordingStream, {
         mimeType,
@@ -736,13 +817,14 @@
   async function finishRecording(): Promise<void> {
     const chunks = recordingChunks;
     const completedMimeType = recordingMimeType;
+    const destinationHash = recordingDestination;
     stopRecordingResources();
-    if (!chunks.length) return;
+    if (!chunks.length || !destinationHash) return;
     const mimeType = completedMimeType || 'audio/webm';
     const extension = mimeType === 'audio/mp4' ? 'm4a' : 'webm';
     const blob = new Blob(chunks, { type: mimeType });
     const name = `voice-message-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`;
-    await addFiles([new File([blob], name, { type: mimeType })]);
+    await addFiles([new File([blob], name, { type: mimeType })], destinationHash);
   }
 
   function stopRecordingResources(): void {
@@ -754,6 +836,7 @@
     mediaRecorder = undefined;
     recordingChunks = [];
     recordingMimeType = '';
+    recordingDestination = undefined;
     recording = false;
   }
 </script>
