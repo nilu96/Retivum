@@ -558,6 +558,15 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 @media (min-width: 700px) {
   .nomad-page { height: 100%; min-height: 0; padding-block-end: 28px; overflow: hidden; }
   .nomad-workspace { height: auto; min-height: 0; }
+  .nomad-directory { position: relative; }
+  .nomad-directory-content > .empty-state,
+  .nomad-canvas:not(.page-loaded)[aria-busy='false'] > .empty-state {
+    position: absolute;
+    inset-block-start: calc(50% - 4.8rem);
+    inset-inline: 0;
+    margin-inline: auto;
+  }
+  .nomad-directory-content > .empty-state { width: min(330px, calc(100% - 28px)); }
 }
 
 .settings-page { max-width: 1050px; }
