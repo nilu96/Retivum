@@ -940,6 +940,8 @@ export class ReticulumNode {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Send a request, automatically using a Resource when the encoded request
+     * exceeds the Link MDU. The returned hash is always the request id.
      * @param {Uint8Array} link_id
      * @param {string} path
      * @param {Uint8Array | null} [data]
@@ -980,6 +982,8 @@ export class ReticulumNode {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * Send a response, automatically using a Resource when the encoded
+     * response exceeds the Link MDU.
      * @param {Uint8Array} link_id
      * @param {Uint8Array} request_id
      * @param {Uint8Array} response_data

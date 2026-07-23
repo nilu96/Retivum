@@ -138,8 +138,16 @@ export class ReticulumNode {
     sendOnLink(link_id: Uint8Array, data: Uint8Array): any;
     sendPacketOnLink(link_id: Uint8Array, data: Uint8Array): any;
     sendProof(packet_hash: Uint8Array, destination_hash: Uint8Array, interface_index?: number | null): any;
+    /**
+     * Send a request, automatically using a Resource when the encoded request
+     * exceeds the Link MDU. The returned hash is always the request id.
+     */
     sendRequest(link_id: Uint8Array, path: string, data?: Uint8Array | null, timeout_ms?: bigint | null): any;
     sendResource(link_id: Uint8Array, data: Uint8Array, metadata?: Uint8Array | null, auto_compress?: boolean | null): any;
+    /**
+     * Send a response, automatically using a Resource when the encoded
+     * response exceeds the Link MDU.
+     */
     sendResponse(link_id: Uint8Array, request_id: Uint8Array, response_data: Uint8Array): any;
     sendResponseResource(link_id: Uint8Array, request_id: Uint8Array, response_data: Uint8Array): any;
     sendSinglePacket(destination_hash: Uint8Array, data: Uint8Array): any;
