@@ -58,14 +58,12 @@
   let mobileDragButton: HTMLButtonElement | undefined;
   let mobileStatusButton: HTMLButtonElement | undefined;
   let appShellElement: HTMLDivElement | undefined;
-  let mobileDragOrigin: { x: number; y: number } | undefined;
   let mobileDragLatest: { x: number; y: number } | undefined;
   let mobileDragGrabOffset: { x: number; y: number } | undefined;
   let mobileDragOriginalSide: 'left' | 'right' = 'right';
   let suppressMobileRuntimeClick = false;
   const announceFeedbackDurationMs = 3_000;
-  const mobileLongPressDurationMs = 550;
-  const mobileLongPressMovementTolerance = 10;
+  const mobileLongPressDurationMs = 150;
   const mobileSnapDurationMs = 260;
   const lxmaAddress = $derived(
     $activeIdentity && $deliveryDestinationHash
@@ -145,7 +143,6 @@
     releaseMobilePointerCapture();
     mobileDragPointerId = undefined;
     mobileDragButton = undefined;
-    mobileDragOrigin = undefined;
     mobileDragLatest = undefined;
     mobileDragGrabOffset = undefined;
   }
@@ -207,7 +204,6 @@
     const bounds = button.getBoundingClientRect();
     mobileDragPointerId = event.pointerId;
     mobileDragButton = button;
-    mobileDragOrigin = { x: event.clientX, y: event.clientY };
     mobileDragLatest = { x: event.clientX, y: event.clientY };
     mobileDragGrabOffset = {
       x: 5 + Math.max(0, Math.min(bounds.width, event.clientX - bounds.left)),
@@ -224,16 +220,12 @@
   }
 
   function handleMobileDragPointerMove(event: PointerEvent): void {
-    if (event.pointerId !== mobileDragPointerId || !mobileDragOrigin) return;
+    if (event.pointerId !== mobileDragPointerId) return;
     mobileDragLatest = { x: event.clientX, y: event.clientY };
     if (mobileActionsDragging) {
       event.preventDefault();
       setMobileDragPosition(event.clientX, event.clientY);
-      return;
     }
-    if (Math.hypot(event.clientX - mobileDragOrigin.x, event.clientY - mobileDragOrigin.y)
-      <= mobileLongPressMovementTolerance) return;
-    clearMobileDragPointer();
   }
 
   function handleMobileDragPointerUp(event: PointerEvent): void {

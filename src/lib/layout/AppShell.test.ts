@@ -143,7 +143,7 @@ describe('AppShell Chat unread indicator', () => {
       clientX: 980,
       clientY: 30,
     });
-    await vi.advanceTimersByTimeAsync(550);
+    await vi.advanceTimersByTimeAsync(150);
 
     const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
     expect(tray).toHaveClass('dragging');
@@ -180,6 +180,66 @@ describe('AppShell Chat unread indicator', () => {
     expect(screen.getByText('Identity actions moved to the bottom left.')).toBeInTheDocument();
   });
 
+  it('keeps a drag pending when the finger leaves the status control before the long-press interval', async () => {
+    vi.useFakeTimers();
+    runtimeStatus.set('online');
+    render(AppShell, { current: 'chat', children: emptyChildren });
+
+    const status = screen.getByRole('button', { name: 'Show identity actions, Online' });
+    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({
+      x: 960,
+      y: 10,
+      left: 960,
+      top: 10,
+      right: 998,
+      bottom: 48,
+      width: 38,
+      height: 38,
+      toJSON: () => ({}),
+    });
+
+    await fireEvent.pointerDown(status, {
+      pointerType: 'touch',
+      pointerId: 9,
+      button: 0,
+      clientX: 980,
+      clientY: 30,
+    });
+    await fireEvent.pointerMove(status, {
+      pointerType: 'touch',
+      pointerId: 9,
+      clientX: 300,
+      clientY: 240,
+    });
+
+    const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
+    expect(tray).toHaveClass('drag-armed');
+    expect(tray).not.toHaveClass('dragging');
+
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(tray).toHaveClass('dragging');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-left')).toBe('275px');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-top')).toBe('215px');
+
+    await fireEvent.pointerMove(status, {
+      pointerType: 'touch',
+      pointerId: 9,
+      clientX: 120,
+      clientY: 260,
+    });
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-left')).toBe('95px');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-top')).toBe('235px');
+
+    await fireEvent.pointerUp(status, {
+      pointerType: 'touch',
+      pointerId: 9,
+      clientX: 120,
+      clientY: 260,
+    });
+    expect(tray).toHaveClass('side-left', 'snapping');
+  });
+
   it('snaps back to the top inside a conversation regardless of scrollability', async () => {
     vi.useFakeTimers();
     render(AppShell, { current: 'chat', children: selectedConversationChildren });
@@ -203,7 +263,7 @@ describe('AppShell Chat unread indicator', () => {
       clientX: 380,
       clientY: 92,
     });
-    await vi.advanceTimersByTimeAsync(550);
+    await vi.advanceTimersByTimeAsync(150);
     await fireEvent.pointerMove(status, {
       pointerType: 'touch',
       pointerId: 8,
