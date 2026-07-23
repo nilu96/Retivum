@@ -824,9 +824,17 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .identity-address-details { display: grid; min-width: 0; gap: 14px; margin: 0; }
 .identity-address-details div { min-width: 0; }
 .identity-address-details dt { margin-block-end: 6px; color: var(--text-subtle); font-size: .68rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
-.identity-address-details dd { margin: 0; padding: 11px 12px; border-radius: 9px; background: var(--surface-2); }
+.identity-address-details dd { margin: 0; border-radius: 9px; background: var(--surface-2); }
+.identity-address-copy { display: grid; width: 100%; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; border: 0; border-radius: inherit; color: var(--text-muted); background: transparent; text-align: start; }
 .identity-address-details code { display: block; color: var(--text-muted); font-size: .72rem; line-height: 1.55; overflow-wrap: anywhere; }
-.identity-address-content footer { display: flex; justify-content: flex-end; gap: 9px; padding-block-start: 3px; }
+.identity-address-copy svg { flex: none; color: var(--text-subtle); }
+@media (hover: hover) and (pointer: fine) {
+  .identity-address-copy:hover { background: var(--surface-hover); }
+}
+@media (hover: none) and (pointer: coarse) {
+  .identity-address-copy { -webkit-tap-highlight-color: transparent; }
+  .identity-address-copy:active { background: var(--surface-hover); }
+}
 
 .logs-page { max-width: 1180px; min-width: 0; overflow-x: clip; }
 .logs-header { margin-block-end: 22px; }
@@ -1154,8 +1162,6 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .modal-close-button { top: 10px; margin: 10px 10px -50px auto; }
   .identity-address-content { gap: 18px; padding: 12px 20px 26px; }
   .identity-qr { min-height: 250px; padding-block-start: 0; }
-  .identity-address-content footer { padding-block-start: 7px; }
-  .identity-address-content footer .button { width: 100%; }
   .logs-header { display: grid; }
   .logs-header .header-actions { width: 100%; }
   .logs-header .button { flex: 1; }

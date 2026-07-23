@@ -326,6 +326,8 @@
   "identity.address.qrError": "The QR code could not be generated.",
   "identity.address.lxma": "LXMF address",
   "identity.address.destinationHash": "LXMF destination hash",
+  "identity.address.copyDestinationHash": "Copy LXMF destination hash",
+  "identity.address.copyLxma": "Copy LXMF address",
   "settings.network.title": "Network node",
   "settings.network.experimental": "Experimental",
   "settings.network.description": "Control Reticulum transport behavior on this device.",

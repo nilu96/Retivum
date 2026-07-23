@@ -31,8 +31,8 @@
     }
   });
 
-  async function copyAddress(): Promise<void> {
-    if (await copyText(address)) toast.success('common.copied');
+  async function copyValue(value: string): Promise<void> {
+    if (await copyText(value)) toast.success('common.copied');
     else toast.error('common.copyFailed');
   }
 </script>
@@ -58,19 +58,28 @@
       <dl class="identity-address-details">
         <div>
           <dt>{$t('identity.address.destinationHash')}</dt>
-          <dd><code>{destinationHash}</code></dd>
+          <dd>
+            <button
+              class="identity-address-copy"
+              type="button"
+              title={$t('identity.address.copyDestinationHash')}
+              aria-label={$t('identity.address.copyDestinationHash')}
+              onclick={() => copyValue(destinationHash)}
+            ><code>{destinationHash}</code><Icon name="copy" size={17} /></button>
+          </dd>
         </div>
         <div>
           <dt>{$t('identity.address.lxma')}</dt>
-          <dd><code>{address}</code></dd>
+          <dd>
+            <button
+              class="identity-address-copy"
+              type="button"
+              title={$t('identity.address.copyLxma')}
+              aria-label={$t('identity.address.copyLxma')}
+              onclick={() => copyValue(address)}
+            ><code>{address}</code><Icon name="copy" size={17} /></button>
+          </dd>
         </div>
       </dl>
-
-      <footer>
-        <button class="button primary" type="button" onclick={copyAddress}>
-          <Icon name="copy" size={17} />
-          {$t('common.copy')}
-        </button>
-      </footer>
     </div>
 </ModalDialog>
