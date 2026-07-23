@@ -879,6 +879,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 
 .status-details-page { max-width: 1180px; min-width: 0; }
 .status-details-header { margin-block-end: 22px; }
+.status-details-page .empty-state { margin-inline: auto; }
 .probe-page { display: grid; max-width: 1050px; min-width: 0; align-content: start; gap: 26px; }
 .probe-header { margin-block-end: -3px; }
 .probe-config-card { overflow: visible; }
