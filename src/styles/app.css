@@ -500,6 +500,7 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .nomad-address label:focus-within { border-color: var(--accent); }
 .nomad-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
 .nomad-canvas { position: relative; display: grid; min-height: 0; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
+.conversation-empty > .empty-state,
 .nomad-canvas > .empty-state { width: min(378px, 100%); padding-inline: 24px; }
 .nomad-canvas.page-loaded { display: block; place-items: initial; overflow: auto; }
 .nomad-grid { position: absolute; inset: 0; opacity: .22; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 38px 38px; mask-image: radial-gradient(circle, black, transparent 75%); }
