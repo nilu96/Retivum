@@ -46,6 +46,7 @@
     | { kind: 'clearDestinations' };
   interface EntryActions {
     destinationHash: string;
+    counterpartTab: ManagementTab;
     x: number;
     y: number;
     autofocus: boolean;
@@ -306,12 +307,14 @@
 
   function openEntryActions(
     destination: string,
+    counterpartTab: ManagementTab,
     clientX: number,
     clientY: number,
     method: ContextMenuOpenMethod,
   ): void {
     entryActions = {
       destinationHash: destination,
+      counterpartTab,
       x: clientX,
       y: clientY,
       autofocus: method === 'keyboard',
@@ -323,6 +326,13 @@
     entryActions = undefined;
     if (await copyText(destination)) toast.success('common.copied');
     else toast.error('common.copyFailed');
+  }
+
+  function showEntryCounterpart(): void {
+    if (!entryActions) return;
+    const { destinationHash: destination, counterpartTab } = entryActions;
+    entryActions = undefined;
+    void navigateToCounterpart(destination, counterpartTab);
   }
 
   function hasCounterpart(destination: string, targetTab: ManagementTab): boolean {
@@ -352,10 +362,6 @@
       if (highlightedDestination === destination) highlightedDestination = undefined;
       highlightTimer = undefined;
     }, counterpartHighlightDurationMs);
-  }
-
-  function entryClick(destination: string, targetTab: ManagementTab): void {
-    void navigateToCounterpart(destination, targetTab);
   }
 
   function clearFilters(): void {
@@ -570,16 +576,18 @@
           <ol class="path-management-entry-list" aria-label={$t('pathManagement.paths.list')}>
             {#each filteredPathEntries as entry (entry.destinationHash)}
               {@const presentation = destinationPresentations.get(entry.destinationHash)}
-              {@const counterpartAvailable = hasCounterpart(entry.destinationHash, 'destinations')}
               <PathManagementEntry
                 destinationHash={entry.destinationHash}
-                {counterpartAvailable}
                 highlighted={highlightedDestination === entry.destinationHash}
-                hoverSuppressed={highlightedDestination !== undefined}
                 localContactName={presentation?.localContactName}
                 announcedName={presentation?.announcedName}
-                onopen={(x, y, method) => openEntryActions(entry.destinationHash, x, y, method)}
-                onactivate={() => entryClick(entry.destinationHash, 'destinations')}
+                onopen={(x, y, method) => openEntryActions(
+                  entry.destinationHash,
+                  'destinations',
+                  x,
+                  y,
+                  method,
+                )}
               >
                 {#snippet badges()}
                   <span class="path-management-entry-badge destination-type">
@@ -660,7 +668,6 @@
             {#each displayedKnownDestinations as row (row.entry.destinationHash)}
               {@const entry = row.entry}
               {@const presentation = destinationPresentations.get(entry.destinationHash)}
-              {@const counterpartAvailable = hasCounterpart(entry.destinationHash, 'paths')}
               {#if row.identityGroupStart && row.identityPublicKey}
                 <li class="known-destination-section-heading identity-group">
                   <span>{$t('pathManagement.destination.identityGroup', { count: row.identityGroupCount })}</span>
@@ -674,16 +681,19 @@
               {/if}
               <PathManagementEntry
                 destinationHash={entry.destinationHash}
-                {counterpartAvailable}
                 highlighted={highlightedDestination === entry.destinationHash}
-                hoverSuppressed={highlightedDestination !== undefined}
                 identityGroupPosition={row.identityGroupPosition}
                 local={entry.isLocal}
                 localContactName={presentation?.localContactName}
                 announcedName={presentation?.announcedName}
                 showActions={!entry.isLocal}
-                onopen={(x, y, method) => openEntryActions(entry.destinationHash, x, y, method)}
-                onactivate={() => entryClick(entry.destinationHash, 'paths')}
+                onopen={(x, y, method) => openEntryActions(
+                  entry.destinationHash,
+                  'paths',
+                  x,
+                  y,
+                  method,
+                )}
               >
                 {#snippet badges()}
                   <span class="path-management-entry-badge destination-type">
@@ -819,6 +829,17 @@
     closeLabel={$t('pathManagement.contextMenu.close')}
     onclose={() => { entryActions = undefined; }}
   >
+    {#if hasCounterpart(entryActions.destinationHash, entryActions.counterpartTab)}
+      <button role="menuitem" onclick={showEntryCounterpart}>
+        <Icon
+          name={entryActions.counterpartTab === 'paths' ? 'route' : 'announce'}
+          size={17}
+        />
+        {$t(entryActions.counterpartTab === 'paths'
+          ? 'pathManagement.contextMenu.showPath'
+          : 'pathManagement.contextMenu.showDestination')}
+      </button>
+    {/if}
     <button
       role="menuitem"
       onclick={() => { void copyDestinationHash(entryActions!.destinationHash); }}

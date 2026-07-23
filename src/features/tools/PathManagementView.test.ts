@@ -449,32 +449,28 @@ describe('PathManagementView', () => {
     expect(screen.getAllByText('No path')).toHaveLength(4);
 
     const knownDestinationEntry = screen.getByText(knownDestination).closest('li');
-    expect(knownDestinationEntry).toHaveClass('counterpart-available');
     expect(knownDestinationEntry?.querySelector('.known-destination-public-key'))
       .toBeInTheDocument();
     expect(knownDestinationEntry?.querySelector('.known-destination-metrics'))
       .toBeInTheDocument();
-    await fireEvent.click(knownDestinationEntry!.querySelector('.path-management-entry-copy')!);
+    await fireEvent.contextMenu(knownDestinationEntry!, { clientX: 100, clientY: 100 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Show path' }));
     expect(screen.getByRole('tab', { name: /Paths/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByLabelText('Filter by destination hash')).toHaveValue('');
     const pathCounterpart = screen.getByText(knownDestination).closest('li');
     expect(pathCounterpart).toHaveClass('counterpart-highlight');
-    expect(pathCounterpart).toHaveClass('counterpart-hover-suppressed');
     expect(within(pathCounterpart!).getByText('Local Alice')).toBeInTheDocument();
     expect(within(pathCounterpart!).getByText('Announced as Shared Alice')).toBeInTheDocument();
     expect(within(pathCounterpart!).getByText('LXMF delivery')).toHaveClass('destination-type');
     expect(pathCounterpart!.querySelector('.hop-count')).toHaveTextContent('2 hops');
     const otherPathEntry = screen.getByText(unmatchedPathDestination).closest('li');
-    expect(otherPathEntry).toHaveClass('counterpart-hover-suppressed');
     expect(otherPathEntry).not.toHaveClass('counterpart-highlight');
-    await fireEvent.pointerLeave(otherPathEntry!);
-    expect(otherPathEntry).toHaveClass('counterpart-hover-suppressed');
 
-    await fireEvent.click(pathCounterpart!.querySelector('.path-management-entry-copy')!);
+    await fireEvent.contextMenu(pathCounterpart!, { clientX: 120, clientY: 120 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Show known destination' }));
     expect(screen.getByRole('tab', { name: /Known destinations/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText(knownDestination).closest('li')).toHaveClass('counterpart-highlight');
     const otherDestinationEntry = screen.getByText(unknownDestination).closest('li');
-    expect(otherDestinationEntry).toHaveClass('counterpart-hover-suppressed');
     expect(otherDestinationEntry).not.toHaveClass('counterpart-highlight');
   });
 
@@ -497,7 +493,9 @@ describe('PathManagementView', () => {
     try {
       render(PathManagementView);
       await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
-      await fireEvent.click(screen.getByText(knownDestination).closest('.path-management-entry-copy')!);
+      const destinationEntry = screen.getByText(knownDestination).closest('li');
+      await fireEvent.contextMenu(destinationEntry!, { clientX: 100, clientY: 100 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Show path' }));
 
       await waitFor(() => {
         expect(scrollIntoView).toHaveBeenCalledWith({
@@ -515,6 +513,33 @@ describe('PathManagementView', () => {
     }
   });
 
+  it('opens an existing counterpart from the entry context menu', async () => {
+    pathTableEntries.set([{
+      destinationHash: knownDestination,
+      hops: 1,
+      lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
+    }]);
+    render(PathManagementView);
+
+    const pathEntry = screen.getByText(knownDestination).closest('li');
+    await fireEvent.click(pathEntry!.querySelector('.path-management-entry-copy')!);
+    expect(screen.getByRole('tab', { name: /Paths/ })).toHaveAttribute('aria-selected', 'true');
+
+    await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Show known destination' }));
+
+    expect(screen.getByRole('tab', { name: /Known destinations/ }))
+      .toHaveAttribute('aria-selected', 'true');
+    const destinationEntry = screen.getByText(knownDestination).closest('li');
+    expect(destinationEntry).toHaveClass('counterpart-highlight');
+
+    await fireEvent.contextMenu(destinationEntry!, { clientX: 120, clientY: 120 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Show path' }));
+
+    expect(screen.getByRole('tab', { name: /Paths/ })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText(knownDestination).closest('li')).toHaveClass('counterpart-highlight');
+  });
+
   it('copies path and destination hashes from the shared context-menu action', async () => {
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -526,13 +551,22 @@ describe('PathManagementView', () => {
     try {
       render(PathManagementView);
       const pathEntry = screen.getByText(pathDestination).closest('li');
+      expect(pathEntry).toHaveClass('path-management-context-trigger');
+      expect(pathEntry!.querySelector('.path-management-entry-copy'))
+        .toHaveAttribute('aria-haspopup', 'menu');
       await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+      expect(screen.queryByRole('menuitem', { name: 'Show known destination' }))
+        .not.toBeInTheDocument();
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenLastCalledWith(pathDestination);
 
       await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
       const destinationEntry = screen.getByText(knownDestination).closest('li');
+      expect(destinationEntry).toHaveClass('path-management-context-trigger');
+      expect(destinationEntry!.querySelector('.path-management-entry-copy'))
+        .toHaveAttribute('aria-haspopup', 'menu');
       await fireEvent.contextMenu(destinationEntry!, { clientX: 120, clientY: 120 });
+      expect(screen.queryByRole('menuitem', { name: 'Show path' })).not.toBeInTheDocument();
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenLastCalledWith(knownDestination);
     } finally {

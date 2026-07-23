@@ -641,6 +641,8 @@
   "pathManagement.destination.capability.kilobytes": "{value} KB",
   "pathManagement.contextMenu.label": "Path destination actions",
   "pathManagement.contextMenu.close": "Close destination actions",
+  "pathManagement.contextMenu.showPath": "Show path",
+  "pathManagement.contextMenu.showDestination": "Show known destination",
   "pathManagement.path.deleted": "The cached path was deleted.",
   "pathManagement.path.deleteFailed": "The cached path could not be deleted.",
   "pathManagement.paths.cleared": "All cached paths were deleted.",

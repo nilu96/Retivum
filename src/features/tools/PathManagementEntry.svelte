@@ -8,50 +8,37 @@
 
   let {
     destinationHash,
-    counterpartAvailable,
     highlighted,
-    hoverSuppressed,
     identityGroupPosition,
     local = false,
     localContactName,
     announcedName,
     showActions = true,
     onopen,
-    onactivate,
     badges,
     details,
     actions,
   }: {
     destinationHash: string;
-    counterpartAvailable: boolean;
     highlighted: boolean;
-    hoverSuppressed: boolean;
     identityGroupPosition?: 'first' | 'middle' | 'last';
     local?: boolean;
     localContactName?: string;
     announcedName?: string;
     showActions?: boolean;
     onopen: (x: number, y: number, method: ContextMenuOpenMethod) => void;
-    onactivate: () => void;
     badges: Snippet;
     details: Snippet;
     actions?: Snippet;
   } = $props();
   let actionsHovered = $state(false);
-
-  function activateFromKeyboard(event: KeyboardEvent): void {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    if (counterpartAvailable) onactivate();
-  }
 </script>
 
 <li
   data-destination-hash={destinationHash}
-  use:contextMenuTrigger={{ onopen }}
-  class:counterpart-available={counterpartAvailable}
+  class="path-management-context-trigger"
+  use:contextMenuTrigger={{ onopen, openOnActivate: true }}
   class:counterpart-highlight={highlighted}
-  class:counterpart-hover-suppressed={hoverSuppressed}
   class:identity-group-entry={identityGroupPosition !== undefined}
   class:identity-group-entry-first={identityGroupPosition === 'first'}
   class:identity-group-entry-last={identityGroupPosition === 'last'}
@@ -64,9 +51,7 @@
     class="path-management-entry-copy"
     role="button"
     tabindex="0"
-    aria-disabled={!counterpartAvailable}
-    onclick={() => { if (counterpartAvailable) onactivate(); }}
-    onkeydown={activateFromKeyboard}
+    aria-haspopup="menu"
   >
     <header class="path-management-entry-header">
       <div class="path-management-entry-identity">
