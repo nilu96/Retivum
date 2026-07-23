@@ -35,6 +35,7 @@
   import { toast } from '../../lib/notifications/toasts';
 
   type LoadedNomadPage = NomadPage & { identifyBeforeLoad?: boolean };
+  type NomadDirectoryScope = 'announces' | 'bookmarks';
   type NomadPageRequest = {
     destinationHash: string;
     path: string;
@@ -52,7 +53,7 @@
   };
 
   let address = $state('');
-  let scope = $state<'announces' | 'bookmarks'>('announces');
+  let selectedScope = $state<NomadDirectoryScope>();
   let query = $state('');
   let directoryExpanded = $state(true);
   let loadedPage = $state<LoadedNomadPage>();
@@ -112,6 +113,9 @@
       ].some((value) => value?.toLowerCase().includes(normalizedQuery)),
     ),
   );
+  const scope = $derived<NomadDirectoryScope>(
+    selectedScope ?? ($nomadBookmarks.length ? 'bookmarks' : 'announces'),
+  );
   const visibleDestinationCount = $derived(
     scope === 'announces' ? filteredAnnounces.length : filteredBookmarks.length,
   );
@@ -125,9 +129,9 @@
       : $t('nomadnet.offlineHint'),
   );
 
-  const scopes: Array<{ id: 'announces' | 'bookmarks'; label: MessageKey; searchName: MessageKey }> = [
-    { id: 'announces', label: 'nomadnet.scope.announces', searchName: 'nomadnet.scope.announces.searchName' },
+  const scopes: Array<{ id: NomadDirectoryScope; label: MessageKey; searchName: MessageKey }> = [
     { id: 'bookmarks', label: 'nomadnet.scope.bookmarks', searchName: 'nomadnet.scope.bookmarks.searchName' },
+    { id: 'announces', label: 'nomadnet.scope.announces', searchName: 'nomadnet.scope.announces.searchName' },
   ];
 
   function isCurrentPage(
@@ -680,7 +684,7 @@
             role="tab"
             aria-selected={scope === item.id}
             class:active={scope === item.id}
-            onclick={() => { scope = item.id; query = ''; }}
+            onclick={() => { selectedScope = item.id; query = ''; }}
           >{$t(item.label)}</button>
         {/each}
       </div>

@@ -23,16 +23,36 @@ describe('NomadNetView', () => {
 
   afterEach(() => vi.useRealTimers());
 
-  it('switches between announced and bookmarked destinations', async () => {
+  it('shows bookmarks first but defaults to announces when no bookmarks exist', async () => {
     render(NomadNetView);
 
-    expect(screen.getByRole('heading', { name: 'No NomadNet destinations announced' })).toBeInTheDocument();
+    expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Bookmarks', 'Announces']);
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'No NomadNet announces yet' })).toBeInTheDocument();
     const directoryToggle = screen.getByRole('button', { name: 'Hide destination list' });
     expect(directoryToggle).toHaveAttribute('aria-expanded', 'true');
     await fireEvent.click(directoryToggle);
-    expect(screen.getByRole('button', { name: 'Show announced destinations (0)' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Show announces (0)' })).toHaveAttribute('aria-expanded', 'false');
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     expect(screen.getByRole('heading', { name: 'No bookmarks yet' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search bookmarks')).toBeInTheDocument();
+  });
+
+  it('selects bookmarks when they finish loading after the view opens', async () => {
+    render(NomadNetView);
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+
+    nomadBookmarks.set([{
+      id: 'identity:late-bookmark',
+      identityId: 'identity',
+      destinationHash: '1'.repeat(32),
+      path: '/page/index.mu',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'true');
+    });
     expect(screen.getByPlaceholderText('Search bookmarks')).toBeInTheDocument();
   });
 
@@ -56,8 +76,7 @@ describe('NomadNetView', () => {
     const announcedHash = '1'.repeat(32);
     const bookmarkedHash = '2'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${announcedHash}`,
-      identityId: 'identity',
+      id: announcedHash,
       destinationHash: announcedHash,
       displayName: 'Announced node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -75,13 +94,15 @@ describe('NomadNetView', () => {
     const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
     render(NomadNetView);
 
+    expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'true');
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     const announcedPage = screen.getByRole('button', { name: /Announced node/ });
     await fireEvent.click(announcedPage);
     expect(announcedPage).toHaveClass('active');
     expect(announcedPage).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('button', { name: 'Show announced destinations (1)' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Show announces (1)' })).toHaveAttribute('aria-expanded', 'false');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Show announced destinations (1)' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Show announces (1)' }));
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     const bookmarkedPage = screen.getByRole('button', { name: /Saved node/ });
     await fireEvent.click(bookmarkedPage);
@@ -109,15 +130,14 @@ describe('NomadNetView', () => {
     });
     await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
 
-    expect(screen.getByRole('button', { name: 'Show announced destinations (0)' }))
+    expect(screen.getByRole('button', { name: 'Show announces (0)' }))
       .toHaveAttribute('aria-expanded', 'false');
   });
 
   it('uses the exact bookmark identification policy when opening an announced page', async () => {
     const destinationHash = '3'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       displayName: 'Identified node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -134,6 +154,7 @@ describe('NomadNetView', () => {
     const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
     render(NomadNetView);
 
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     await fireEvent.click(screen.getByRole('button', { name: /Identified node/ }));
 
     expect(requestPage).toHaveBeenCalledWith(
@@ -149,8 +170,7 @@ describe('NomadNetView', () => {
   it('keeps an announced destination active on its subpages while bookmarks remain path-specific', async () => {
     const destinationHash = '4'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       displayName: 'Subpage node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -178,10 +198,10 @@ describe('NomadNetView', () => {
     });
     await fireEvent.submit(screen.getByPlaceholderText('destination:/page/path').closest('form')!);
 
-    expect(screen.getByRole('button', { name: /Subpage node/ })).toHaveAttribute('aria-current', 'page');
-    await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     expect(screen.getByRole('button', { name: /Home bookmark/ })).not.toHaveAttribute('aria-current');
     expect(screen.getByRole('button', { name: /Details bookmark/ })).toHaveAttribute('aria-current', 'page');
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    expect(screen.getByRole('button', { name: /Subpage node/ })).toHaveAttribute('aria-current', 'page');
   });
 
   it('asks for a name when bookmarking the current address', async () => {
@@ -193,8 +213,7 @@ describe('NomadNetView', () => {
       publicKeyHex: 'c'.repeat(128),
     });
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       displayName: 'Forest Node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -222,7 +241,7 @@ describe('NomadNetView', () => {
       'Community node',
       true,
     ));
-    expect(screen.getByRole('tab', { name: 'Announced' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
   });
 
@@ -235,8 +254,7 @@ describe('NomadNetView', () => {
       publicKeyHex: 'd'.repeat(128),
     });
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       displayName: 'Fresh node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -279,8 +297,7 @@ describe('NomadNetView', () => {
     vi.useFakeTimers();
     const destinationHash = 'e'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       displayName: 'Touch node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -325,7 +342,7 @@ describe('NomadNetView', () => {
     await fireEvent.click(dismiss, { detail: 1 });
 
     expect(screen.queryByRole('menu', { name: 'NomadNet destination actions' })).not.toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Announced' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
     expect(row).not.toHaveClass('touch-active');
   });
@@ -333,8 +350,7 @@ describe('NomadNetView', () => {
   it('focuses the first destination action when the menu is opened from the keyboard', async () => {
     const destinationHash = 'f'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       displayName: 'Keyboard node',
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -437,8 +453,7 @@ describe('NomadNetView', () => {
       publicKeyHex: 'c'.repeat(128),
     });
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       displayName: 'Community Node',
@@ -470,7 +485,7 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(destinationHash) }));
     expect(await screen.findByText('Welcome')).toBeInTheDocument();
     expect(requestPage).toHaveBeenNthCalledWith(1, destinationHash, '/page/index.mu', {}, expect.any(Function));
-    expect(screen.getByRole('button', { name: 'Show announced destinations (1)' })).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.getByRole('button', { name: 'Show announces (1)' })).toHaveAttribute('aria-expanded', 'false');
 
     await fireEvent.click(screen.getByRole('link', { name: 'Next' }));
     expect(await screen.findByText('Next page')).toBeInTheDocument();
@@ -480,8 +495,7 @@ describe('NomadNetView', () => {
   it('shows detailed loading stages, transfer progress, and the final error', async () => {
     const destinationHash = '5'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -515,8 +529,7 @@ describe('NomadNetView', () => {
     const previousHash = '1'.repeat(32);
     const failedHash = '2'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${previousHash}`,
-      identityId: 'identity',
+      id: previousHash,
       destinationHash: previousHash,
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -571,8 +584,7 @@ describe('NomadNetView', () => {
     const failedHash = '4'.repeat(32);
     const unrelatedHash = '5'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${previousHash}`,
-      identityId: 'identity',
+      id: previousHash,
       destinationHash: previousHash,
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -627,8 +639,7 @@ describe('NomadNetView', () => {
     const secondHash = '7'.repeat(32);
     const unknownHash = '8'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${firstHash}`,
-      identityId: 'identity',
+      id: firstHash,
       destinationHash: firstHash,
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -681,8 +692,7 @@ describe('NomadNetView', () => {
       publicKeyHex: 'c'.repeat(128),
     });
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -716,8 +726,7 @@ describe('NomadNetView', () => {
   it('replaces an in-progress load with an atomic hard reload', async () => {
     const destinationHash = '6'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -750,8 +759,7 @@ describe('NomadNetView', () => {
   it('cancels an in-progress navigation and restores the last rendered page', async () => {
     const destinationHash = '4'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -789,8 +797,7 @@ describe('NomadNetView', () => {
   it('shows a cancel action in the Home slot while loading and restores the cached page', async () => {
     const destinationHash = '3'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -830,8 +837,7 @@ describe('NomadNetView', () => {
   it('cancels an initial page load from the Home slot', async () => {
     const destinationHash = '5'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -856,8 +862,7 @@ describe('NomadNetView', () => {
   it('shares the active identity over the NomadNet link and reloads the page', async () => {
     const destinationHash = '7'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -914,8 +919,7 @@ describe('NomadNetView', () => {
   it('restores cached history when navigating back and returns to the announced home page', async () => {
     const destinationHash = '8'.repeat(32);
     nomadAnnounces.set([{
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
+      id: destinationHash,
       destinationHash,
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
