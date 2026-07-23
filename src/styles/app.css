@@ -911,7 +911,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .path-management-filters-toggle { display: none; }
 .path-management-lists [role="tabpanel"] > .empty-state { width: 100%; max-width: none; padding: 54px 24px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface-1); }
 .path-management-entry-list { display: grid; min-width: 0; gap: 9px; margin: 0; padding: 0; list-style: none; }
-.path-management-entry-list > li { --path-entry-background: var(--surface-1); position: relative; display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; column-gap: 18px; row-gap: 14px; padding: 15px 17px; border: 0; border-radius: 11px; background: var(--path-entry-background); }
+.path-management-entry-list > li { --path-entry-background: var(--surface-1); position: relative; display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; column-gap: 18px; row-gap: 14px; padding: 15px 17px; border: 1px solid var(--border); border-radius: 11px; background: var(--path-entry-background); box-shadow: 0 1px 0 rgba(255,255,255,.015); }
 .path-management-entry-list > li.counterpart-available { cursor: pointer; }
 .path-management-entry-list > li.entry-pointer-moved { cursor: default; }
 .path-management-entry-list > li.counterpart-available:not(.counterpart-highlight):not(.counterpart-hover-suppressed):not(.entry-actions-hovered):hover,
