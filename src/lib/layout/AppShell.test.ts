@@ -1,17 +1,25 @@
 import { createRawSnippet } from 'svelte';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { markChatMessagesRead, noteUnreadChatMessage } from '../../infrastructure/reticulum/chat-state';
 import { reticulumRuntime, runtimeStatus } from '../../infrastructure/reticulum/runtime';
 import AppShell from './AppShell.svelte';
 
 const emptyChildren = createRawSnippet(() => ({ render: () => '<div>Content</div>' }));
+const selectedConversationChildren = createRawSnippet(() => ({
+  render: () => '<div class="chat-workspace conversation-selected"></div>',
+}));
 
 describe('AppShell Chat unread indicator', () => {
   beforeEach(() => {
     markChatMessagesRead();
     runtimeStatus.set('offline');
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it('shows the unread count in desktop and mobile navigation', () => {
@@ -88,6 +96,142 @@ describe('AppShell Chat unread indicator', () => {
 
     expect(document.querySelector('.mobile-identity-actions [aria-label="Announce"]')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show identity actions, Online' })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('reverses the mobile action order when positioned on the left', async () => {
+    runtimeStatus.set('online');
+    render(AppShell, { current: 'chat', children: emptyChildren });
+
+    const status = screen.getByRole('button', { name: 'Show identity actions, Online' });
+    await fireEvent.keyDown(status, { key: 'ArrowLeft' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Show identity actions, Online' }));
+
+    const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
+    expect(tray).toHaveAttribute('data-side', 'left');
+    expect(tray).toHaveClass('side-left', 'expanded');
+    expect(Array.from(tray?.querySelectorAll('button') ?? []).map((button) => button.getAttribute('aria-label'))).toEqual([
+      'Open interface settings, Online',
+      'Show LXMF address and QR code',
+      'Announce',
+    ]);
+  });
+
+  it('follows a long-press drag and animates to the side under the released finger', async () => {
+    vi.useFakeTimers();
+    runtimeStatus.set('online');
+    render(AppShell, { current: 'chat', children: emptyChildren });
+
+    const status = screen.getByRole('button', { name: 'Show identity actions, Online' });
+    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({
+      x: 960,
+      y: 10,
+      left: 960,
+      top: 10,
+      right: 998,
+      bottom: 48,
+      width: 38,
+      height: 38,
+      toJSON: () => ({}),
+    });
+
+    await fireEvent.pointerDown(status, {
+      pointerType: 'touch',
+      pointerId: 7,
+      button: 0,
+      clientX: 980,
+      clientY: 30,
+    });
+    await vi.advanceTimersByTimeAsync(550);
+
+    const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
+    expect(tray).toHaveClass('dragging');
+    expect(tray).toHaveAttribute('data-dragging', 'true');
+    expect(status).toHaveAttribute('aria-expanded', 'false');
+
+    await fireEvent.pointerMove(status, {
+      pointerType: 'touch',
+      pointerId: 7,
+      clientX: 120,
+      clientY: 260,
+    });
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-left')).toBe('95px');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-top')).toBe('235px');
+
+    await fireEvent.pointerUp(status, {
+      pointerType: 'touch',
+      pointerId: 7,
+      clientX: 120,
+      clientY: 260,
+    });
+    expect(tray).toHaveClass('side-left', 'snapping');
+    expect(tray).not.toHaveClass('dragging');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-left')).toContain('safe-area-inset-left');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-top')).toContain('100dvh');
+
+    const snappedStatus = screen.getByRole('button', { name: 'Show identity actions, Online' });
+    await fireEvent.click(snappedStatus);
+    expect(snappedStatus).toHaveAttribute('aria-expanded', 'false');
+
+    await vi.advanceTimersByTimeAsync(260);
+    expect(tray).not.toHaveClass('snapping');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-left')).toBe('');
+    expect(screen.getByText('Identity actions moved to the bottom left.')).toBeInTheDocument();
+  });
+
+  it('snaps back to the top inside a conversation regardless of scrollability', async () => {
+    vi.useFakeTimers();
+    render(AppShell, { current: 'chat', children: selectedConversationChildren });
+
+    const status = screen.getByRole('button', { name: 'Show identity actions, Offline' });
+    vi.spyOn(status, 'getBoundingClientRect').mockReturnValue({
+      x: 360,
+      y: 72,
+      left: 360,
+      top: 72,
+      right: 398,
+      bottom: 110,
+      width: 38,
+      height: 38,
+      toJSON: () => ({}),
+    });
+    await fireEvent.pointerDown(status, {
+      pointerType: 'touch',
+      pointerId: 8,
+      button: 0,
+      clientX: 380,
+      clientY: 92,
+    });
+    await vi.advanceTimersByTimeAsync(550);
+    await fireEvent.pointerMove(status, {
+      pointerType: 'touch',
+      pointerId: 8,
+      clientX: 100,
+      clientY: 300,
+    });
+    await fireEvent.pointerUp(status, {
+      pointerType: 'touch',
+      pointerId: 8,
+      clientX: 100,
+      clientY: 300,
+    });
+
+    const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
+    expect(tray).toHaveClass('side-left', 'snapping');
+    expect(tray?.style.getPropertyValue('--mobile-actions-drag-top')).toBe(
+      'calc(env(safe-area-inset-top, 0px) + 72px)',
+    );
+  });
+
+  it('keeps the mobile side in memory only for the mounted app shell', async () => {
+    const first = render(AppShell, { current: 'chat', children: emptyChildren });
+    const status = screen.getByRole('button', { name: 'Show identity actions, Offline' });
+    await fireEvent.keyDown(status, { key: 'ArrowLeft' });
+    expect(document.querySelector('.mobile-identity-actions')).toHaveAttribute('data-side', 'left');
+
+    first.unmount();
+    render(AppShell, { current: 'chat', children: emptyChildren });
+
+    expect(document.querySelector('.mobile-identity-actions')).toHaveAttribute('data-side', 'right');
   });
 
   it('fades successful manual announce feedback for the Announced label duration', async () => {

@@ -980,7 +980,6 @@
 <div
   class="chat-workspace"
   class:conversation-selected={selectedDestination !== undefined}
-  class:message-feed-scrollable={messageFeedScrollable}
 >
   <section class="chat-overview">
     <header class="page-header chat-header">
