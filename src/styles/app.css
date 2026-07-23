@@ -934,7 +934,6 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .probe-actions { align-items: stretch; flex-direction: column; }
   .probe-actions .button { width: 100%; }
   .probe-path-feedback { margin: 4px 0 0; text-align: center; }
-  .probe-history-section .section-heading-row { align-items: flex-start; }
   .probe-history-list > li > header { align-items: flex-start; }
   .transport-summary-details { grid-template-columns: 1fr; }
   .transport-summary-details > div + div { margin: 12px 0 0; padding: 12px 0 0; border-block-start: 1px solid var(--border); border-inline-start: 0; }
