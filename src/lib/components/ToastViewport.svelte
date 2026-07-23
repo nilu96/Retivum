@@ -9,6 +9,7 @@
     <article
       class="toast-notification"
       class:success={notification.kind === 'success'}
+      class:info={notification.kind === 'info'}
       class:error={notification.kind === 'error'}
       class:activity={notification.kind === 'activity'}
       role={notification.kind === 'error' ? 'alert' : 'status'}

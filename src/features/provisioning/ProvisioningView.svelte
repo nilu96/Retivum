@@ -532,7 +532,7 @@
           <strong>{stageLabel()}</strong>
           {#if transferProgress !== undefined}
             <progress max="1" value={transferProgress}></progress>
-            <small>{Math.round(transferProgress * 100)}%{transferSize ? ` · ${Math.ceil(transferSize / 1024)} KiB` : ''}</small>
+            <small>{Math.round(transferProgress * 100)}%{transferSize ? ` · ${Math.ceil(transferSize / 1_000)} KB` : ''}</small>
           {/if}
         </div>
       {:else if loaded}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  formatChatByteSize,
   MAX_CHAT_ATTACHMENT_BYTES,
   normalizeChatAttachments,
 } from './chat-attachments';
@@ -23,5 +24,12 @@ describe('chat attachment policy', () => {
       mimeType: 'application/octet-stream',
       data: new Uint8Array(MAX_CHAT_ATTACHMENT_BYTES + 1),
     }])).toThrow('LXMF_ATTACHMENTS_TOO_LARGE');
+  });
+
+  it('formats byte sizes with decimal SI units', () => {
+    expect(formatChatByteSize(999)).toBe('999 B');
+    expect(formatChatByteSize(4_096)).toBe('4.1 KB');
+    expect(formatChatByteSize(MAX_CHAT_ATTACHMENT_BYTES)).toBe('10.5 MB');
+    expect(formatChatByteSize(1_000_000_000)).toBe('1.0 GB');
   });
 });

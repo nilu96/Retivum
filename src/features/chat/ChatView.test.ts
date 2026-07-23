@@ -410,7 +410,7 @@ describe('ChatView', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /payload.bin/ }));
     expect(screen.getByText('Uploading attachments')).toBeInTheDocument();
-    expect(screen.getByText('42% · 2.0 KiB')).toBeInTheDocument();
+    expect(screen.getByText('42% · 2.0 KB')).toBeInTheDocument();
 
     chatInboundTransfers.set([{
       id: 'incoming-resource',
@@ -420,7 +420,7 @@ describe('ChatView', () => {
       transferSize: 4352,
     }]);
     expect(await screen.findByText('Receiving LXMF message')).toBeInTheDocument();
-    expect(screen.getByText('50% · 4.0 KiB')).toBeInTheDocument();
+    expect(screen.getByText('50% · 4.1 KB')).toBeInTheDocument();
 
     const otherDestination = '4'.repeat(32);
     chatMessages.update((items) => [...items, {
@@ -1195,6 +1195,12 @@ describe('ChatView', () => {
     if (input) await fireEvent.change(input, { target: { files: [file] } });
 
     expect(await screen.findByText('notes.txt')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+    const attachmentMenu = screen.getByRole('button', { name: 'Choose files' })
+      .closest('.composer-attachment-menu');
+    expect(attachmentMenu?.parentElement).toHaveClass('composer-attachment-control');
+    await fireEvent.pointerDown(document.body);
+
     const sendButton = screen.getByRole('button', { name: 'Send message' });
     expect(sendButton).toBeEnabled();
     await fireEvent.click(sendButton);
@@ -1204,6 +1210,117 @@ describe('ChatView', () => {
       name: 'notes.txt',
       mimeType: 'text/plain',
     })]);
+  });
+
+  it('uses the image icon for every image in the draft', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      identityHash: '5'.repeat(32),
+      publicKey: '6'.repeat(128),
+      displayName: 'Bob',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Bob/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+
+    const input = document.querySelector<HTMLInputElement>('input[type="file"]:not([accept])');
+    expect(input).not.toBeNull();
+    if (input) {
+      await fireEvent.change(input, {
+        target: {
+          files: [
+            new File(['first'], 'first.gif', { type: 'image/gif' }),
+            new File(['second'], 'second.gif', { type: 'image/gif' }),
+          ],
+        },
+      });
+    }
+
+    const firstChip = (await screen.findByText('first.gif')).parentElement;
+    const secondChip = (await screen.findByText('second.gif')).parentElement;
+    expect(firstChip).toHaveAttribute('data-attachment-icon', 'image');
+    expect(secondChip).toHaveAttribute('data-attachment-icon', 'image');
+  });
+
+  it('prompts once and keeps a smaller downscaled image attachment', async () => {
+    const destinationHash = 'd'.repeat(32);
+    const imageEncoding = installLargeImageMocks(80, true);
+    chatMessages.set([incomingConversationMessage(
+      destinationHash,
+      'image-downscale-success',
+      'Conversation for image downscaling',
+    )]);
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Conversation for image downscaling/ }));
+    await selectComposerFile(sizedFile('landscape.jpeg', 'image/jpeg', 200));
+
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent(
+      '“landscape.jpeg” is 4096 × 2048 pixels. Scale down this image to reduce its size before sending?',
+    );
+    await fireEvent.click(screen.getByRole('button', { name: 'Downscale' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('Downscaling “landscape.jpeg”…');
+
+    imageEncoding.finish();
+
+    expect(await screen.findByText('landscape.jpg')).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Reduced “landscape.jpeg” from 200 B to 80 B.',
+    );
+    expect(imageEncoding.drawImage).toHaveBeenCalledOnce();
+    expect(imageEncoding.close).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the original image and shows informational feedback when downscaling is larger', async () => {
+    const destinationHash = 'e'.repeat(32);
+    installLargeImageMocks(240);
+    chatMessages.set([incomingConversationMessage(
+      destinationHash,
+      'image-downscale-larger',
+      'Conversation with incompressible image',
+    )]);
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Conversation with incompressible image/ }));
+    await selectComposerFile(sizedFile('detail.jpeg', 'image/jpeg', 200));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Downscale' }));
+
+    expect(await screen.findByText('detail.jpeg')).toBeInTheDocument();
+    const status = await screen.findByRole('status');
+    expect(status).toHaveClass('info');
+    expect(status).toHaveTextContent(
+      'The downscaled “detail.jpeg” was 240 B, not smaller than the 200 B original. The original was kept.',
+    );
+  });
+
+  it('keeps the original image and shows an error when downscaling fails', async () => {
+    const destinationHash = 'f'.repeat(32);
+    installLargeImageMocks(null);
+    chatMessages.set([incomingConversationMessage(
+      destinationHash,
+      'image-downscale-error',
+      'Conversation with failed image processing',
+    )]);
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Conversation with failed image processing/ }));
+    await selectComposerFile(sizedFile('broken.jpeg', 'image/jpeg', 200));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Downscale' }));
+
+    expect(await screen.findByText('broken.jpeg')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '“broken.jpeg” could not be downscaled. The original was kept.',
+    );
   });
 
   it('keeps text and attachment drafts scoped to their conversation', async () => {
@@ -1335,3 +1452,64 @@ describe('ChatView', () => {
     expect(await screen.findByText(/voice-message-.*\.m4a/)).toBeInTheDocument();
   });
 });
+
+function incomingConversationMessage(destinationHash: string, messageId: string, content: string) {
+  return {
+    id: `identity:${messageId}`,
+    identityId: 'identity',
+    messageId,
+    sourceHash: destinationHash,
+    destinationHash: '1'.repeat(32),
+    title: '',
+    content,
+    receivedAt: '2026-07-16T10:00:00.000Z',
+  };
+}
+
+function sizedFile(name: string, type: string, byteLength: number): File {
+  const bytes = new Uint8Array(byteLength);
+  const file = new File([bytes], name, { type });
+  Object.defineProperty(file, 'arrayBuffer', {
+    value: async () => bytes.buffer,
+  });
+  return file;
+}
+
+async function selectComposerFile(file: File): Promise<void> {
+  const input = document.querySelector<HTMLInputElement>('input[type="file"]:not([accept])');
+  expect(input).not.toBeNull();
+  if (input) await fireEvent.change(input, { target: { files: [file] } });
+}
+
+function installLargeImageMocks(encodedByteLength: number | null, deferred = false): {
+  close: ReturnType<typeof vi.fn>;
+  drawImage: ReturnType<typeof vi.fn>;
+  finish: () => void;
+} {
+  const close = vi.fn();
+  const drawImage = vi.fn();
+  vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({
+    width: 4_096,
+    height: 2_048,
+    close,
+  }));
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+    imageSmoothingEnabled: false,
+    imageSmoothingQuality: 'low',
+    drawImage,
+  } as unknown as CanvasRenderingContext2D);
+
+  let callback: BlobCallback | undefined;
+  const finish = () => {
+    callback?.(encodedByteLength === null
+      ? null
+      : {
+          arrayBuffer: async () => new Uint8Array(encodedByteLength).buffer,
+        } as Blob);
+  };
+  vi.spyOn(HTMLCanvasElement.prototype, 'toBlob').mockImplementation((nextCallback) => {
+    callback = nextCallback;
+    if (!deferred) finish();
+  });
+  return { close, drawImage, finish };
+}

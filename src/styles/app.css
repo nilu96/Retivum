@@ -65,11 +65,13 @@
 }
 
 .toast-notification.success { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.toast-notification.info { border-color: color-mix(in srgb, var(--warning) 55%, var(--border)); }
 .toast-notification.error { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
 .toast-notification.activity { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .toast-notification p { margin: 0; font-size: .82rem; font-weight: 620; line-height: 1.4; }
 .toast-icon { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 9px; color: var(--text-muted); background: var(--surface-3); }
 .toast-notification.success .toast-icon { color: var(--accent-strong); background: var(--accent-soft); }
+.toast-notification.info .toast-icon { color: var(--warning); background: color-mix(in srgb, var(--warning) 13%, transparent); }
 .toast-notification.error .toast-icon { color: var(--danger); background: var(--danger-soft); }
 .toast-notification.activity .toast-icon { color: var(--accent-strong); background: var(--accent-soft); }
 .toast-notification.activity .toast-icon svg { animation: toast-activity-spin .9s linear infinite; }
@@ -429,6 +431,8 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .message-composer textarea:placeholder-shown { overflow: hidden; }
 .message-composer textarea:disabled { overflow: hidden; cursor: not-allowed; color: var(--text-subtle); background: var(--surface-1); }
 .message-composer > .icon-button { align-self: end; width: 42px; height: 42px; }
+.composer-attachment-control { position: relative; align-self: end; width: 42px; height: 42px; }
+.composer-attachment-control > .icon-button { width: 42px; height: 42px; }
 .composer-attachment-button.recording { position: relative; isolation: isolate; overflow: hidden; border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .composer-attachment-button.recording::before,
 .composer-attachment-button.recording::after { content: ''; position: absolute; z-index: 0; top: 50%; left: 50%; pointer-events: none; border-radius: 50%; background: var(--danger); transform-origin: center; transition: transform 70ms linear, opacity 70ms linear; }
@@ -440,7 +444,7 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .composer-attachments > span > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-attachments button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 50%; color: inherit; background: transparent; }
 .composer-attachments button:hover { color: var(--danger); background: var(--danger-soft); }
-.composer-attachment-menu { position: absolute; z-index: 6; inset-inline-start: 16px; inset-block-end: calc(100% - 2px); display: flex; flex-direction: column; min-width: 190px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); box-shadow: var(--shadow); }
+.composer-attachment-menu { position: absolute; z-index: 6; inset-inline-start: 0; inset-block-end: calc(100% + 8px); display: flex; flex-direction: column; min-width: 190px; padding: 6px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-1); box-shadow: var(--shadow); }
 .composer-attachment-menu button { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border: 0; border-radius: 8px; color: var(--text); background: transparent; font: inherit; font-size: .74rem; text-align: start; }
 .composer-attachment-menu button:hover { background: var(--surface-hover); }
 .message-composer > p { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: .7rem; }

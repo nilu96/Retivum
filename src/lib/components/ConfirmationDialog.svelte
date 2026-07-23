@@ -8,6 +8,7 @@
     title,
     description,
     icon,
+    cancelLabel,
     confirmLabel,
     tone = 'primary',
     oncancel,
@@ -17,6 +18,7 @@
     title: string;
     description: string;
     icon: IconName;
+    cancelLabel?: string;
     confirmLabel: string;
     tone?: 'primary' | 'danger';
     oncancel: () => void;
@@ -59,7 +61,7 @@
     </header>
     <footer class="identity-confirmation-actions">
       <button class="button secondary" type="button" disabled={confirming} onclick={cancel}>
-        {$t('common.cancel')}
+        {cancelLabel ?? $t('common.cancel')}
       </button>
       <button
         class="button"

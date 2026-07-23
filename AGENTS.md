@@ -155,7 +155,7 @@ These notes describe code behavior that is useful while modifying the implementa
 - Incoming LXMF messages follow the same UI-first, durable-follow-up flow. Overlapping identity-directory loads merge rather than replace live events.
 - Outbound LXMF uses the WASM router queue, preserves stable logical messages across propagation fallback, and reuses active direct or identified backchannel links.
 - User contact names are local metadata, take precedence over announce labels, and are never transmitted.
-- NomadNet root requests normalize to `/page/index.mu`; the worker reuses links, bounds page resources to 1 MiB, unwraps MessagePack response values, and decodes binary/string payloads as UTF-8.
+- NomadNet root requests normalize to `/page/index.mu`; the worker reuses links, bounds page resources to 1.05 MB, unwraps MessagePack response values, and decodes binary/string payloads as UTF-8.
 - NomadNet links stay live only in worker memory. They are not serialized across application or runtime restarts. Form submission and persistent page caching remain future work.
 - Same-node NomadNet navigation resolves locally; cross-node navigation requires a known public key, normally learned from an announce.
 - Provisioning reads may recover once after a broken established link. Mutating provisioning operations are never automatically replayed because the firmware protocol has no idempotency key or duplicate-request cache.

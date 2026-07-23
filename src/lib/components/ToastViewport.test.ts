@@ -39,6 +39,21 @@ describe('ToastViewport', () => {
     expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
   });
 
+  it('can finish a live activity as informational feedback', async () => {
+    render(ToastViewport);
+
+    const activity = liveActivity.start('chat.attachment.imageDownscale.running', { name: 'photo.jpg' });
+    activity.info('chat.attachment.imageDownscale.originalKept', {
+      name: 'photo.jpg',
+      originalSize: '2.0 MB',
+      resultSize: '2.2 MB',
+    });
+
+    const status = await screen.findByRole('status');
+    expect(status).toHaveClass('info');
+    expect(status).toHaveTextContent('The downscaled “photo.jpg” was 2.2 MB');
+  });
+
   it('cancels and removes a cancellable live activity from its close button', async () => {
     const cancel = vi.fn();
     render(ToastViewport);

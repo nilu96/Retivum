@@ -16,6 +16,7 @@ export interface LiveActivityHandle {
   readonly id: number;
   update: (messageKey: MessageKey, parameters?: MessageParameters) => void;
   success: (messageKey: MessageKey, parameters?: MessageParameters, durationMs?: number) => void;
+  info: (messageKey: MessageKey, parameters?: MessageParameters, durationMs?: number) => void;
   error: (messageKey: MessageKey, parameters?: MessageParameters, durationMs?: number) => void;
   dismiss: () => void;
 }
@@ -68,6 +69,9 @@ function startLiveActivity(
     update: (nextMessageKey, nextParameters) => updateLiveActivity(id, nextMessageKey, nextParameters),
     success: (nextMessageKey, nextParameters, durationMs = defaultDuration.success) => {
       finishLiveActivity(id, 'success', nextMessageKey, nextParameters, durationMs);
+    },
+    info: (nextMessageKey, nextParameters, durationMs = defaultDuration.info) => {
+      finishLiveActivity(id, 'info', nextMessageKey, nextParameters, durationMs);
     },
     error: (nextMessageKey, nextParameters, durationMs = defaultDuration.error) => {
       finishLiveActivity(id, 'error', nextMessageKey, nextParameters, durationMs);

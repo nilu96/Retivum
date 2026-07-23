@@ -40,9 +40,10 @@ export function chatAttachmentBytes(attachments: ChatAttachment[] | undefined): 
 
 export function formatChatByteSize(bytes: number): string {
   const safeBytes = Math.max(0, Number.isFinite(bytes) ? bytes : 0);
-  if (safeBytes < 1024) return `${Math.round(safeBytes)} B`;
-  if (safeBytes < 1024 * 1024) return `${(safeBytes / 1024).toFixed(1)} KiB`;
-  return `${(safeBytes / 1024 / 1024).toFixed(1)} MiB`;
+  if (safeBytes < 1_000) return `${Math.round(safeBytes)} B`;
+  if (safeBytes < 1_000_000) return `${(safeBytes / 1_000).toFixed(1)} KB`;
+  if (safeBytes < 1_000_000_000) return `${(safeBytes / 1_000_000).toFixed(1)} MB`;
+  return `${(safeBytes / 1_000_000_000).toFixed(1)} GB`;
 }
 
 export function imageFormat(mimeType: string): string {

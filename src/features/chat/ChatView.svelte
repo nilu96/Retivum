@@ -37,6 +37,13 @@
   } from '../../infrastructure/reticulum/runtime';
   import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
   import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
+  import {
+    downscaleChatImage,
+    inspectChatImageForDownscale,
+    MAX_CHAT_IMAGE_LONG_EDGE,
+    type ChatImageDownscaleCandidate,
+  } from '../../infrastructure/platform/chat-image-downscale';
+  import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -51,7 +58,7 @@
   import NewConversationEditor from './NewConversationEditor.svelte';
   import MessageAttachment from './MessageAttachment.svelte';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
-  import { toast } from '../../lib/notifications/toasts';
+  import { liveActivity, toast } from '../../lib/notifications/toasts';
 
   type ChatScope = 'chats' | 'contacts' | 'announces';
   type DestinationActionTarget = {
@@ -61,6 +68,10 @@
   type ConversationDraft = {
     content: string;
     attachments: ChatAttachment[];
+  };
+  type PendingImageDownscaleConfirmation = {
+    candidate: ChatImageDownscaleCandidate;
+    resolve: (downscale: boolean) => void;
   };
 
   let scope = $state<ChatScope>('chats');
@@ -75,6 +86,7 @@
   let attachmentMenu = $state<HTMLDivElement>();
   let attachmentMenuButton = $state<HTMLButtonElement>();
   let fileInput = $state<HTMLInputElement>();
+  let imageDownscaleConfirmation = $state.raw<PendingImageDownscaleConfirmation>();
   let recording = $state(false);
   let mediaRecorder: MediaRecorder | undefined;
   let recordingStream: MediaStream | undefined;
@@ -272,6 +284,7 @@
     window.addEventListener('resize', updateOverflow);
     window.visualViewport?.addEventListener('resize', updateOverflow);
     return () => {
+      resolveImageDownscale(false);
       stopRecordingResources();
       window.removeEventListener('resize', updateOverflow);
       window.visualViewport?.removeEventListener('resize', updateOverflow);
@@ -593,7 +606,9 @@
           ? 'chat.composer.propagationUnavailable'
           : result.code === 'LXMF_DESTINATION_BLOCKED'
             ? 'chat.composer.blocked'
-            : 'chat.composer.error');
+            : 'chat.composer.error', result.code === 'LXMF_ATTACHMENTS_TOO_LARGE'
+              ? { size: formatChatByteSize(MAX_CHAT_ATTACHMENT_BYTES) }
+              : undefined);
       }
     } catch {
       toast.error('chat.composer.error');
@@ -656,11 +671,7 @@
     if (!destinationHash) return;
     const additions: ChatAttachment[] = [];
     for (const file of Array.from(files)) {
-      const mimeType = file.type.toLowerCase().split(';', 1)[0] || 'application/octet-stream';
-      const kind: ChatAttachment['kind'] = mimeType.startsWith('image/') && isRenderableChatImage(mimeType)
-        ? 'image'
-        : mimeType.startsWith('audio/') ? 'audio' : 'file';
-      additions.push({ kind, name: file.name || 'attachment.bin', mimeType, data: new Uint8Array(await file.arrayBuffer()) });
+      additions.push(await prepareChatAttachment(file));
     }
     try {
       const existingDraft = selectedDestination === destinationHash
@@ -673,8 +684,89 @@
         attachmentMenuOpen = false;
       }
     } catch {
-      toast.error('chat.attachment.tooLarge', { size: Math.round(MAX_CHAT_ATTACHMENT_BYTES / 1024 / 1024) });
+      toast.error('chat.attachment.tooLarge', { size: formatChatByteSize(MAX_CHAT_ATTACHMENT_BYTES) });
     }
+  }
+
+  async function prepareChatAttachment(file: File): Promise<ChatAttachment> {
+    const mimeType = file.type.toLowerCase().split(';', 1)[0] || 'application/octet-stream';
+    const kind: ChatAttachment['kind'] = mimeType.startsWith('image/') && isRenderableChatImage(mimeType)
+      ? 'image'
+      : mimeType.startsWith('audio/') ? 'audio' : 'file';
+    if (kind !== 'image') return originalFileAttachment(file, kind, mimeType);
+
+    let candidate: ChatImageDownscaleCandidate | undefined;
+    try {
+      candidate = await inspectChatImageForDownscale(file);
+    } catch {
+      return originalFileAttachment(file, kind, mimeType);
+    }
+    if (!candidate) return originalFileAttachment(file, kind, mimeType);
+
+    try {
+      if (!await requestImageDownscale(candidate)) {
+        return originalFileAttachment(file, kind, mimeType);
+      }
+      const activity = liveActivity.start(
+        'chat.attachment.imageDownscale.running',
+        { name: file.name || 'image' },
+      );
+      try {
+        const downscaled = await downscaleChatImage(candidate);
+        const originalSize = formatChatByteSize(file.size);
+        const resultSize = formatChatByteSize(downscaled.data.byteLength);
+        if (downscaled.data.byteLength < file.size) {
+          activity.success('chat.attachment.imageDownscale.success', {
+            name: file.name || 'image',
+            originalSize,
+            resultSize,
+          });
+          return {
+            kind: 'image',
+            name: downscaled.name,
+            mimeType: downscaled.mimeType,
+            data: downscaled.data,
+          };
+        }
+        activity.info('chat.attachment.imageDownscale.originalKept', {
+          name: file.name || 'image',
+          originalSize,
+          resultSize,
+        });
+      } catch {
+        activity.error('chat.attachment.imageDownscale.error', {
+          name: file.name || 'image',
+        });
+      }
+      return originalFileAttachment(file, kind, mimeType);
+    } finally {
+      candidate.dispose();
+    }
+  }
+
+  async function originalFileAttachment(
+    file: File,
+    kind: ChatAttachment['kind'],
+    mimeType: string,
+  ): Promise<ChatAttachment> {
+    return {
+      kind,
+      name: file.name || 'attachment.bin',
+      mimeType,
+      data: new Uint8Array(await file.arrayBuffer()),
+    };
+  }
+
+  function requestImageDownscale(candidate: ChatImageDownscaleCandidate): Promise<boolean> {
+    return new Promise((resolve) => {
+      imageDownscaleConfirmation = { candidate, resolve };
+    });
+  }
+
+  function resolveImageDownscale(downscale: boolean): void {
+    const pending = imageDownscaleConfirmation;
+    imageDownscaleConfirmation = undefined;
+    pending?.resolve(downscale);
   }
 
   function fileSelectionChanged(event: Event): void {
@@ -1202,8 +1294,11 @@
         {#if composerAttachments.length > 0}
           <div class="composer-attachments" aria-label={$t('chat.attachment.add')}>
             {#each composerAttachments as attachment, index (`${attachment.name}:${index}`)}
-              <span>
-                <Icon name={attachment.kind === 'image' ? 'image' : attachment.kind === 'audio' ? 'microphone' : 'file'} size={14} />
+              {@const attachmentIcon = attachment.mimeType.startsWith('image/')
+                ? 'image'
+                : attachment.mimeType.startsWith('audio/') ? 'microphone' : 'file'}
+              <span data-attachment-icon={attachmentIcon}>
+                <Icon name={attachmentIcon} size={14} />
                 <span>{attachment.name}</span>
                 <button
                   type="button"
@@ -1214,33 +1309,35 @@
             {/each}
           </div>
         {/if}
-        {#if attachmentMenuOpen && !recording}
-          <div class="composer-attachment-menu" bind:this={attachmentMenu}>
-            <button type="button" onclick={() => {
-              attachmentMenuOpen = false;
-              fileInput?.click();
-            }}>
-              <Icon name="file" size={17} />{$t('chat.attachment.addFile')}
-            </button>
-            <button type="button" onclick={() => {
-              attachmentMenuOpen = false;
-              void toggleRecording();
-            }}>
-              <Icon name="microphone" size={17} />{$t('chat.attachment.record')}
-            </button>
-          </div>
-        {/if}
-        <button
-          class="icon-button composer-attachment-button"
-          class:recording
-          bind:this={attachmentMenuButton}
-          type="button"
-          disabled={selectedDestinationBlocked || sending}
-          title={$t(recording ? 'chat.attachment.stopRecording' : 'chat.attachment.add')}
-          aria-label={$t(recording ? 'chat.attachment.stopRecording' : 'chat.attachment.add')}
-          onclick={() => recording ? toggleRecording() : attachmentMenuOpen = !attachmentMenuOpen
-          }
-        ><Icon name={recording ? 'stop' : 'paperclip'} size={18} /></button>
+        <div class="composer-attachment-control">
+          {#if attachmentMenuOpen && !recording}
+            <div class="composer-attachment-menu" bind:this={attachmentMenu}>
+              <button type="button" onclick={() => {
+                attachmentMenuOpen = false;
+                fileInput?.click();
+              }}>
+                <Icon name="file" size={17} />{$t('chat.attachment.addFile')}
+              </button>
+              <button type="button" onclick={() => {
+                attachmentMenuOpen = false;
+                void toggleRecording();
+              }}>
+                <Icon name="microphone" size={17} />{$t('chat.attachment.record')}
+              </button>
+            </div>
+          {/if}
+          <button
+            class="icon-button composer-attachment-button"
+            class:recording
+            bind:this={attachmentMenuButton}
+            type="button"
+            disabled={selectedDestinationBlocked || sending}
+            title={$t(recording ? 'chat.attachment.stopRecording' : 'chat.attachment.add')}
+            aria-label={$t(recording ? 'chat.attachment.stopRecording' : 'chat.attachment.add')}
+            onclick={() => recording ? toggleRecording() : attachmentMenuOpen = !attachmentMenuOpen
+            }
+          ><Icon name={recording ? 'stop' : 'paperclip'} size={18} /></button>
+        </div>
         <label>
           <span class="sr-only">{$t('chat.composer.label')}</span>
           <textarea
@@ -1410,5 +1507,23 @@
       selectDestination(destinationHash);
       newConversationOpen = false;
     }}
+  />
+{/if}
+
+{#if imageDownscaleConfirmation}
+  <ConfirmationDialog
+    titleId="chat-image-downscale-title"
+    title={$t('chat.attachment.imageDownscale.title')}
+    description={$t('chat.attachment.imageDownscale.description', {
+      name: imageDownscaleConfirmation.candidate.file.name || 'image',
+      width: imageDownscaleConfirmation.candidate.width,
+      height: imageDownscaleConfirmation.candidate.height,
+      max: MAX_CHAT_IMAGE_LONG_EDGE,
+    })}
+    icon="image"
+    cancelLabel={$t('chat.attachment.imageDownscale.keepOriginal')}
+    confirmLabel={$t('chat.attachment.imageDownscale.confirm')}
+    oncancel={() => resolveImageDownscale(false)}
+    onconfirm={() => resolveImageDownscale(true)}
   />
 {/if}
