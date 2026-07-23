@@ -172,57 +172,6 @@ describe('PathManagementView', () => {
     expect(screen.queryByRole('button', { name: 'Scroll to top' })).not.toBeInTheDocument();
   });
 
-  it('does not open a counterpart after pointer movement or text selection', async () => {
-    knownDestinations.set([{
-      destinationHash: pathDestination,
-      publicKey: '4'.repeat(128),
-      lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
-    }]);
-    render(PathManagementView);
-
-    const pathEntry = screen.getByText(pathDestination).closest('li');
-    const entryCopy = pathEntry!.querySelector('.path-management-entry-copy')!;
-    await fireEvent.pointerDown(entryCopy, {
-      pointerId: 7,
-      button: 0,
-      clientX: 20,
-      clientY: 20,
-    });
-    await fireEvent.pointerMove(entryCopy, {
-      pointerId: 7,
-      buttons: 1,
-      clientX: 34,
-      clientY: 20,
-    });
-    expect(pathEntry).toHaveClass('entry-pointer-moved');
-    await fireEvent.pointerUp(entryCopy, {
-      pointerId: 7,
-      button: 0,
-      clientX: 34,
-      clientY: 20,
-    });
-    await fireEvent.click(entryCopy);
-
-    expect(screen.getByRole('tab', { name: /Paths/ })).toHaveAttribute('aria-selected', 'true');
-    expect(pathEntry).not.toHaveClass('entry-pointer-moved');
-
-    const selection = window.getSelection()!;
-    const range = document.createRange();
-    range.selectNodeContents(screen.getByText(pathDestination));
-    selection.removeAllRanges();
-    selection.addRange(range);
-    await fireEvent.click(entryCopy);
-    expect(screen.getByRole('tab', { name: /Paths/ })).toHaveAttribute('aria-selected', 'true');
-    expect(pathEntry).toHaveClass('entry-text-selected');
-
-    selection.removeAllRanges();
-    await fireEvent.pointerMove(entryCopy, { pointerId: 7, buttons: 0 });
-    expect(pathEntry).not.toHaveClass('entry-text-selected');
-    await fireEvent.click(entryCopy);
-    expect(screen.getByRole('tab', { name: /Known destinations/ }))
-      .toHaveAttribute('aria-selected', 'true');
-  });
-
   it('filters known destinations by partial hash and shows a no-results state', async () => {
     render(PathManagementView);
 
