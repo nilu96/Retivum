@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import { flickDismiss } from '../actions/flickDismiss';
   import { dismissToast, toasts } from '../notifications/toasts';
   import Icon from './Icon.svelte';
 </script>
@@ -12,8 +13,14 @@
       class:info={notification.kind === 'info'}
       class:error={notification.kind === 'error'}
       class:activity={notification.kind === 'activity'}
+      class:transient={notification.kind !== 'activity'}
       role={notification.kind === 'error' ? 'alert' : 'status'}
       aria-busy={notification.kind === 'activity'}
+      use:flickDismiss={{
+        disabled: notification.kind === 'activity',
+        dismiss: notification.dismissing,
+        ondismiss: () => dismissToast(notification.id),
+      }}
     >
       <span class="toast-icon">
         <Icon name={notification.kind === 'success' ? 'check' : notification.kind === 'activity' ? 'sync' : 'info'} size={18} />

@@ -10,6 +10,7 @@ export interface ToastNotification {
   messageKey: MessageKey;
   parameters?: MessageParameters;
   oncancel?: () => void;
+  dismissing?: boolean;
 }
 
 export interface LiveActivityHandle {
@@ -116,7 +117,16 @@ function trimTransientToasts(items: ToastNotification[]): ToastNotification[] {
 function scheduleDismissal(id: number, durationMs: number): void {
   const existing = timers.get(id);
   if (existing) clearTimeout(existing);
-  timers.set(id, setTimeout(() => dismissToast(id), durationMs));
+  timers.set(id, setTimeout(() => beginToastDismissal(id), durationMs));
+}
+
+function beginToastDismissal(id: number): void {
+  timers.delete(id);
+  toasts.update((items) => items.map((item) => (
+    item.id === id && item.kind !== 'activity' && !item.dismissing
+      ? { ...item, dismissing: true }
+      : item
+  )));
 }
 
 export const toast = {
