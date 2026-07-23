@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { get } from 'svelte/store';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { startRouter } from '../../app/router';
 import { defaultAppPreferences } from '../../domain/settings';
 import {
   chatAnnounces,
@@ -23,8 +24,13 @@ import { clearToasts } from '../../lib/notifications/toasts';
 import ChatView from './ChatView.svelte';
 
 describe('ChatView', () => {
+  let stopRouter: (() => void) | undefined;
+
   beforeEach(() => {
     vi.unstubAllGlobals();
+    delete document.documentElement.dataset.nativeShell;
+    window.history.replaceState(null, '', '#/chat');
+    stopRouter = startRouter();
     chatAnnounces.set([]);
     chatContacts.set([]);
     chatMessages.set([]);
@@ -37,6 +43,11 @@ describe('ChatView', () => {
     clearToasts();
     clearProbeHistory();
     vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    stopRouter?.();
+    stopRouter = undefined;
   });
 
   it('switches between the localized overview scopes', async () => {
@@ -875,8 +886,13 @@ describe('ChatView', () => {
       expect(menu).toHaveStyle({ left: '80px', top: '120px' });
       await fireEvent.click(screen.getByRole('button', { name: 'Close chat actions' }));
       expect(screen.queryByRole('menu', { name: 'Chat actions' })).not.toBeInTheDocument();
+      vi.useRealTimers();
+      row.classList.add('touch-active');
       await fireEvent.click(row);
-      expect(document.querySelector('.chat-workspace')).toHaveClass('conversation-selected');
+      expect(row).not.toHaveClass('touch-active');
+      await waitFor(() => {
+        expect(document.querySelector('.chat-workspace')).toHaveClass('conversation-selected');
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -923,6 +939,50 @@ describe('ChatView', () => {
       await fireEvent.pointerUp(announceRow, { pointerType: 'touch', pointerId: 4, button: 0 });
       expect(announceRow).not.toHaveClass('touch-active');
     }
+  });
+
+  it('paints cleared touch feedback before opening a pointer-activated conversation', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:painted-touch-conversation',
+      identityId: 'identity',
+      messageId: 'painted-touch-conversation',
+      sourceHash: destinationHash,
+      destinationHash: '1'.repeat(32),
+      title: '',
+      content: 'Paint before opening',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const frameCallbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    }));
+    document.documentElement.dataset.nativeShell = 'true';
+    render(ChatView);
+    const row = screen.getByRole('button', { name: /Paint before opening/ });
+    row.classList.add('touch-active');
+
+    row.dispatchEvent(new MouseEvent('click', {
+      bubbles: true,
+      cancelable: true,
+    }));
+
+    expect(row).not.toHaveClass('touch-active');
+    expect(document.querySelector('.chat-workspace')).not.toHaveClass('conversation-selected');
+    expect(frameCallbacks).toHaveLength(1);
+
+    frameCallbacks.shift()?.(0);
+    await Promise.resolve();
+    expect(document.querySelector('.chat-workspace')).not.toHaveClass('conversation-selected');
+    expect(frameCallbacks).toHaveLength(1);
+
+    frameCallbacks.shift()?.(16);
+    await waitFor(() => {
+      expect(document.querySelector('.chat-workspace')).toHaveClass('conversation-selected');
+    });
   });
 
   it('shows per-chat unread messages and clears them when that chat is opened', async () => {
@@ -1022,9 +1082,37 @@ describe('ChatView', () => {
     await fireEvent.click(screen.getByRole('button', { name: /Unread before close/ }));
     expect(screen.getByText('New')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(screen.queryByRole('log', { name: 'Conversation messages' })).not.toBeInTheDocument());
     await fireEvent.click(screen.getByRole('button', { name: /Unread before close/ }));
 
     expect(screen.queryByText('New')).not.toBeInTheDocument();
+  });
+
+  it('closes and restores a conversation through browser history', async () => {
+    const sourceHash = '7'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:history-conversation',
+      identityId: 'identity',
+      messageId: 'history-conversation',
+      sourceHash,
+      destinationHash: '4'.repeat(32),
+      title: '',
+      content: 'History conversation',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /History conversation/ }));
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'Preserved draft' },
+    });
+
+    window.history.back();
+    await waitFor(() => expect(screen.queryByRole('log', { name: 'Conversation messages' })).not.toBeInTheDocument());
+
+    window.history.forward();
+    await waitFor(() => expect(screen.getByRole('log', { name: 'Conversation messages' })).toBeInTheDocument());
+    expect(screen.getByRole('textbox', { name: 'Message' })).toHaveValue('Preserved draft');
   });
 
   it('reacts to announces and messages received after the view is mounted', async () => {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { navigate } from '../../app/router';
+  import { navigateBack } from '../../app/router';
   import type { RNodeBatteryState } from '../../infrastructure/reticulum/protocol';
   import { reticulumRuntime, statusDetails } from '../../infrastructure/reticulum/runtime';
   import { t, type MessageKey } from '../../i18n';
@@ -54,7 +54,7 @@
 
 <div class="page status-details-page" bind:this={page}>
   <header class="page-header provisioning-header status-details-header">
-    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigate('tools')}>
+    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('status.backToTools')}
     </button>
     <div class="provisioning-header-copy">

@@ -6,6 +6,7 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(RetivumAppearancePlugin.class);
         registerPlugin(RetivumImageSharePlugin.class);
         super.onCreate(savedInstanceState);
     }

@@ -4,6 +4,7 @@ const config: CapacitorConfig = {
   appId: 'de.nilu96.retivum',
   appName: 'Retivum',
   webDir: 'dist',
+  backgroundColor: '#0b0f0c',
   bundledWebRuntime: false,
   loggingBehavior: 'none',
   android: {

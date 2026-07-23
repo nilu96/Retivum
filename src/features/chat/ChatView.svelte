@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import {
+    closeNavigationLayer,
+    navigationLayer,
+    openChatConversation,
+  } from '../../app/router';
+  import {
     chatConversationSummaries,
     chatMessageDisplayStatus,
     chatMessageDirection,
@@ -227,6 +232,17 @@
   });
 
   $effect(() => {
+    const layer = $navigationLayer;
+    if (layer?.kind === 'chatConversation') {
+      if (selectedDestination !== layer.destinationHash) {
+        void selectDestination(layer.destinationHash, false);
+      }
+      return;
+    }
+    if (selectedDestination) closeConversationState();
+  });
+
+  $effect(() => {
     const destination = selectedDestination;
     const latestIncomingId = selectedMessages
       .filter((message) => chatMessageDirection(message) === 'incoming')
@@ -373,13 +389,14 @@
     recordingDestination = undefined;
   }
 
-  async function selectDestination(destinationHash: string): Promise<void> {
+  async function selectDestination(destinationHash: string, updateNavigation = true): Promise<void> {
     const incomingMessageIds = new Set($chatMessages
       .filter((message) => chatMessagePeerHash(message) === destinationHash
         && chatMessageDirection(message) === 'incoming')
       .map((message) => message.id));
     openedUnreadMessageIds = ($unreadChatMessageIds[destinationHash] ?? [])
       .filter((messageId) => incomingMessageIds.has(messageId));
+    if (updateNavigation) openChatConversation(destinationHash);
     if (selectedDestination !== destinationHash) {
       stopConversationRecording(selectedDestination);
       storeSelectedConversationDraft();
@@ -389,7 +406,7 @@
     await scrollToLatestMessage();
   }
 
-  function closeConversation(): void {
+  function closeConversationState(): void {
     stopConversationRecording(selectedDestination);
     storeSelectedConversationDraft();
     openedUnreadMessageIds = [];
@@ -397,6 +414,11 @@
     composerContent = '';
     composerAttachments = [];
     attachmentMenuOpen = false;
+  }
+
+  function closeConversation(): void {
+    closeConversationState();
+    closeNavigationLayer('chatConversation');
   }
 
   async function saveContact(name: string): Promise<boolean> {
@@ -468,7 +490,19 @@
     chatActions = undefined;
   }
 
-  async function chatRowClick(destinationHash: string): Promise<void> {
+  function waitForOverviewPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          window.setTimeout(resolve, 0);
+        });
+      });
+    });
+  }
+
+  async function chatRowClick(event: MouseEvent, destinationHash: string): Promise<void> {
+    (event.currentTarget as HTMLElement).classList.remove('touch-active');
+    if (document.documentElement.dataset.nativeShell === 'true') await waitForOverviewPaint();
     await selectDestination(destinationHash);
   }
 
@@ -1016,7 +1050,7 @@
               title={$t('chat.conversation.actions.open', {
                 name: conversation.displayName ?? shortHash(conversation.destinationHash),
               })}
-              onclick={() => { void chatRowClick(conversation.destinationHash); }}
+              onclick={(event) => { void chatRowClick(event, conversation.destinationHash); }}
               use:contextMenuTrigger={{
                 onopen: (x, y, method) => openChatActions(actionTarget, x, y, method),
               }}
@@ -1053,7 +1087,7 @@
               <button
                 class="chat-directory-row"
                 aria-haspopup="menu"
-                onclick={() => { void chatRowClick(contact.destinationHash); }}
+                onclick={(event) => { void chatRowClick(event, contact.destinationHash); }}
                 use:contextMenuTrigger={{
                   onopen: (x, y, method) => openChatActions(actionTarget, x, y, method),
                 }}
@@ -1103,7 +1137,7 @@
               class="chat-directory-row"
               class:active={selectedDestination === announce.destinationHash}
               aria-haspopup="menu"
-              onclick={() => { void chatRowClick(announce.destinationHash); }}
+              onclick={(event) => { void chatRowClick(event, announce.destinationHash); }}
               use:contextMenuTrigger={{
                 onopen: (x, y, method) => openChatActions(actionTarget, x, y, method),
               }}

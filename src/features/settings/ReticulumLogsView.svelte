@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { navigate } from '../../app/router';
+  import { navigateBack } from '../../app/router';
   import type { ReticulumLogLevel } from '../../domain/logging';
   import { createDateFormatter, locale, t } from '../../i18n';
   import { clearReticulumLogs, reticulumLogs } from '../../infrastructure/reticulum/runtime';
@@ -29,7 +29,7 @@
 
 <div class="page logs-page" bind:this={page}>
   <header class="page-header provisioning-header logs-header">
-    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigate('tools')}>
+    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('provisioning.backToTools')}
     </button>
     <div class="provisioning-header-copy">

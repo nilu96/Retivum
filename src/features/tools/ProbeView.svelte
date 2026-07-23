@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { navigate } from '../../app/router';
+  import { navigateBack } from '../../app/router';
   import { normalizeDestinationHash } from '../../domain/settings';
   import { createDateFormatter, locale, t } from '../../i18n';
   import { maximumProbePayloadBytes } from '../../infrastructure/reticulum/protocol';
@@ -119,7 +119,7 @@
 
 <div class="page probe-page" bind:this={page}>
   <header class="page-header provisioning-header probe-header">
-    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigate('tools')}>
+    <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('probe.backToTools')}
     </button>
     <div class="provisioning-header-copy">

@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { AppRoute } from '../../app/router';
-  import { navigate, navigateToSettingsSection } from '../../app/router';
+  import { navigateToSettingsSection, navigateTopLevel } from '../../app/router';
   import { t, type MessageKey } from '../../i18n';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import { createLxmaAddress } from '../../domain/lxmf';
@@ -133,7 +133,7 @@
           class:active={navigationItemIsActive(item)}
           aria-current={navigationItemIsActive(item) ? 'page' : undefined}
           aria-label={navigationLabel(item)}
-          onclick={() => navigate(item.route)}
+          onclick={() => navigateTopLevel(item.route)}
         >
           <Icon name={item.icon} size={21} />
           <span class="navigation-copy">
@@ -238,7 +238,7 @@
         class:active={navigationItemIsActive(item)}
         aria-current={navigationItemIsActive(item) ? 'page' : undefined}
         aria-label={navigationLabel(item)}
-        onclick={() => navigate(item.route)}
+        onclick={() => navigateTopLevel(item.route)}
       >
         <Icon name={item.icon} size={22} />
         <span class="navigation-copy">
