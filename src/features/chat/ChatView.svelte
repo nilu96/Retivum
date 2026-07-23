@@ -79,7 +79,7 @@
     resolve: (downscale: boolean) => void;
   };
 
-  let scope = $state<ChatScope>('chats');
+  let selectedScope = $state<ChatScope>();
   let query = $state('');
   let selectedDestination = $state<string | undefined>();
   let contactEditorDestination = $state<string | undefined>();
@@ -174,6 +174,9 @@
   };
 
   const conversations = $derived(chatConversationSummaries($chatMessages, $chatAnnounces, $chatContacts));
+  const scope = $derived<ChatScope>(
+    selectedScope ?? (conversations.length ? 'chats' : $chatContacts.length ? 'contacts' : 'announces'),
+  );
   const blockedDestinationHashes = $derived(new Set($blockedChatDestinations.map((item) => item.destinationHash)));
   const normalizedQuery = $derived(query.trim().toLowerCase());
   const visibleConversations = $derived(conversations.filter((conversation) => [
@@ -1013,7 +1016,7 @@
           aria-selected={scope === item.id}
           class:active={scope === item.id}
           onclick={() => {
-            scope = item.id;
+            selectedScope = item.id;
             query = '';
           }}
         >{$t(item.label)}</button>

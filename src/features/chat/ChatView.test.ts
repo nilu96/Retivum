@@ -50,13 +50,78 @@ describe('ChatView', () => {
     stopRouter = undefined;
   });
 
-  it('switches between the localized overview scopes', async () => {
+  it('defaults to announces when there are no chats or contacts', async () => {
     render(ChatView);
 
-    expect(screen.getByRole('heading', { name: 'No conversations yet' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'No chat announces heard' })).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('tab', { name: 'Contacts' }));
     expect(screen.getByRole('heading', { name: 'No contacts saved' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search contacts')).toBeInTheDocument();
+  });
+
+  it('defaults to contacts when there are contacts but no chats', () => {
+    const destinationHash = '1'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Saved contact',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+
+    render(ChatView);
+
+    expect(screen.getByRole('tab', { name: 'Contacts' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Saved contact')).toBeInTheDocument();
+  });
+
+  it('keeps chats as the first default when a conversation exists', () => {
+    const destinationHash = '2'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Conversation contact',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatMessages.set([{
+      id: 'identity:default-conversation',
+      identityId: 'identity',
+      messageId: 'default-conversation',
+      sourceHash: destinationHash,
+      destinationHash: '3'.repeat(32),
+      title: '',
+      content: 'Existing conversation',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+
+    render(ChatView);
+
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Existing conversation')).toBeInTheDocument();
+  });
+
+  it('selects contacts when they finish loading after the view opens', async () => {
+    render(ChatView);
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+
+    const destinationHash = '4'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Loaded contact',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Contacts' })).toHaveAttribute('aria-selected', 'true');
+    });
+    expect(screen.getByText('Loaded contact')).toBeInTheDocument();
   });
 
   it('syncs from the preferred or best discovered propagation node independently of sending preferences', async () => {
@@ -1119,7 +1184,7 @@ describe('ChatView', () => {
     const sourceHash = 'e'.repeat(32);
     render(ChatView);
 
-    expect(screen.getByRole('heading', { name: 'No conversations yet' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'No chat announces heard' })).toBeInTheDocument();
 
     chatAnnounces.set([{
       id: `identity:${sourceHash}`,
@@ -1142,7 +1207,8 @@ describe('ChatView', () => {
       receivedAt: '2026-07-16T10:01:00.000Z',
     }]);
 
-    await waitFor(() => expect(screen.getByText('Arrived after mount')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true'));
+    expect(screen.getByText('Arrived after mount')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     expect(screen.getByText('Live Alice')).toBeInTheDocument();
     expect(screen.getByText(sourceHash)).toBeInTheDocument();
