@@ -7,12 +7,17 @@
     defaultAppPreferences,
     AUTHORIZED_SERIAL_PORT_ID,
     interfaceDescription,
+    MAX_CHAT_IMAGE_LONG_EDGE,
+    MIN_CHAT_IMAGE_LONG_EDGE,
+    normalizeChatImageLongEdge,
     normalizeDestinationHash,
     propagationIsActive,
     type AppPreferences,
+    type ImageDownscalingMode,
     type InterfaceConfig,
     type InterfaceType,
     type LxmfDeliveryMethod,
+    type MessageRetentionDays,
     type PropagationSyncIntervalMinutes,
     type ThemePreference,
   } from '../../domain/settings';
@@ -677,6 +682,69 @@
             />
           </label>
         </div>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <header class="settings-card-header">
+        <div class="section-icon"><Icon name="chat" size={21} /></div>
+        <div>
+          <h2>{$t('settings.chat.title')}</h2>
+          <p>{$t('settings.chat.description')}</p>
+        </div>
+      </header>
+      <div class="field-grid two-column chat-settings-grid">
+        <label class="field chat-image-downscaling-mode">
+          <span>{$t('settings.chat.imageDownscaling')}</span>
+          <select
+            value={preferences.chat.imageDownscalingMode}
+            onchange={(event) => {
+              preferences.chat.imageDownscalingMode = event.currentTarget.value as ImageDownscalingMode;
+              void persistPreferences();
+            }}
+          >
+            <option value="ask">{$t('settings.chat.imageDownscaling.ask')}</option>
+            <option value="automatic">{$t('settings.chat.imageDownscaling.automatic')}</option>
+            <option value="never">{$t('settings.chat.imageDownscaling.never')}</option>
+          </select>
+          <small>{$t(`settings.chat.imageDownscaling.${preferences.chat.imageDownscalingMode}.help` as MessageKey)}</small>
+        </label>
+        <label class="field chat-image-max-edge">
+          <span>{$t('settings.chat.imageDownscaling.maxEdge')}</span>
+          <input
+            type="number"
+            min={MIN_CHAT_IMAGE_LONG_EDGE}
+            max={MAX_CHAT_IMAGE_LONG_EDGE}
+            step="100"
+            value={preferences.chat.imageDownscalingMaxLongEdge}
+            onchange={(event) => {
+              preferences.chat.imageDownscalingMaxLongEdge = normalizeChatImageLongEdge(
+                event.currentTarget.valueAsNumber,
+              );
+              void persistPreferences();
+            }}
+          />
+          <small>{$t('settings.chat.imageDownscaling.maxEdge.help')}</small>
+        </label>
+        <label class="field chat-message-retention">
+          <span>{$t('settings.chat.messageRetention')}</span>
+          <select
+            value={preferences.chat.messageRetentionDays}
+            onchange={(event) => {
+              preferences.chat.messageRetentionDays = Number(event.currentTarget.value) as MessageRetentionDays;
+              void persistPreferences();
+            }}
+          >
+            <option value={0}>{$t('settings.chat.messageRetention.never')}</option>
+            <option value={1}>{$t('settings.chat.messageRetention.1')}</option>
+            <option value={2}>{$t('settings.chat.messageRetention.2')}</option>
+            <option value={3}>{$t('settings.chat.messageRetention.3')}</option>
+            <option value={7}>{$t('settings.chat.messageRetention.7')}</option>
+            <option value={30}>{$t('settings.chat.messageRetention.30')}</option>
+            <option value={90}>{$t('settings.chat.messageRetention.90')}</option>
+          </select>
+          <small>{$t('settings.chat.messageRetention.help')}</small>
+        </label>
       </div>
     </section>
 

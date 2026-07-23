@@ -33,6 +33,9 @@ describe('requiresReticulumRuntimeRebuild', () => {
       preferences.lxmf.propagationNodeHash = '0123456789abcdef0123456789abcdef';
       preferences.lxmf.autoAnnounceIntervalMinutes = 60;
       preferences.lxmf.propagationSyncIntervalMinutes = 30;
+      preferences.chat.imageDownscalingMode = 'automatic';
+      preferences.chat.imageDownscalingMaxLongEdge = 1_200;
+      preferences.chat.messageRetentionDays = 30;
     });
 
     expect(requiresReticulumRuntimeRebuild(current, propagated)).toBe(false);

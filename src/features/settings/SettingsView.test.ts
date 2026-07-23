@@ -52,6 +52,33 @@ describe('SettingsView blocked destinations', () => {
     expect(screen.getByText('Experimental')).toBeInTheDocument();
   });
 
+  it('offers image handling and message retention preferences in the Chat section', async () => {
+    render(SettingsView);
+
+    const imageDownscaling = screen.getByRole('combobox', {
+      name: /Image downscaling/,
+    });
+    const maximumEdge = screen.getByRole('spinbutton', { name: /Maximum image edge/ });
+    const messageRetention = screen.getByRole('combobox', { name: /Delete old messages/ });
+    const chatSection = screen.getByRole('heading', { name: 'Chat' }).closest('.settings-card');
+    expect(chatSection?.querySelector('.chat-settings-grid')).toHaveClass('two-column');
+    expect(imageDownscaling.closest('.field')).toHaveClass('chat-image-downscaling-mode');
+    expect(maximumEdge.closest('.field')).toHaveClass('chat-image-max-edge');
+    expect(messageRetention.closest('.field')).toHaveClass('chat-message-retention');
+    expect(imageDownscaling).toHaveValue('ask');
+    expect(maximumEdge).toHaveValue(1_500);
+    expect(messageRetention).toHaveValue('0');
+    expect(Array.from((messageRetention as HTMLSelectElement).options).map((option) => option.text)).toContain('After 3 days');
+    expect(Array.from((messageRetention as HTMLSelectElement).options).map((option) => option.text)).not.toContain('After 1 year');
+
+    await fireEvent.change(imageDownscaling, { target: { value: 'automatic' } });
+    await fireEvent.change(maximumEdge, { target: { value: '1200' } });
+    await fireEvent.change(messageRetention, { target: { value: '2' } });
+    expect(imageDownscaling).toHaveValue('automatic');
+    expect(maximumEdge).toHaveValue(1_200);
+    expect(messageRetention).toHaveValue('2');
+  });
+
   it('credits its protocol foundations and shows the project package version', () => {
     render(SettingsView);
 

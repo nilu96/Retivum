@@ -74,7 +74,7 @@ Transport mode may still be toggled on every platform, but the UI must show the 
 
 - Further interface types beyond WebSocket, RNode, TCP, and UDP
 - Group chat, voice/video, reactions, and message editing
-- General file attachments and media processing
+- Advanced attachment editing and transcoding beyond bounded image downscaling and voice recording
 - Hosting a NomadNet node or serving pages
 - Full background service/daemon operation
 - Push notifications that depend on a central service
@@ -510,6 +510,8 @@ Selecting a contact or announce opens its existing conversation or creates an em
 - Adding a contact does not by itself mark a destination or key as verified. Key changes retain the existing warning/verification flow and must not silently attach history to a different cryptographic identity.
 - Virtualized chronological message list with date separators and delivery-state details.
 - Multiline composer with send, keyboard-safe mobile layout, draft persistence, and explicit retry/cancel.
+- Image attachments can be kept unchanged, downscaled after confirmation, or downscaled automatically. The user-configured longest-edge threshold defaults to 1,500 pixels; conversion is single-pass and the generated image replaces the original only when it is smaller.
+- Local message retention defaults to **Never**. Optional 1-, 2-, 3-, 7-, 30-, and 90-day policies remove expired local history at startup, after preference changes, and periodically while Retivum remains open. Retention applies to delivered, failed, queued, and pending messages; Retivum requests cancellation of active expired deliveries before removing their local records. Attachment bytes are embedded in the message record and are deleted atomically with it.
 - Incoming-message notification when supported and permitted; never require a central push service.
 - Identity announce action and a compact event/diagnostics view for troubleshooting.
 

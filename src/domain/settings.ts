@@ -6,8 +6,14 @@ export type WebSocketScheme = 'ws' | 'wss';
 export type InterfaceType = 'websocket' | 'rnode' | 'tcp' | 'udp';
 export type RNodeConnectionType = 'ble' | 'serial';
 export type InterfaceMode = 'full' | 'pointToPoint' | 'accessPoint' | 'roaming' | 'boundary' | 'gateway';
+export type ImageDownscalingMode = 'ask' | 'automatic' | 'never';
+export type MessageRetentionDays = 0 | 1 | 2 | 3 | 7 | 30 | 90;
 
 export const AUTHORIZED_SERIAL_PORT_ID = 'authorized-serial-port';
+export const DEFAULT_CHAT_IMAGE_LONG_EDGE = 1_500;
+export const MIN_CHAT_IMAGE_LONG_EDGE = 320;
+export const MAX_CHAT_IMAGE_LONG_EDGE = 8_192;
+export const messageRetentionDayOptions: readonly MessageRetentionDays[] = [0, 1, 2, 3, 7, 30, 90];
 
 export const interfaceModes: readonly InterfaceMode[] = [
   'full',
@@ -35,11 +41,18 @@ export interface LxmfPreferences {
   autoAnnounceIntervalMinutes: AutoAnnounceIntervalMinutes;
 }
 
+export interface ChatPreferences {
+  imageDownscalingMode: ImageDownscalingMode;
+  imageDownscalingMaxLongEdge: number;
+  messageRetentionDays: MessageRetentionDays;
+}
+
 export interface AppPreferences {
-  schemaVersion: 7;
+  schemaVersion: 8;
   transportEnabled: boolean;
   theme: ThemePreference;
   locale: 'system' | 'en';
+  chat: ChatPreferences;
   lxmf: LxmfPreferences;
 }
 
@@ -122,10 +135,15 @@ export const rnodeBandwidths = [
 ] as const;
 
 export const defaultAppPreferences: AppPreferences = {
-  schemaVersion: 7,
+  schemaVersion: 8,
   transportEnabled: false,
   theme: 'system',
   locale: 'system',
+  chat: {
+    imageDownscalingMode: 'ask',
+    imageDownscalingMaxLongEdge: DEFAULT_CHAT_IMAGE_LONG_EDGE,
+    messageRetentionDays: 0,
+  },
   lxmf: {
     defaultDeliveryMethod: 'direct',
     acceptMessagesFromContactsOnly: false,
@@ -171,8 +189,14 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
   if (!value || typeof value !== 'object') return structuredClone(defaultAppPreferences);
   const source = value as {
     transportEnabled?: unknown;
+    automaticImageDownscaling?: unknown;
     theme?: unknown;
     locale?: unknown;
+    chat?: {
+      imageDownscalingMode?: unknown;
+      imageDownscalingMaxLongEdge?: unknown;
+      messageRetentionDays?: unknown;
+    };
     lxmf?: {
       defaultDeliveryMethod?: unknown;
       acceptMessagesFromContactsOnly?: unknown;
@@ -188,11 +212,20 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
   const propagationNodeHash = typeof source.lxmf?.propagationNodeHash === 'string'
     ? normalizeDestinationHash(source.lxmf.propagationNodeHash)
     : undefined;
+  const legacyAutomaticImageDownscaling = source.automaticImageDownscaling === true;
   return {
-    schemaVersion: 7,
+    schemaVersion: 8,
     transportEnabled: source.transportEnabled === true,
     theme: source.theme === 'dark' || source.theme === 'light' ? source.theme : 'system',
     locale: source.locale === 'en' ? 'en' : 'system',
+    chat: {
+      imageDownscalingMode: normalizeImageDownscalingMode(
+        source.chat?.imageDownscalingMode,
+        legacyAutomaticImageDownscaling,
+      ),
+      imageDownscalingMaxLongEdge: normalizeChatImageLongEdge(source.chat?.imageDownscalingMaxLongEdge),
+      messageRetentionDays: normalizeMessageRetentionDays(source.chat?.messageRetentionDays),
+    },
     lxmf: {
       defaultDeliveryMethod: legacyMethod === 'opportunistic' || legacyMethod === 'propagated' ? legacyMethod : 'direct',
       acceptMessagesFromContactsOnly: source.lxmf?.acceptMessagesFromContactsOnly === true,
@@ -208,6 +241,25 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
       ),
     },
   };
+}
+
+export function normalizeImageDownscalingMode(
+  value: unknown,
+  legacyAutomatic = false,
+): ImageDownscalingMode {
+  if (value === 'automatic' || value === 'never') return value;
+  return legacyAutomatic ? 'automatic' : 'ask';
+}
+
+export function normalizeChatImageLongEdge(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_CHAT_IMAGE_LONG_EDGE;
+  return Math.min(MAX_CHAT_IMAGE_LONG_EDGE, Math.max(MIN_CHAT_IMAGE_LONG_EDGE, Math.round(value)));
+}
+
+export function normalizeMessageRetentionDays(value: unknown): MessageRetentionDays {
+  return typeof value === 'number' && messageRetentionDayOptions.includes(value as MessageRetentionDays)
+    ? value as MessageRetentionDays
+    : 0;
 }
 
 export function normalizeInboundStampCost(value: unknown): number {

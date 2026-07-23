@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  forgetUnreadChatMessages,
   markChatMessagesRead,
   noteUnreadChatMessage,
   unreadChatMessageCount,
@@ -29,5 +30,15 @@ describe('chat unread state', () => {
     noteUnreadChatMessage('alice', 'alice-1');
 
     expect(get(unreadChatMessageCounts)).toEqual({ alice: 1 });
+  });
+
+  it('forgets only unread messages removed from local history', () => {
+    noteUnreadChatMessage('alice', 'alice-1');
+    noteUnreadChatMessage('alice', 'alice-2');
+    noteUnreadChatMessage('bob', 'bob-1');
+
+    forgetUnreadChatMessages(['alice-1', 'bob-1']);
+
+    expect(get(unreadChatMessageIds)).toEqual({ alice: ['alice-2'] });
   });
 });

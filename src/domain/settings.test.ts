@@ -199,9 +199,44 @@ describe('LXMF delivery preferences', () => {
       locale: 'en',
       lxmf: { defaultDeliveryMethod: 'propagated', propagationNodeHash: hash },
     })).toMatchObject({
-      schemaVersion: 7,
+      schemaVersion: 8,
       lxmf: { defaultDeliveryMethod: 'propagated', propagationEnabled: true, propagationNodeHash: hash },
     });
+  });
+
+  it('normalizes chat image handling and message retention preferences', () => {
+    expect(normalizeAppPreferences({ schemaVersion: 7 }).chat).toEqual({
+      imageDownscalingMode: 'ask',
+      imageDownscalingMaxLongEdge: 1_500,
+      messageRetentionDays: 0,
+    });
+    expect(normalizeAppPreferences({
+      automaticImageDownscaling: true,
+    }).chat.imageDownscalingMode).toBe('automatic');
+    expect(normalizeAppPreferences({
+      chat: {
+        imageDownscalingMode: 'never',
+        imageDownscalingMaxLongEdge: 200,
+        messageRetentionDays: 2,
+      },
+    }).chat).toEqual({
+      imageDownscalingMode: 'never',
+      imageDownscalingMaxLongEdge: 320,
+      messageRetentionDays: 2,
+    });
+    expect(normalizeAppPreferences({
+      chat: {
+        imageDownscalingMaxLongEdge: 20_000,
+        messageRetentionDays: 3,
+      },
+    }).chat).toEqual({
+      imageDownscalingMode: 'ask',
+      imageDownscalingMaxLongEdge: 8_192,
+      messageRetentionDays: 3,
+    });
+    expect(normalizeAppPreferences({
+      chat: { messageRetentionDays: 365 },
+    }).chat.messageRetentionDays).toBe(0);
   });
 
   it('defaults inbound stamp enforcement to zero and accepts Python-compatible costs', () => {

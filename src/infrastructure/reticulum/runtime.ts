@@ -15,6 +15,7 @@ import {
   chatMessageProgressStatus,
   chatMessageStatusForState,
   isUnconfirmedPacket,
+  messageTime,
   shouldUsePropagationFallback,
   upsertChatAnnounce,
   upsertChatBlockedDestination,
@@ -37,7 +38,12 @@ import type {
 } from '../../domain/nomadnet';
 import type { ProvisioningNode } from '../../domain/provisioning';
 import { formatNomadAddress, nomadRequestPath, parseNomadAddress, upsertNomadAnnounce } from '../../domain/nomadnet';
-import { normalizeDestinationHash, type AppPreferences, type InterfaceConfig } from '../../domain/settings';
+import {
+  defaultAppPreferences,
+  normalizeDestinationHash,
+  type AppPreferences,
+  type InterfaceConfig,
+} from '../../domain/settings';
 import { t } from '../../i18n';
 import { BrowserIdentityRepository } from '../database/identity-repository';
 import { BrowserChatRepository } from '../database/chat-repository';
@@ -66,6 +72,7 @@ import {
   blockedChatDestinations,
   chatContacts,
   chatMessages,
+  forgetUnreadChatMessages,
   markChatMessagesRead,
   noteUnreadChatMessage,
   unreadChatMessageCount,
@@ -80,6 +87,7 @@ export {
 } from './chat-state';
 
 export const runtimeStatus = writable<RuntimeState>('starting');
+export const appPreferences = writable<AppPreferences>(structuredClone(defaultAppPreferences));
 export const chatInboundTransfers = writable<ChatInboundTransfer[]>([]);
 export const interfaceStatuses = writable<Record<string, InterfaceRuntimeState>>({});
 export const statusDetails = writable<RuntimeStatusDetails | undefined>();
@@ -139,6 +147,7 @@ class ReticulumRuntimeController {
   );
   private loadedNomadIdentityId?: string;
   private loadedChatIdentityId?: string;
+  private messageRetentionTimer?: number;
   private readonly identityNameWaiters = new Map<string, (ok: boolean) => void>();
   private readonly identityOperationWaiters = new Map<string, (ok: boolean) => void>();
   private readonly identityExportWaiters = new Map<string, (value: Uint8Array | undefined) => void>();
@@ -182,6 +191,8 @@ class ReticulumRuntimeController {
         this.provisioningRepository.loadNodes(),
       ]);
       identities.set(storedIdentities.map(identitySummary));
+      appPreferences.set(structuredClone(settings.preferences));
+      this.scheduleMessageRetention();
       propagationNodeAnnounces.set([]);
       provisioningNodes.set(storedProvisioningNodes);
       const worker = new Worker(new URL('../../workers/reticulum.worker.ts', import.meta.url), { type: 'module' });
@@ -231,6 +242,10 @@ class ReticulumRuntimeController {
         configuration: { preferences: settings.preferences, interfaces: settings.interfaces },
       });
     } catch {
+      if (this.messageRetentionTimer !== undefined) {
+        window.clearInterval(this.messageRetentionTimer);
+        this.messageRetentionTimer = undefined;
+      }
       runtimeErrorCode.set('RUNTIME_INITIALIZATION_FAILED');
       runtimeStatus.set('error');
     }
@@ -241,6 +256,8 @@ class ReticulumRuntimeController {
       preferences: structuredClone(preferences),
       interfaces: structuredClone(interfaces),
     };
+    appPreferences.set(structuredClone(preferences));
+    await this.pruneExpiredChatMessages();
     this.post({ type: 'applyConfiguration', configuration });
   }
 
@@ -1006,6 +1023,10 @@ class ReticulumRuntimeController {
   }
 
   stop(): void {
+    if (this.messageRetentionTimer !== undefined) {
+      window.clearInterval(this.messageRetentionTimer);
+      this.messageRetentionTimer = undefined;
+    }
     if (!this.worker) return;
     this.post({ type: 'shutdown' });
     void this.platformInterfaceHost.closeAll();
@@ -1568,6 +1589,61 @@ class ReticulumRuntimeController {
       .filter((item) => item.identityId === identityId)
       .reduce((items, item) => upsertChatMessage(items, item), directory.messages));
     blockedChatDestinations.set(directory.blockedDestinations);
+    await this.pruneExpiredChatMessages();
+  }
+
+  private scheduleMessageRetention(): void {
+    if (this.messageRetentionTimer !== undefined) window.clearInterval(this.messageRetentionTimer);
+    this.messageRetentionTimer = window.setInterval(() => {
+      void this.pruneExpiredChatMessages();
+    }, 60 * 60 * 1_000);
+  }
+
+  private async pruneExpiredChatMessages(): Promise<void> {
+    const retentionDays = get(appPreferences).chat.messageRetentionDays;
+    const identity = get(activeIdentity);
+    if (retentionDays === 0 || !identity) return;
+    const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1_000;
+    const expiredCurrentMessages = get(chatMessages).filter((message) => (
+      message.identityId === identity.id
+      && Number.isFinite(messageTime(message))
+      && messageTime(message) < cutoff
+    ));
+    const pendingMessages = expiredCurrentMessages.filter((message) => {
+      const status = chatMessageDisplayStatus(message);
+      return message.direction === 'outgoing'
+        && (status === 'queued' || status === 'sending' || message.propagationFallbackPending === true);
+    });
+    for (const message of expiredCurrentMessages) this.deletingChatMessageIds.add(message.messageId);
+    try {
+      if (this.worker && pendingMessages.length > 0) {
+        const cancellations = await Promise.all(
+          pendingMessages.map((message) => this.cancelChatMessageDelivery(message.messageId)),
+        );
+        if (cancellations.some((cancelled) => !cancelled)) {
+          appendLocalLog('warning', 'runtime', 'CHAT_EXPIRED_MESSAGE_CANCEL_FAILED', {
+            messages: cancellations.filter((cancelled) => !cancelled).length,
+          });
+        }
+      }
+      const deletedIds = await this.chatRepository.deleteExpiredMessages(identity.id, cutoff);
+      if (deletedIds.length === 0) return;
+      const deleted = new Set(deletedIds);
+      forgetUnreadChatMessages(
+        get(chatMessages).filter((item) => deleted.has(item.id)).map((item) => item.messageId),
+      );
+      chatMessages.update((items) => items.filter((item) => !deleted.has(item.id)));
+      appendLocalLog('info', 'persistence', 'CHAT_EXPIRED_MESSAGES_DELETED', {
+        messages: deletedIds.length,
+        retentionDays,
+      });
+    } catch {
+      appendLocalLog('error', 'persistence', 'CHAT_EXPIRED_MESSAGE_DELETE_FAILED', {
+        retentionDays,
+      });
+    } finally {
+      for (const message of expiredCurrentMessages) this.deletingChatMessageIds.delete(message.messageId);
+    }
   }
 
   private refreshKnownDestinationPaths(): void {

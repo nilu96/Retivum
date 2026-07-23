@@ -1,4 +1,6 @@
-export const MAX_CHAT_IMAGE_LONG_EDGE = 1_500;
+import { DEFAULT_CHAT_IMAGE_LONG_EDGE } from '../../domain/settings';
+
+export { DEFAULT_CHAT_IMAGE_LONG_EDGE };
 export const CHAT_IMAGE_JPEG_QUALITY = 0.85;
 
 export interface ChatImageDownscaleCandidate {
@@ -29,7 +31,7 @@ export interface PngFeatures {
 export function targetImageDimensions(
   width: number,
   height: number,
-  maximumLongEdge = MAX_CHAT_IMAGE_LONG_EDGE,
+  maximumLongEdge = DEFAULT_CHAT_IMAGE_LONG_EDGE,
 ): { width: number; height: number } {
   const safeWidth = Math.max(1, Math.round(width));
   const safeHeight = Math.max(1, Math.round(height));
@@ -78,7 +80,7 @@ export function inspectPngFeatures(data: Uint8Array): PngFeatures {
 
 export async function inspectChatImageForDownscale(
   file: File,
-  maximumLongEdge = MAX_CHAT_IMAGE_LONG_EDGE,
+  maximumLongEdge = DEFAULT_CHAT_IMAGE_LONG_EDGE,
 ): Promise<ChatImageDownscaleCandidate | undefined> {
   const mimeType = file.type.toLowerCase().split(';', 1)[0];
   if (mimeType !== 'image/jpeg' && mimeType !== 'image/png') return undefined;

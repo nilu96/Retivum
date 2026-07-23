@@ -81,6 +81,25 @@ export class BrowserChatRepository {
     }
   }
 
+  async deleteExpiredMessages(identityId: string, before: number): Promise<string[]> {
+    if (!Number.isFinite(before)) return [];
+    const database = await openRetivumDatabase();
+    try {
+      const transaction = database.transaction('chatMessages', 'readwrite');
+      const store = transaction.objectStore('chatMessages');
+      const messages = await requestResult<ChatMessage[]>(store.getAll());
+      const expiredIds = messages.filter((message) => {
+        const timestamp = messageTime(message);
+        return message.identityId === identityId && Number.isFinite(timestamp) && timestamp < before;
+      }).map((message) => message.id);
+      for (const id of expiredIds) store.delete(id);
+      await transactionDone(transaction);
+      return expiredIds;
+    } finally {
+      database.close();
+    }
+  }
+
   async saveContact(contact: ChatContact): Promise<void> {
     await this.put('chatContacts', contact);
   }

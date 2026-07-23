@@ -40,3 +40,14 @@ export function markChatMessagesRead(destinationHash?: string): void {
     return remaining;
   });
 }
+
+export function forgetUnreadChatMessages(messageIds: Iterable<string>): void {
+  const removed = new Set(messageIds);
+  if (removed.size === 0) return;
+  unreadChatMessageIds.update((messages) => Object.fromEntries(
+    Object.entries(messages).flatMap(([destinationHash, current]) => {
+      const remaining = current.filter((messageId) => !removed.has(messageId));
+      return remaining.length > 0 ? [[destinationHash, remaining]] : [];
+    }),
+  ));
+}

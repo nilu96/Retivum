@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { openRetivumDatabase, requestResult, transactionDone } from './database';
 import { BrowserChatRepository } from './chat-repository';
 
 function deleteDatabase(): Promise<void> {
@@ -143,5 +144,89 @@ describe('BrowserChatRepository', () => {
 
     const restored = await repository.load('identity-1');
     expect(restored.messages.map((message) => message.messageId)).toEqual(['other']);
+  });
+
+  it('deletes expired history in every message state while preserving recent messages', async () => {
+    const repository = new BrowserChatRepository();
+    const base = {
+      identityId: 'identity-1',
+      sourceHash: 'a'.repeat(32),
+      destinationHash: 'b'.repeat(32),
+      title: '',
+    };
+    await repository.saveMessage({
+      ...base,
+      id: 'identity-1:old-incoming',
+      messageId: 'old-incoming',
+      content: 'Expired incoming',
+      attachments: [{
+        kind: 'file',
+        name: 'expired.bin',
+        mimeType: 'application/octet-stream',
+        data: new Uint8Array([1, 2, 3, 4]),
+      }],
+      receivedAt: '2026-07-01T10:00:00.000Z',
+    });
+    await repository.saveMessage({
+      ...base,
+      id: 'identity-1:old-delivered',
+      messageId: 'old-delivered',
+      content: 'Expired delivered',
+      direction: 'outgoing',
+      status: 'delivered',
+      receivedAt: '2026-07-01T10:00:00.000Z',
+    });
+    await repository.saveMessage({
+      ...base,
+      id: 'identity-1:old-queued',
+      messageId: 'old-queued',
+      content: 'Pending',
+      direction: 'outgoing',
+      status: 'queued',
+      receivedAt: '2026-07-01T10:00:00.000Z',
+    });
+    await repository.saveMessage({
+      ...base,
+      id: 'identity-1:old-fallback-pending',
+      messageId: 'old-fallback-pending',
+      content: 'Pending fallback',
+      direction: 'outgoing',
+      status: 'failed',
+      propagationFallbackPending: true,
+      receivedAt: '2026-07-01T10:00:00.000Z',
+    });
+    await repository.saveMessage({
+      ...base,
+      id: 'identity-1:recent',
+      messageId: 'recent',
+      content: 'Recent',
+      receivedAt: '2026-07-22T10:00:00.000Z',
+    });
+
+    await expect(repository.deleteExpiredMessages(
+      'identity-1',
+      Date.parse('2026-07-21T10:00:00.000Z'),
+    )).resolves.toEqual([
+      'identity-1:old-delivered',
+      'identity-1:old-fallback-pending',
+      'identity-1:old-incoming',
+      'identity-1:old-queued',
+    ]);
+
+    expect((await repository.load('identity-1')).messages.map((message) => message.messageId)).toEqual([
+      'recent',
+    ]);
+
+    const database = await openRetivumDatabase();
+    try {
+      const transaction = database.transaction('chatMessages', 'readonly');
+      const [expiredRecord] = await Promise.all([
+        requestResult(transaction.objectStore('chatMessages').get('identity-1:old-incoming')),
+        transactionDone(transaction),
+      ]);
+      expect(expiredRecord).toBeUndefined();
+    } finally {
+      database.close();
+    }
   });
 });

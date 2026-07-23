@@ -665,6 +665,7 @@ input[role='switch']:checked { border-color: var(--accent); background: var(--ac
 input[role='switch']:checked::after { translate: 17px 0; background: var(--accent-ink); }
 .field-grid { display: grid; gap: 13px; }
 .two-column { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 4px 20px 20px 70px; }
+.chat-settings-grid { column-gap: 16px; row-gap: 16px; }
 .field { display: flex; min-width: 0; flex-direction: column; gap: 7px; color: var(--text-muted); font-size: .74rem; font-weight: 650; }
 .field input, .field select { width: 100%; min-height: 42px; padding-inline: 11px; border: 1px solid var(--border); border-radius: 9px; outline: 0; color: var(--text); background-color: var(--surface-2); transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
 .field select { appearance: none; padding-inline-end: 38px; background-image: linear-gradient(45deg, transparent 50%, var(--text-subtle) 50%), linear-gradient(135deg, var(--text-subtle) 50%, transparent 50%); background-position: calc(100% - 16px) 18px, calc(100% - 11px) 18px; background-repeat: no-repeat; background-size: 5px 5px, 5px 5px; }
@@ -760,6 +761,14 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .rnode-duty-cycle-controls { grid-template-columns: minmax(0, 1fr) 106px; gap: 10px; }
 }
 @media (min-width: 700px) {
+  .chat-settings-grid {
+    grid-template-areas:
+      'image-mode max-edge'
+      'retention retention';
+  }
+  .chat-image-downscaling-mode { grid-area: image-mode; }
+  .chat-image-max-edge { grid-area: max-edge; }
+  .chat-message-retention { grid-area: retention; }
   .lxmf-settings-grid {
     grid-template-areas:
       'method interval'

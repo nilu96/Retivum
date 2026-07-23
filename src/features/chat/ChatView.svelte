@@ -30,6 +30,7 @@
     unreadChatMessageCounts,
   } from '../../infrastructure/reticulum/chat-state';
   import {
+    appPreferences,
     chatInboundTransfers,
     destinationPathStatuses,
     propagationSyncActive,
@@ -40,7 +41,6 @@
   import {
     downscaleChatImage,
     inspectChatImageForDownscale,
-    MAX_CHAT_IMAGE_LONG_EDGE,
     type ChatImageDownscaleCandidate,
   } from '../../infrastructure/platform/chat-image-downscale';
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
@@ -694,17 +694,25 @@
       ? 'image'
       : mimeType.startsWith('audio/') ? 'audio' : 'file';
     if (kind !== 'image') return originalFileAttachment(file, kind, mimeType);
+    const imagePreferences = $appPreferences.chat;
+    if (imagePreferences.imageDownscalingMode === 'never') {
+      return originalFileAttachment(file, kind, mimeType);
+    }
 
     let candidate: ChatImageDownscaleCandidate | undefined;
     try {
-      candidate = await inspectChatImageForDownscale(file);
+      candidate = await inspectChatImageForDownscale(
+        file,
+        imagePreferences.imageDownscalingMaxLongEdge,
+      );
     } catch {
       return originalFileAttachment(file, kind, mimeType);
     }
     if (!candidate) return originalFileAttachment(file, kind, mimeType);
 
     try {
-      if (!await requestImageDownscale(candidate)) {
+      if (imagePreferences.imageDownscalingMode === 'ask'
+        && !await requestImageDownscale(candidate)) {
         return originalFileAttachment(file, kind, mimeType);
       }
       const activity = liveActivity.start(
@@ -1518,7 +1526,6 @@
       name: imageDownscaleConfirmation.candidate.file.name || 'image',
       width: imageDownscaleConfirmation.candidate.width,
       height: imageDownscaleConfirmation.candidate.height,
-      max: MAX_CHAT_IMAGE_LONG_EDGE,
     })}
     icon="image"
     cancelLabel={$t('chat.attachment.imageDownscale.keepOriginal')}

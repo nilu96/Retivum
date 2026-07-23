@@ -8,6 +8,7 @@ import { BrowserSettingsRepository } from './infrastructure/database/settings-re
 import { keepMobileDisplayAwakeWhileForeground } from './infrastructure/platform/display-wake-lock';
 import { configureNativeViewport } from './infrastructure/platform/native-viewport';
 import { lockNativeScreenOrientation } from './infrastructure/platform/screen-orientation';
+import { appPreferences } from './infrastructure/reticulum/runtime';
 
 const native = Capacitor.isNativePlatform();
 const mobile = native && ['android', 'ios'].includes(Capacitor.getPlatform());
@@ -18,8 +19,10 @@ await keepMobileDisplayAwakeWhileForeground(mobile);
 async function applyInitialTheme(): Promise<void> {
   try {
     const snapshot = await new BrowserSettingsRepository().load();
+    appPreferences.set(structuredClone(snapshot.preferences));
     applyThemePreference(snapshot.preferences.theme);
   } catch {
+    appPreferences.set(structuredClone(defaultAppPreferences));
     applyThemePreference(defaultAppPreferences.theme);
   }
 }

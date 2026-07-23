@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { defaultAppPreferences } from '../../domain/settings';
 import {
   chatAnnounces,
   blockedChatDestinations,
@@ -10,6 +11,7 @@ import {
   noteUnreadChatMessage,
 } from '../../infrastructure/reticulum/chat-state';
 import {
+  appPreferences,
   chatInboundTransfers,
   destinationPathStatuses,
   propagationSyncActive,
@@ -29,6 +31,7 @@ describe('ChatView', () => {
     blockedChatDestinations.set([]);
     destinationPathStatuses.set({});
     chatInboundTransfers.set([]);
+    appPreferences.set(structuredClone(defaultAppPreferences));
     propagationSyncActive.set(false);
     markChatMessagesRead();
     clearToasts();
@@ -1307,6 +1310,61 @@ describe('ChatView', () => {
     );
     expect(imageEncoding.drawImage).toHaveBeenCalledOnce();
     expect(imageEncoding.close).toHaveBeenCalledOnce();
+  });
+
+  it('automatically downscales to the configured edge without prompting', async () => {
+    const destinationHash = 'c'.repeat(32);
+    const preferences = structuredClone(defaultAppPreferences);
+    preferences.chat.imageDownscalingMode = 'automatic';
+    preferences.chat.imageDownscalingMaxLongEdge = 1_000;
+    appPreferences.set(preferences);
+    const imageEncoding = installLargeImageMocks(80, true);
+    chatMessages.set([incomingConversationMessage(
+      destinationHash,
+      'automatic-image-downscale',
+      'Conversation with automatic image downscaling',
+    )]);
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Conversation with automatic image downscaling/ }));
+    await selectComposerFile(sizedFile('automatic.jpeg', 'image/jpeg', 200));
+
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent('Downscaling “automatic.jpeg”…');
+
+    imageEncoding.finish();
+
+    expect(await screen.findByText('automatic.jpg')).toBeInTheDocument();
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Reduced “automatic.jpeg” from 200 B to 80 B.',
+    );
+    expect(imageEncoding.drawImage).toHaveBeenCalledWith(expect.anything(), 0, 0, 1_000, 500);
+    expect(imageEncoding.close).toHaveBeenCalledOnce();
+  });
+
+  it('keeps original images without decoding or prompting when downscaling is disabled', async () => {
+    const destinationHash = '8'.repeat(32);
+    const preferences = structuredClone(defaultAppPreferences);
+    preferences.chat.imageDownscalingMode = 'never';
+    appPreferences.set(preferences);
+    const createBitmap = vi.fn();
+    vi.stubGlobal('createImageBitmap', createBitmap);
+    chatMessages.set([incomingConversationMessage(
+      destinationHash,
+      'never-image-downscale',
+      'Conversation without image downscaling',
+    )]);
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Conversation without image downscaling/ }));
+    await selectComposerFile(sizedFile('original.jpeg', 'image/jpeg', 200));
+
+    expect(await screen.findByText('original.jpeg')).toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
+    expect(createBitmap).not.toHaveBeenCalled();
   });
 
   it('keeps the original image and shows informational feedback when downscaling is larger', async () => {

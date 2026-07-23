@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   CHAT_IMAGE_JPEG_QUALITY,
+  DEFAULT_CHAT_IMAGE_LONG_EDGE,
   downscaleChatImage,
   inspectChatImageForDownscale,
   inspectPngFeatures,
-  MAX_CHAT_IMAGE_LONG_EDGE,
   targetImageDimensions,
 } from './chat-image-downscale';
 
@@ -83,7 +83,7 @@ describe('chat image downscaling', () => {
     expect(candidate).toMatchObject({
       width: 4_000,
       height: 2_000,
-      targetWidth: MAX_CHAT_IMAGE_LONG_EDGE,
+      targetWidth: DEFAULT_CHAT_IMAGE_LONG_EDGE,
       targetHeight: 750,
       outputMimeType: 'image/jpeg',
       outputName: 'large.jpg',

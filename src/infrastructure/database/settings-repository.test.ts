@@ -24,16 +24,29 @@ describe('BrowserSettingsRepository', () => {
     expect(initial.preferences.lxmf.propagationEnabled).toBe(false);
     expect(initial.preferences.lxmf.propagationSyncIntervalMinutes).toBe(0);
     expect(initial.preferences.lxmf.autoAnnounceIntervalMinutes).toBe(0);
+    expect(initial.preferences.chat).toEqual({
+      imageDownscalingMode: 'ask',
+      imageDownscalingMaxLongEdge: 1_500,
+      messageRetentionDays: 0,
+    });
     expect(initial.interfaces).toEqual([]);
 
     const config = createWebSocketInterfaceDraft('home-relay');
     config.name = 'Home relay';
     initial.preferences.transportEnabled = true;
+    initial.preferences.chat.imageDownscalingMode = 'automatic';
+    initial.preferences.chat.imageDownscalingMaxLongEdge = 1_200;
+    initial.preferences.chat.messageRetentionDays = 2;
     await repository.savePreferences(initial.preferences);
     await repository.saveInterface(config);
 
     const restored = await repository.load();
     expect(restored.preferences.transportEnabled).toBe(true);
+    expect(restored.preferences.chat).toEqual({
+      imageDownscalingMode: 'automatic',
+      imageDownscalingMaxLongEdge: 1_200,
+      messageRetentionDays: 2,
+    });
     expect(restored.interfaces).toEqual([config]);
   });
 
