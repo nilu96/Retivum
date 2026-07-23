@@ -667,7 +667,7 @@
       mediaRecorder?.stop();
       return;
     }
-    const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']
+    const mimeType = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm']
       .find((candidate) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(candidate));
     if (!mimeType || !navigator.mediaDevices?.getUserMedia) {
       toast.error('chat.attachment.recordingUnsupported');
@@ -676,7 +676,10 @@
     try {
       recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingChunks = [];
-      mediaRecorder = new MediaRecorder(recordingStream, { mimeType });
+      mediaRecorder = new MediaRecorder(recordingStream, {
+        mimeType,
+        audioBitsPerSecond: 64_000,
+      });
       recordingMimeType = mimeType.split(';', 1)[0];
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size) recordingChunks.push(event.data);
