@@ -19,6 +19,11 @@
   let viewerOpen = $state(false);
   let previewButton = $state<HTMLButtonElement>();
   let closeButton = $state<HTMLButtonElement>();
+  const attachmentIcon = $derived(
+    attachment.mimeType.startsWith('image/')
+      ? 'image'
+      : attachment.mimeType.startsWith('audio/') ? 'microphone' : 'file',
+  );
 
   $effect(() => {
     const url = URL.createObjectURL(new Blob([attachment.data as BlobPart], { type: attachment.mimeType }));
@@ -74,8 +79,8 @@
 </script>
 
 <div class="message-attachment" class:image={attachment.kind === 'image'}>
-  <div class="message-file-copy">
-    <Icon name={attachment.kind === 'image' ? 'image' : attachment.kind === 'audio' ? 'microphone' : 'file'} size={19} />
+  <div class="message-file-copy" data-attachment-icon={attachmentIcon}>
+    <Icon name={attachmentIcon} size={19} />
     <span><strong>{attachment.name}</strong><small>{formatChatByteSize(attachment.data.byteLength)}</small></span>
   </div>
   {#if attachment.kind === 'image'}

@@ -1246,6 +1246,36 @@ describe('ChatView', () => {
     const secondChip = (await screen.findByText('second.gif')).parentElement;
     expect(firstChip).toHaveAttribute('data-attachment-icon', 'image');
     expect(secondChip).toHaveAttribute('data-attachment-icon', 'image');
+
+    chatMessages.set([{
+      id: 'identity:multiple-images',
+      identityId: 'identity',
+      messageId: 'multiple-images',
+      sourceHash: destinationHash,
+      destinationHash: '7'.repeat(32),
+      title: '',
+      content: '',
+      attachments: [
+        {
+          kind: 'image',
+          name: 'first.gif',
+          mimeType: 'image/gif',
+          data: new Uint8Array([1]),
+        },
+        {
+          kind: 'file',
+          name: 'second.gif',
+          mimeType: 'image/gif',
+          data: new Uint8Array([2]),
+        },
+      ],
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+
+    await waitFor(() => expect(document.querySelectorAll('.message-file-copy')).toHaveLength(2));
+    expect(Array.from(document.querySelectorAll('.message-file-copy')).map(
+      (element) => element.getAttribute('data-attachment-icon'),
+    )).toEqual(['image', 'image']);
   });
 
   it('prompts once and keeps a smaller downscaled image attachment', async () => {
