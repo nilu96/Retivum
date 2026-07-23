@@ -88,6 +88,10 @@ export class ReticulumNode {
     static identityFromPrivateKey(private_key: Uint8Array): any;
     identityHash(): Uint8Array;
     identityPublicKey(): Uint8Array;
+    /**
+     * List hashes for destinations registered for incoming traffic.
+     */
+    inDestinationHashes(): any;
     ingestLxmfPaper(uri: string): any;
     linkStats(link_id: Uint8Array): any;
     lxmfDeliveryDestinationHash(): Uint8Array | undefined;
@@ -273,6 +277,7 @@ export interface InitOutput {
     readonly reticulumnode_identityFromPrivateKey: (a: number, b: number) => [number, number, number];
     readonly reticulumnode_identityHash: (a: number) => [number, number];
     readonly reticulumnode_identityPublicKey: (a: number) => [number, number];
+    readonly reticulumnode_inDestinationHashes: (a: number) => [number, number, number];
     readonly reticulumnode_linkStats: (a: number, b: number, c: number) => [number, number, number];
     readonly reticulumnode_memoryReport: (a: number) => any;
     readonly reticulumnode_new: (a: any) => [number, number, number];

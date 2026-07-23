@@ -97,7 +97,7 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `216c44f0505dee8e1790a675496f3a3dd57aa761`. The generated WASM below was rebuilt from this committed `feat/wasm` source with a clean Leviculum worktree. This source includes optional `interfaceIndex` targeting for `announceLxmf()`.
+The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `216c44f0505dee8e1790a675496f3a3dd57aa761`. The generated WASM below was rebuilt from this `feat/wasm` source plus an uncommitted WASM-only `inDestinationHashes()` binding; the core and LXMF crates remain unchanged. The complete Leviculum working-tree diff has SHA-256 `1c58a1674cb14a8b3f51ee679872c49b15b4b5ab036a77209ed6b3f1a2064e3f`. This source also includes optional `interfaceIndex` targeting for `announceLxmf()`.
 
 If provenance matters, capture the complete dirty source state or create an immutable commit/archive before publishing a rebuilt artifact.
 
@@ -114,10 +114,10 @@ Current fingerprints:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `leviculum_wasm.js` | `2ccdd05f46d6b95b4ef23ef92afd066bb70bb02063bf903e9a1a6c3b2d26859f` |
-| `leviculum_wasm_bg.wasm` | `8f48e01aa3eaef095d7f2803be87346c2ef41c0048f89e2d6a9f466e34693f82` |
-| `leviculum_wasm.d.ts` | `d142050185cd595c1c88e588313f524e8f091e0dd74cf60bf17b4528151013ce` |
-| `leviculum_wasm_bg.wasm.d.ts` | `e07a872c38ff5d585a3f20131ba74152293001b8ad55a1340fb6fec673f43692` |
+| `leviculum_wasm.js` | `bd7039e744a3cecd957081d0ce52fc1411156d65a44668d2084586672240bd3f` |
+| `leviculum_wasm_bg.wasm` | `5b5941a6fd2af6571e3be61765b25c33f429c616bd16d1f64a550316ac51c89f` |
+| `leviculum_wasm.d.ts` | `d0b9b665935f1d6d78979e3580ecdb0eca62887543f744fd8dbd80cb797e50fc` |
+| `leviculum_wasm_bg.wasm.d.ts` | `c460552a70985d08d4f26be754961453ae42072bdc49c3de6fc07120c98b6aa8` |
 
 The current build was produced with Rust 1.95.0 and `wasm-bindgen` 0.2.126. From the Leviculum checkout, the documented development build is:
 

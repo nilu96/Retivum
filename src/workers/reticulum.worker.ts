@@ -17,6 +17,7 @@ import {
 import type { ChatAttachment } from '../domain/chat';
 import type { ReticulumLogEntry, ReticulumLogLevel } from '../domain/logging';
 import { parseLxmaAddress } from '../domain/lxmf';
+import { normalizeInDestinationHashes } from '../infrastructure/reticulum/in-destination-hashes';
 import {
   encodeNomadRequestData,
   nomadPageLoadDeadlineMs,
@@ -154,6 +155,12 @@ interface ProbeJob {
   timer?: ReturnType<typeof setTimeout>;
 }
 
+interface DestinationPathRequestJob {
+  requestId: string;
+  destinationHash: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 let node: ReticulumNode | undefined;
 let wrappingKey: CryptoKey | undefined;
 let privateKey: Uint8Array | undefined;
@@ -161,6 +168,7 @@ let identity: PersistedIdentityRecord | undefined;
 let persistedNetworkState: PersistedNetworkStateRecord | undefined;
 let configuration: RuntimeConfiguration | undefined;
 let blockedDestinationHashes: string[] = [];
+let localLxmfDeliveryDestinationHash: string | undefined;
 let contactDestinationHashes = new Set<string>();
 let nomadNodeNameHash: Uint8Array | undefined;
 let managementNodeNameHash: Uint8Array | undefined;
@@ -199,10 +207,11 @@ const provisioningLinksByDestination = new Map<string, ProvisioningLinkState>();
 const provisioningLinksById = new Map<string, ProvisioningLinkState>();
 const probeJobs = new Map<string, ProbeJob>();
 const probeJobsByPacketHash = new Map<string, ProbeJob>();
+const destinationPathRequestJobs = new Map<string, DestinationPathRequestJob>();
 const knownDestinationPublicKeys = new Map<string, Uint8Array>();
-const localDestinationHashes = new Set<string>();
 const interfaceOnlineSuppressedAnnounceDestinations = new Set<string>();
 let knownDestinationSnapshotSignature = '';
+let pathManagementSnapshotSignature = '';
 const lxmfOutboundStatusCache = new Map<string, string>();
 const lxmfDeliveryLinks = new Set<string>();
 const lxmfLinkDestinations = new Map<string, string>();
@@ -399,8 +408,33 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       return;
     }
 
+    if (command.type === 'requestDestinationPath') {
+      requestDestinationPath(command);
+      return;
+    }
+
+    if (command.type === 'cancelDestinationPathRequest') {
+      finishDestinationPathRequest(command.requestId, false, undefined, 'PATH_REQUEST_CANCELLED');
+      return;
+    }
+
     if (command.type === 'dropDestinationPath') {
       dropDestinationPath(command);
+      return;
+    }
+
+    if (command.type === 'clearDestinationPaths') {
+      clearDestinationPaths(command.requestId);
+      return;
+    }
+
+    if (command.type === 'forgetKnownDestination') {
+      await forgetKnownDestinations(command.requestId, [command.destinationHash]);
+      return;
+    }
+
+    if (command.type === 'clearKnownDestinations') {
+      await forgetKnownDestinations(command.requestId);
       return;
     }
 
@@ -576,9 +610,8 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
     deliveryDestinationHash?: Uint8Array;
   };
   if (lxmf.deliveryDestinationHash) {
-    const deliveryDestinationHashHex = bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash));
-    localDestinationHashes.add(deliveryDestinationHashHex);
-    interfaceOnlineSuppressedAnnounceDestinations.add(deliveryDestinationHashHex);
+    localLxmfDeliveryDestinationHash = bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash));
+    interfaceOnlineSuppressedAnnounceDestinations.add(localLxmfDeliveryDestinationHash);
   }
   applyBlockedDestinationPolicy();
 
@@ -601,9 +634,7 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
   emit({
     type: 'identityReady',
     identity,
-    deliveryDestinationHashHex: lxmf.deliveryDestinationHash
-      ? bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash))
-      : undefined,
+    deliveryDestinationHashHex: localLxmfDeliveryDestinationHash,
   });
   log('info', 'runtime', 'RUNTIME_READY', {
     interfaces: configuration.interfaces.filter((item) => item.enabled).length,
@@ -640,32 +671,147 @@ function restoreKnownDestinationPublicKeys(state: unknown): void {
 }
 
 function emitKnownDestinationSnapshot(): void {
-  const hashes = new Set<string>([
-    ...knownDestinationPublicKeys.keys(),
-    ...localDestinationHashes,
-    ...observedDestinationPaths,
-  ]);
+  let snapshot: Record<string, unknown> | undefined;
+  let inDestinationHashes: string[] = [];
   if (node) {
     try {
-      const snapshot = node.exportNetworkPersistentState() as Record<string, unknown>;
-      for (const collectionName of ['knownIdentities', 'knownDestinations', 'paths']) {
-        const collection = snapshot[collectionName];
-        if (!Array.isArray(collection)) continue;
-        for (const value of collection) {
-          if (!value || typeof value !== 'object') continue;
-          const destinationHash = eventBytes(value as Record<string, unknown>, 'destinationHash');
-          if (destinationHash?.byteLength === 16) hashes.add(bytesToHex(destinationHash));
-        }
-      }
+      snapshot = node.exportNetworkPersistentState() as Record<string, unknown>;
     } catch {
-      // The in-memory indexes above still provide a safe partial snapshot.
+      // The in-memory indexes below still provide a safe partial snapshot.
+    }
+    try {
+      inDestinationHashes = normalizeInDestinationHashes(node.inDestinationHashes());
+    } catch {
+      // A malformed runtime result must not prevent remote destination updates.
+    }
+  }
+  const hashes = new Set<string>([
+    ...knownDestinationPublicKeys.keys(),
+    ...inDestinationHashes,
+    ...observedDestinationPaths,
+  ]);
+  if (snapshot) {
+    for (const collectionName of ['knownIdentities', 'knownDestinations', 'paths']) {
+      const collection = snapshot[collectionName];
+      if (!Array.isArray(collection)) continue;
+      for (const value of collection) {
+        if (!value || typeof value !== 'object') continue;
+        const destinationHash = eventBytes(value as Record<string, unknown>, 'destinationHash');
+        if (destinationHash?.byteLength === 16) hashes.add(bytesToHex(destinationHash));
+      }
     }
   }
   const destinationHashes = Array.from(hashes).sort();
   const signature = destinationHashes.join(':');
-  if (signature === knownDestinationSnapshotSignature) return;
-  knownDestinationSnapshotSignature = signature;
-  emit({ type: 'knownDestinationSnapshot', destinationHashes });
+  if (signature !== knownDestinationSnapshotSignature) {
+    knownDestinationSnapshotSignature = signature;
+    emit({ type: 'knownDestinationSnapshot', destinationHashes });
+  }
+  emitPathManagementSnapshot(snapshot, inDestinationHashes);
+}
+
+function emitPathManagementSnapshot(
+  snapshot: Record<string, unknown> | undefined,
+  inDestinationHashes: string[],
+): void {
+  const persistentState = snapshot ?? {};
+  const lastAnnouncedAtByHash = new Map<string, string>();
+  for (const entry of arrayRecords(persistentState.knownDestinations)) {
+    const destinationHash = eventBytes(entry, 'destinationHash');
+    const lastAnnounceMs = eventNumber(entry, 'lastAnnounceMs');
+    if (destinationHash?.byteLength !== 16 || lastAnnounceMs === undefined || lastAnnounceMs <= 0) continue;
+    lastAnnouncedAtByHash.set(bytesToHex(destinationHash), new Date(lastAnnounceMs).toISOString());
+  }
+
+  const paths = arrayRecords(persistentState.paths).flatMap((entry) => {
+    const destinationHash = eventBytes(entry, 'destinationHash');
+    const hops = eventNumber(entry, 'hops');
+    if (destinationHash?.byteLength !== 16 || hops === undefined) return [];
+    const destinationHashHex = bytesToHex(destinationHash);
+    const nextHop = eventBytes(entry, 'nextHop');
+    const interfaceIndex = eventNumber(entry, 'interfaceIndex');
+    const expiresMs = eventNumber(entry, 'expiresMs');
+    const interfaceId = stableInterfaceId(interfaceIndex);
+    const lastAnnouncedAt = lastAnnouncedAtByHash.get(destinationHashHex);
+    return [{
+      destinationHash: destinationHashHex,
+      hops,
+      ...(nextHop?.byteLength === 16 ? { nextHop: bytesToHex(nextHop) } : {}),
+      ...(interfaceId ? { interfaceId } : {}),
+      ...(expiresMs !== undefined && expiresMs > 0 ? { expiresAt: new Date(expiresMs).toISOString() } : {}),
+      ...(lastAnnouncedAt ? { lastAnnouncedAt } : {}),
+    }];
+  }).sort((left, right) => (
+    (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
+    || left.destinationHash.localeCompare(right.destinationHash)
+  ));
+
+  const knownByHash = new Map<string, {
+    destinationHash: string;
+    publicKey?: string;
+    lastAnnouncedAt?: string;
+    isLocal?: boolean;
+    fullDestinationName?: string;
+  }>();
+  for (const entry of arrayRecords(persistentState.knownIdentities)) {
+    const destinationHash = eventBytes(entry, 'destinationHash');
+    const publicKey = eventBytes(entry, 'publicKey');
+    if (destinationHash?.byteLength !== 16) continue;
+    const hash = bytesToHex(destinationHash);
+    knownByHash.set(hash, {
+      destinationHash: hash,
+      ...(publicKey?.byteLength === 64 ? { publicKey: bytesToHex(publicKey) } : {}),
+    });
+  }
+  for (const entry of arrayRecords(persistentState.knownDestinations)) {
+    const destinationHash = eventBytes(entry, 'destinationHash');
+    if (destinationHash?.byteLength !== 16) continue;
+    const hash = bytesToHex(destinationHash);
+    const lastAnnouncedAt = lastAnnouncedAtByHash.get(hash);
+    knownByHash.set(hash, {
+      ...knownByHash.get(hash),
+      destinationHash: hash,
+      ...(lastAnnouncedAt ? { lastAnnouncedAt } : {}),
+    });
+  }
+  for (const [destinationHash, publicKey] of knownDestinationPublicKeys) {
+    const current = knownByHash.get(destinationHash);
+    knownByHash.set(destinationHash, {
+      ...current,
+      destinationHash,
+      publicKey: bytesToHex(publicKey),
+    });
+  }
+  for (const destinationHash of inDestinationHashes) {
+    const current = knownByHash.get(destinationHash);
+    knownByHash.set(destinationHash, {
+      destinationHash,
+      ...(current?.lastAnnouncedAt
+        ? { lastAnnouncedAt: current.lastAnnouncedAt }
+        : identity?.lastAnnouncedAt
+          ? { lastAnnouncedAt: identity.lastAnnouncedAt }
+          : {}),
+      isLocal: true,
+      ...(destinationHash === localLxmfDeliveryDestinationHash
+        ? { fullDestinationName: 'lxmf.delivery' }
+        : {}),
+    });
+  }
+  const knownDestinations = Array.from(knownByHash.values()).sort((left, right) => (
+    Number(Boolean(left.isLocal)) - Number(Boolean(right.isLocal))
+    || (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
+    || left.destinationHash.localeCompare(right.destinationHash)
+  ));
+  const nextSignature = JSON.stringify([paths, knownDestinations]);
+  if (nextSignature === pathManagementSnapshotSignature) return;
+  pathManagementSnapshotSignature = nextSignature;
+  emit({ type: 'pathManagementSnapshot', paths, knownDestinations });
+}
+
+function arrayRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
+    : [];
 }
 
 function normalizeDestinationHashes(destinationHashes: string[]): Set<string> {
@@ -778,11 +924,14 @@ function cleanupRuntime(): void {
   clearNomadState('NOMAD_RUNTIME_RESET');
   clearProvisioningState('PROVISIONING_RUNTIME_RESET');
   clearProbeState('PROBE_RUNTIME_RESET');
+  clearDestinationPathRequests('PATH_REQUEST_RUNTIME_RESET');
   knownDestinationPublicKeys.clear();
-  localDestinationHashes.clear();
+  localLxmfDeliveryDestinationHash = undefined;
   interfaceOnlineSuppressedAnnounceDestinations.clear();
   knownDestinationSnapshotSignature = '';
+  pathManagementSnapshotSignature = '';
   emit({ type: 'knownDestinationSnapshot', destinationHashes: [] });
+  emit({ type: 'pathManagementSnapshot', paths: [], knownDestinations: [] });
   lxmfOutboundStatusCache.clear();
   lxmfDeliveryLinks.clear();
   lxmfLinkDestinations.clear();
@@ -1216,6 +1365,199 @@ function dropDestinationPath(command: Extract<RuntimeCommand, { type: 'dropDesti
   } catch {
     emit({ type: 'destinationPathDropResult', requestId: command.requestId, ok: false, code: 'PATH_DROP_FAILED' });
   }
+}
+
+function requestDestinationPath(
+  command: Extract<RuntimeCommand, { type: 'requestDestinationPath' }>,
+): void {
+  const destinationHash = normalizeDestinationHash(command.destinationHash);
+  if (!node || !destinationHash) {
+    emit({
+      type: 'destinationPathRequestResult',
+      requestId: command.requestId,
+      ok: false,
+      destinationHash: destinationHash ?? command.destinationHash.trim().toLowerCase(),
+      code: 'PATH_REQUEST_INVALID',
+    });
+    return;
+  }
+  const job: DestinationPathRequestJob = {
+    requestId: command.requestId,
+    destinationHash,
+    timer: setTimeout(() => {
+      finishDestinationPathRequest(command.requestId, false, undefined, 'PATH_REQUEST_TIMEOUT');
+    }, pathRequestTimeoutMs),
+  };
+  destinationPathRequestJobs.set(command.requestId, job);
+  try {
+    observedDestinationPaths.add(destinationHash);
+    processOutput(node.requestPath(hexToBytes(destinationHash)) as WasmOutput);
+    emitDestinationPathStatuses([destinationHash]);
+    emitKnownDestinationSnapshot();
+    log('info', 'wasm', 'RETICULUM_PATH_REQUESTED', { destinationHash });
+  } catch {
+    finishDestinationPathRequest(command.requestId, false, undefined, 'PATH_REQUEST_FAILED');
+  }
+}
+
+function resolveDestinationPathRequests(destinationHash: string, hops?: number): void {
+  for (const job of Array.from(destinationPathRequestJobs.values())) {
+    if (job.destinationHash === destinationHash) {
+      finishDestinationPathRequest(job.requestId, true, hops);
+    }
+  }
+}
+
+function finishDestinationPathRequest(
+  requestId: string,
+  ok: boolean,
+  hops?: number,
+  code?: string,
+): void {
+  const job = destinationPathRequestJobs.get(requestId);
+  if (!job || !destinationPathRequestJobs.delete(requestId)) return;
+  clearTimeout(job.timer);
+  emit({
+    type: 'destinationPathRequestResult',
+    requestId,
+    ok,
+    destinationHash: job.destinationHash,
+    ...(ok && hops !== undefined ? { hops } : {}),
+    ...(!ok && code ? { code } : {}),
+  });
+  log(ok ? 'info' : 'warning', 'wasm', ok ? 'RETICULUM_PATH_REQUEST_SUCCEEDED' : code ?? 'PATH_REQUEST_FAILED', {
+    destinationHash: job.destinationHash,
+    ...(hops !== undefined ? { hops } : {}),
+  });
+}
+
+function clearDestinationPathRequests(code: string): void {
+  for (const job of Array.from(destinationPathRequestJobs.values())) {
+    finishDestinationPathRequest(job.requestId, false, undefined, code);
+  }
+}
+
+function clearDestinationPaths(requestId: string): void {
+  if (!node) {
+    emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'PATH_CLEAR_INVALID' });
+    return;
+  }
+  try {
+    const snapshot = node.exportNetworkPersistentState() as Record<string, unknown>;
+    const destinations = arrayRecords(snapshot.paths).flatMap((entry) => {
+      const destinationHash = eventBytes(entry, 'destinationHash');
+      return destinationHash?.byteLength === 16 ? [destinationHash] : [];
+    });
+    let count = 0;
+    for (const destinationHash of destinations) {
+      if (!node.dropPath(destinationHash)) continue;
+      count += 1;
+      emitDestinationPathStatus(destinationHash, false);
+    }
+    if (count > 0) queueSnapshotPersistence();
+    emitKnownDestinationSnapshot();
+    log('info', 'wasm', 'RETICULUM_PATHS_CLEARED', { count });
+    emit({ type: 'pathManagementOperationResult', requestId, ok: true, count });
+  } catch {
+    emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'PATH_CLEAR_FAILED' });
+  }
+}
+
+async function forgetKnownDestinations(requestId: string, requested?: string[]): Promise<void> {
+  if (!node || !wrappingKey) {
+    emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'DESTINATION_FORGET_INVALID' });
+    return;
+  }
+  const operation = persistenceQueue.then(async () => {
+    if (!node || !wrappingKey) return false;
+    const snapshot = node.exportNetworkPersistentState() as Record<string, unknown>;
+    const targets = requested
+      ? normalizeDestinationHashes(requested)
+      : knownDestinationHashesFromSnapshot(snapshot);
+    if (targets.size === 0) {
+      emit({ type: 'pathManagementOperationResult', requestId, ok: true, count: 0 });
+      return true;
+    }
+    const knownBefore = knownDestinationHashesFromSnapshot(snapshot);
+    const matchingTargets = new Set(Array.from(targets).filter((hash) => knownBefore.has(hash)));
+    if (matchingTargets.size === 0) {
+      emit({
+        type: 'pathManagementOperationResult',
+        requestId,
+        ok: false,
+        code: 'DESTINATION_NOT_FOUND',
+      });
+      return false;
+    }
+    const filtered = filterNetworkSnapshot(snapshot, matchingTargets);
+    const now = new Date().toISOString();
+    const updatedNetworkState: PersistedNetworkStateRecord = {
+      schemaVersion: 1,
+      encryptedSnapshot: await encrypt(encodeSnapshot(filtered)),
+      updatedAt: now,
+    };
+    if (!await requestNetworkStateSave(updatedNetworkState)) {
+      emit({
+        type: 'pathManagementOperationResult',
+        requestId,
+        ok: false,
+        code: 'DESTINATION_FORGET_PERSIST_FAILED',
+      });
+      return false;
+    }
+    persistedNetworkState = updatedNetworkState;
+    await rebuildRuntime(false);
+    log('info', 'wasm', 'RETICULUM_DESTINATIONS_FORGOTTEN', { count: matchingTargets.size });
+    emit({
+      type: 'pathManagementOperationResult',
+      requestId,
+      ok: true,
+      count: matchingTargets.size,
+    });
+    return true;
+  });
+  persistenceQueue = operation.then(() => undefined, () => undefined);
+  try {
+    await operation;
+  } catch {
+    emit({
+      type: 'pathManagementOperationResult',
+      requestId,
+      ok: false,
+      code: 'DESTINATION_FORGET_FAILED',
+    });
+  }
+}
+
+function knownDestinationHashesFromSnapshot(snapshot: Record<string, unknown>): Set<string> {
+  const hashes = new Set<string>(knownDestinationPublicKeys.keys());
+  for (const collectionName of ['knownIdentities', 'knownDestinations']) {
+    for (const entry of arrayRecords(snapshot[collectionName])) {
+      const destinationHash = eventBytes(entry, 'destinationHash');
+      if (destinationHash?.byteLength === 16) hashes.add(bytesToHex(destinationHash));
+    }
+  }
+  return hashes;
+}
+
+function filterNetworkSnapshot(
+  snapshot: Record<string, unknown>,
+  destinationHashes: ReadonlySet<string>,
+): Record<string, unknown> {
+  const next = { ...snapshot };
+  for (const collectionName of [
+    'knownIdentities',
+    'knownRatchets',
+    'knownDestinations',
+    'paths',
+    'propagationNodes',
+  ]) {
+    next[collectionName] = arrayRecords(snapshot[collectionName]).filter((entry) => {
+      const destinationHash = eventBytes(entry, 'destinationHash');
+      return destinationHash?.byteLength !== 16 || !destinationHashes.has(bytesToHex(destinationHash));
+    });
+  }
+  return next;
 }
 
 function cancelProbe(requestId: string): void {
@@ -2181,6 +2523,7 @@ function handleWasmEvent(event: Record<string, unknown>): void {
     if (destinationHash) {
       emitDestinationPathStatus(destinationHash, true, eventNumber(event, 'hops'));
       const destinationHashHex = bytesToHex(destinationHash);
+      resolveDestinationPathRequests(destinationHashHex, eventNumber(event, 'hops'));
       // Announce and path events can be part of the same WASM output. Defer
       // sending until every event has been projected so the public identity
       // needed to validate the full destination name is available.

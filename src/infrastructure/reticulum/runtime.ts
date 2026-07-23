@@ -54,10 +54,13 @@ import { BrowserProvisioningRepository } from '../database/provisioning-reposito
 import { PlatformInterfaceHost } from '../platform/interface-host';
 import type {
   ChatMessageQueueResult,
+  DestinationPathRequestResult,
   DestinationPathStatus,
+  KnownDestinationEntry,
   InterfaceRuntimeState,
   AnnouncedPropagationNode,
   LxmfPropagationSyncResult,
+  PathTableEntry,
   ProbeResult,
   RuntimeCommand,
   RuntimeConfiguration,
@@ -67,6 +70,7 @@ import type {
   ProvisioningRequestStage,
 } from './protocol';
 import { maximumProbePayloadBytes } from './protocol';
+import { pathRequestTimeoutMs } from './timeouts';
 import {
   chatAnnounces,
   blockedChatDestinations,
@@ -102,6 +106,8 @@ export const propagationNodeAnnounces = writable<AnnouncedPropagationNode[]>([])
 export const provisioningNodes = writable<ProvisioningNode[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
 export const knownDestinationHashes = writable<string[]>([]);
+export const pathTableEntries = writable<PathTableEntry[]>([]);
+export const knownDestinations = writable<KnownDestinationEntry[]>([]);
 export const reticulumLogs = writable<ReticulumLogEntry[]>([]);
 
 export function clearReticulumLogs(): void {
@@ -176,6 +182,12 @@ class ReticulumRuntimeController {
     cleanup?: () => void;
   }>();
   private readonly pathDropWaiters = new Map<string, (ok: boolean) => void>();
+  private readonly pathManagementWaiters = new Map<string, (ok: boolean) => void>();
+  private readonly pathRequestWaiters = new Map<string, {
+    destinationHash: string;
+    resolve: (result: DestinationPathRequestResult) => void;
+    cleanup?: () => void;
+  }>();
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
@@ -211,7 +223,12 @@ class ReticulumRuntimeController {
         this.failProbeWaiters('PROBE_RUNTIME_FAILED');
         for (const resolve of this.pathDropWaiters.values()) resolve(false);
         this.pathDropWaiters.clear();
+        for (const resolve of this.pathManagementWaiters.values()) resolve(false);
+        this.pathManagementWaiters.clear();
+        this.failPathRequestWaiters('PATH_REQUEST_RUNTIME_FAILED');
         knownDestinationHashes.set([]);
+        pathTableEntries.set([]);
+        knownDestinations.set([]);
       };
 
       let blockedDestinationHashes: string[] = [];
@@ -373,6 +390,62 @@ class ReticulumRuntimeController {
         resolve(ok);
       });
     });
+  }
+
+  async requestDestinationPath(destination: string, signal?: AbortSignal): Promise<DestinationPathRequestResult> {
+    const destinationHash = normalizeDestinationHash(destination);
+    if (!this.worker || !get(activeIdentity) || !destinationHash) {
+      return {
+        ok: false,
+        destinationHash: destinationHash ?? destination.trim().toLowerCase(),
+        code: 'PATH_REQUEST_INVALID',
+      };
+    }
+    if (signal?.aborted) {
+      return { ok: false, destinationHash, code: 'PATH_REQUEST_CANCELLED' };
+    }
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const abort = () => {
+        const waiter = this.pathRequestWaiters.get(requestId);
+        if (!waiter) return;
+        this.pathRequestWaiters.delete(requestId);
+        window.clearTimeout(timeout);
+        waiter.cleanup?.();
+        this.post({ type: 'cancelDestinationPathRequest', requestId });
+        resolve({ ok: false, destinationHash, code: 'PATH_REQUEST_CANCELLED' });
+      };
+      const timeout = window.setTimeout(() => {
+        const waiter = this.pathRequestWaiters.get(requestId);
+        if (!waiter) return;
+        this.pathRequestWaiters.delete(requestId);
+        waiter.cleanup?.();
+        resolve({ ok: false, destinationHash, code: 'PATH_REQUEST_BRIDGE_TIMEOUT' });
+      }, pathRequestTimeoutMs + 5_000);
+      this.pathRequestWaiters.set(requestId, {
+        destinationHash,
+        resolve: (result) => {
+          window.clearTimeout(timeout);
+          signal?.removeEventListener('abort', abort);
+          resolve(result);
+        },
+        ...(signal ? { cleanup: () => signal.removeEventListener('abort', abort) } : {}),
+      });
+      signal?.addEventListener('abort', abort, { once: true });
+      this.post({ type: 'requestDestinationPath', requestId, destinationHash });
+    });
+  }
+
+  async clearDestinationPaths(): Promise<boolean> {
+    return this.performPathManagementOperation('clearDestinationPaths');
+  }
+
+  async forgetKnownDestination(destination: string): Promise<boolean> {
+    return this.performPathManagementOperation('forgetKnownDestination', destination);
+  }
+
+  async clearKnownDestinations(): Promise<boolean> {
+    return this.performPathManagementOperation('clearKnownDestinations');
   }
 
   async syncLxmfPropagation(): Promise<LxmfPropagationSyncResult | undefined> {
@@ -1034,6 +1107,8 @@ class ReticulumRuntimeController {
     this.started = false;
     statusDetails.set(undefined);
     knownDestinationHashes.set([]);
+    pathTableEntries.set([]);
+    knownDestinations.set([]);
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
     for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
@@ -1050,6 +1125,9 @@ class ReticulumRuntimeController {
     this.failProbeWaiters('PROBE_RUNTIME_STOPPED');
     for (const resolve of this.pathDropWaiters.values()) resolve(false);
     this.pathDropWaiters.clear();
+    for (const resolve of this.pathManagementWaiters.values()) resolve(false);
+    this.pathManagementWaiters.clear();
+    this.failPathRequestWaiters('PATH_REQUEST_RUNTIME_STOPPED');
   }
 
   private async handleEvent(event: RuntimeEvent): Promise<void> {
@@ -1111,6 +1189,22 @@ class ReticulumRuntimeController {
     }
     if (event.type === 'knownDestinationSnapshot') {
       knownDestinationHashes.set(event.destinationHashes);
+      return;
+    }
+    if (event.type === 'pathManagementSnapshot') {
+      pathTableEntries.set(event.paths);
+      knownDestinations.set(event.knownDestinations);
+      return;
+    }
+    if (event.type === 'pathManagementOperationResult') {
+      this.pathManagementWaiters.get(event.requestId)?.(event.ok);
+      this.pathManagementWaiters.delete(event.requestId);
+      return;
+    }
+    if (event.type === 'destinationPathRequestResult') {
+      const { type: _type, requestId, ...result } = event;
+      this.pathRequestWaiters.get(requestId)?.resolve(result);
+      this.pathRequestWaiters.delete(event.requestId);
       return;
     }
     if (event.type === 'destinationPathDropResult') {
@@ -1538,6 +1632,38 @@ class ReticulumRuntimeController {
       return;
     }
     this.worker?.postMessage(command);
+  }
+
+  private performPathManagementOperation(
+    type: 'clearDestinationPaths' | 'forgetKnownDestination' | 'clearKnownDestinations',
+    destination?: string,
+  ): Promise<boolean> {
+    const destinationHash = destination === undefined ? undefined : normalizeDestinationHash(destination);
+    if (!this.worker || !get(activeIdentity) || (destination !== undefined && !destinationHash)) {
+      return Promise.resolve(false);
+    }
+    const requestId = crypto.randomUUID();
+    const command = destinationHash
+      ? { type, requestId, destinationHash } as RuntimeCommand
+      : { type, requestId } as RuntimeCommand;
+    this.post(command);
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        this.pathManagementWaiters.delete(requestId);
+        resolve(false);
+      }, 15_000);
+      this.pathManagementWaiters.set(requestId, (ok) => {
+        window.clearTimeout(timeout);
+        resolve(ok);
+      });
+    });
+  }
+
+  private failPathRequestWaiters(code: string): void {
+    for (const waiter of this.pathRequestWaiters.values()) {
+      waiter.resolve({ ok: false, destinationHash: waiter.destinationHash, code });
+    }
+    this.pathRequestWaiters.clear();
   }
 
   private waitForIdentityOperation(requestId: string, command: RuntimeCommand): Promise<boolean> {

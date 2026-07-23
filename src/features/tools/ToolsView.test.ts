@@ -11,7 +11,7 @@ describe('ToolsView', () => {
     expect(screen.getByRole('heading', { name: 'Path management' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Probing' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Status details' })).toBeInTheDocument();
-    expect(screen.getAllByText('Coming soon')).toHaveLength(1);
+    expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Remote provisioning',
       'Path management',
@@ -47,5 +47,12 @@ describe('ToolsView', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /Probing/ }));
     expect(window.location.hash).toBe('#/probe');
+  });
+
+  it('opens path management', async () => {
+    render(ToolsView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Path management/ }));
+    expect(window.location.hash).toBe('#/path-management');
   });
 });

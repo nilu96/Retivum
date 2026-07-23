@@ -554,6 +554,17 @@ export class ReticulumNode {
         return v1;
     }
     /**
+     * List hashes for destinations registered for incoming traffic.
+     * @returns {any}
+     */
+    inDestinationHashes() {
+        const ret = wasm.reticulumnode_inDestinationHashes(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * @param {string} uri
      * @returns {any}
      */

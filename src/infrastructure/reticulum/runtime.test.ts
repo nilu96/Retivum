@@ -5,7 +5,9 @@ import {
   activeIdentity,
   chatInboundTransfers,
   knownDestinationHashes,
+  knownDestinations,
   nomadAnnounces,
+  pathTableEntries,
   provisioningNodes,
   reticulumLogs,
   reticulumRuntime,
@@ -41,6 +43,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
     provisioningNodes.set([]);
     reticulumLogs.set([]);
     knownDestinationHashes.set([]);
+    knownDestinations.set([]);
+    pathTableEntries.set([]);
     (reticulumRuntime as unknown as RuntimeInternals).worker = undefined;
   });
 
@@ -167,6 +171,97 @@ describe('ReticulumRuntimeController chat deletion', () => {
 
     await internals.handleEvent({ type: 'destinationPathDropResult', requestId: command.requestId, ok: true });
     await expect(pending).resolves.toBe(true);
+  });
+
+  it('tracks path-management details and routes request, clear, and forget operations through the worker', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '4'.repeat(32);
+
+    await internals.handleEvent({
+      type: 'pathManagementSnapshot',
+      paths: [{
+        destinationHash,
+        hops: 3,
+        nextHop: '5'.repeat(32),
+        interfaceId: 'interface-1',
+        expiresAt: '2026-07-24T10:00:00.000Z',
+        lastAnnouncedAt: '2026-07-17T10:00:00.000Z',
+      }],
+      knownDestinations: [{
+        destinationHash,
+        publicKey: '6'.repeat(128),
+        lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
+      }],
+    });
+    expect(get(pathTableEntries)).toEqual([expect.objectContaining({
+      destinationHash,
+      hops: 3,
+      lastAnnouncedAt: '2026-07-17T10:00:00.000Z',
+    })]);
+    expect(get(knownDestinations)).toEqual([expect.objectContaining({
+      destinationHash,
+      publicKey: '6'.repeat(128),
+    })]);
+
+    const pathRequest = reticulumRuntime.requestDestinationPath(destinationHash);
+    const operations = [
+      reticulumRuntime.clearDestinationPaths(),
+      reticulumRuntime.forgetKnownDestination(destinationHash),
+      reticulumRuntime.clearKnownDestinations(),
+    ];
+    expect(postMessage.mock.calls.map(([command]) => (command as { type: string }).type)).toEqual([
+      'requestDestinationPath',
+      'clearDestinationPaths',
+      'forgetKnownDestination',
+      'clearKnownDestinations',
+    ]);
+    const [requestCommand, ...managementCommands] = postMessage.mock.calls.map(([command]) => (
+      command as { requestId: string }
+    ));
+    await internals.handleEvent({
+      type: 'destinationPathRequestResult',
+      requestId: requestCommand.requestId,
+      ok: true,
+      destinationHash,
+      hops: 3,
+    });
+    await expect(pathRequest).resolves.toEqual({
+      ok: true,
+      destinationHash,
+      hops: 3,
+    });
+    for (const command of managementCommands) {
+      await internals.handleEvent({
+        type: 'pathManagementOperationResult',
+        requestId: command.requestId,
+        ok: true,
+      });
+    }
+    await expect(Promise.all(operations)).resolves.toEqual([true, true, true]);
+  });
+
+  it('cancels a pending destination path request through the worker', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '7'.repeat(32);
+    const controller = new AbortController();
+
+    const pending = reticulumRuntime.requestDestinationPath(destinationHash, controller.signal);
+    const request = postMessage.mock.calls[0][0] as { requestId: string };
+    controller.abort();
+
+    expect(postMessage).toHaveBeenLastCalledWith({
+      type: 'cancelDestinationPathRequest',
+      requestId: request.requestId,
+    });
+    await expect(pending).resolves.toEqual({
+      ok: false,
+      destinationHash,
+      code: 'PATH_REQUEST_CANCELLED',
+    });
   });
 
   it('does not duplicate detailed worker logs for NomadNet page failures', async () => {

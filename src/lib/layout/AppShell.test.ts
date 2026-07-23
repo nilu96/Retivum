@@ -109,6 +109,8 @@ describe('AppShell Chat unread indicator', () => {
     const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
     expect(tray).toHaveAttribute('data-side', 'left');
     expect(tray).toHaveClass('side-left', 'expanded');
+    expect(document.querySelector('.app-shell')).toHaveClass('mobile-actions-left');
+    expect(document.querySelector('.app-shell')).not.toHaveClass('mobile-actions-right');
     expect(Array.from(tray?.querySelectorAll('button') ?? []).map((button) => button.getAttribute('aria-label'))).toEqual([
       'Open interface settings, Online',
       'Show LXMF address and QR code',
@@ -232,6 +234,7 @@ describe('AppShell Chat unread indicator', () => {
     render(AppShell, { current: 'chat', children: emptyChildren });
 
     expect(document.querySelector('.mobile-identity-actions')).toHaveAttribute('data-side', 'right');
+    expect(document.querySelector('.app-shell')).toHaveClass('mobile-actions-right');
   });
 
   it('fades successful manual announce feedback for the Announced label duration', async () => {

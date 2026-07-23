@@ -26,7 +26,8 @@
       title: 'tools.pathTable.title',
       description: 'tools.pathTable.description',
       icon: 'route',
-      available: false,
+      available: true,
+      route: 'path-management',
     },
     {
       id: 'probe',

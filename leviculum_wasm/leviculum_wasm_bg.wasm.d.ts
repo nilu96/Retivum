@@ -69,6 +69,7 @@ export const reticulumnode_identifyLink: (a: number, b: number, c: number) => [n
 export const reticulumnode_identityFromPrivateKey: (a: number, b: number) => [number, number, number];
 export const reticulumnode_identityHash: (a: number) => [number, number];
 export const reticulumnode_identityPublicKey: (a: number) => [number, number];
+export const reticulumnode_inDestinationHashes: (a: number) => [number, number, number];
 export const reticulumnode_linkStats: (a: number, b: number, c: number) => [number, number, number];
 export const reticulumnode_memoryReport: (a: number) => any;
 export const reticulumnode_new: (a: any) => [number, number, number];

@@ -9,6 +9,7 @@
     | 'arrow-left'
     | 'arrow-right'
     | 'chevron-down'
+    | 'chevron-up'
     | 'identity'
     | 'fingerprint'
     | 'network'
@@ -82,6 +83,8 @@
     <path d="M5 12h14m-5-5 5 5-5 5" />
   {:else if name === 'chevron-down'}
     <path d="m7 9 5 5 5-5" />
+  {:else if name === 'chevron-up'}
+    <path d="m7 15 5-5 5 5" />
   {:else if name === 'identity'}
     <circle cx="12" cy="8" r="3.5" />
     <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />

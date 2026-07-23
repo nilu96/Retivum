@@ -26,7 +26,7 @@
 
   function navigationItemIsActive(item: (typeof navigation)[number]): boolean {
     return current === item.route
-      || ((current === 'logs' || current === 'provisioning' || current === 'probe' || current === 'status')
+      || ((current === 'logs' || current === 'path-management' || current === 'provisioning' || current === 'probe' || current === 'status')
         && item.route === 'tools');
   }
 
@@ -298,6 +298,8 @@
   bind:this={appShellElement}
   class="app-shell"
   class:chat-route={current === 'chat'}
+  class:mobile-actions-left={mobileActionSide === 'left'}
+  class:mobile-actions-right={mobileActionSide === 'right'}
   style:--announce-feedback-duration={`${announceFeedbackDurationMs}ms`}
 >
   <aside class="sidebar" aria-label={$t('nav.primary')}>

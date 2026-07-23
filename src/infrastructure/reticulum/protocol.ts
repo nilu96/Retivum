@@ -104,6 +104,30 @@ export interface DestinationPathStatus {
   hops?: number;
 }
 
+export interface DestinationPathRequestResult {
+  ok: boolean;
+  destinationHash: string;
+  hops?: number;
+  code?: string;
+}
+
+export interface PathTableEntry {
+  destinationHash: string;
+  hops: number;
+  nextHop?: string;
+  interfaceId?: string;
+  expiresAt?: string;
+  lastAnnouncedAt?: string;
+}
+
+export interface KnownDestinationEntry {
+  destinationHash: string;
+  publicKey?: string;
+  lastAnnouncedAt?: string;
+  isLocal?: boolean;
+  fullDestinationName?: string;
+}
+
 export interface AnnouncedPropagationNode {
   destinationHash: string;
   enabled: boolean;
@@ -182,7 +206,12 @@ export type RuntimeCommand =
   | { type: 'cancelProvisioning'; destinationHash: string; closeLink?: boolean }
   | { type: 'closeProvisioning' }
   | { type: 'queryDestinationPaths'; destinationHashes: string[] }
+  | { type: 'requestDestinationPath'; requestId: string; destinationHash: string }
+  | { type: 'cancelDestinationPathRequest'; requestId: string }
   | { type: 'dropDestinationPath'; requestId: string; destinationHash: string }
+  | { type: 'clearDestinationPaths'; requestId: string }
+  | { type: 'forgetKnownDestination'; requestId: string; destinationHash: string }
+  | { type: 'clearKnownDestinations'; requestId: string }
   | {
       type: 'probeDestination';
       requestId: string;
@@ -333,6 +362,19 @@ export type RuntimeEvent =
   | { type: 'provisioningFailed'; requestId: string; code: string }
   | { type: 'destinationPathStatuses'; statuses: DestinationPathStatus[] }
   | { type: 'knownDestinationSnapshot'; destinationHashes: string[] }
+  | {
+      type: 'pathManagementSnapshot';
+      paths: PathTableEntry[];
+      knownDestinations: KnownDestinationEntry[];
+    }
+  | {
+      type: 'pathManagementOperationResult';
+      requestId: string;
+      ok: boolean;
+      count?: number;
+      code?: string;
+    }
+  | ({ type: 'destinationPathRequestResult'; requestId: string } & DestinationPathRequestResult)
   | { type: 'destinationPathDropResult'; requestId: string; ok: boolean; code?: string }
   | ({ type: 'probeResult'; requestId: string } & ProbeResult)
   | {

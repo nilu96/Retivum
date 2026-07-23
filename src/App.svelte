@@ -10,6 +10,7 @@
   import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
   import StatusDetailsView from './features/tools/StatusDetailsView.svelte';
   import ProbeView from './features/tools/ProbeView.svelte';
+  import PathManagementView from './features/tools/PathManagementView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
   import DesktopBluetoothPairing from './lib/components/DesktopBluetoothPairing.svelte';
   import ToastViewport from './lib/components/ToastViewport.svelte';
@@ -62,6 +63,8 @@
     <ProvisioningView />
   {:else if $route === 'probe'}
     <ProbeView />
+  {:else if $route === 'path-management'}
+    <PathManagementView />
   {:else if $route === 'status'}
     <StatusDetailsView />
   {/if}

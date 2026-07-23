@@ -1,17 +1,18 @@
 import { writable } from 'svelte/store';
 
-export type AppRoute = 'chat' | 'nomadnet' | 'tools' | 'settings' | 'logs' | 'provisioning' | 'probe' | 'status';
+export type AppRoute = 'chat' | 'nomadnet' | 'tools' | 'settings' | 'logs' | 'path-management' | 'provisioning' | 'probe' | 'status';
 export type AppNavigationLayer = {
   kind: 'chatConversation';
   destinationHash: string;
 };
 
 const defaultRoute: AppRoute = 'chat';
-const knownRoutes = new Set<AppRoute>(['chat', 'nomadnet', 'tools', 'settings', 'logs', 'provisioning', 'probe', 'status']);
+const knownRoutes = new Set<AppRoute>(['chat', 'nomadnet', 'tools', 'settings', 'logs', 'path-management', 'provisioning', 'probe', 'status']);
 const navigationStateKey = 'retivumNavigation';
 const navigationStateVersion = 1;
 const logicalParentRoutes: Partial<Record<AppRoute, AppRoute>> = {
   logs: 'tools',
+  'path-management': 'tools',
   provisioning: 'tools',
   probe: 'tools',
   status: 'tools',
