@@ -21,10 +21,14 @@ describe('StatusDetailsView', () => {
           mode: 'full',
           state: 'online',
           bitrateBps: 10_550_000,
+          rxRateBps: 4_200,
+          txRateBps: 2_100,
           rxBytes: 10_550,
           txBytes: 15_100,
           rxPackets: 4,
           txPackets: 5,
+          incomingAnnounces: 8,
+          outgoingAnnounces: 3,
           incomingAnnouncesPerSecond: 0,
           outgoingAnnouncesPerSecond: 0.0061,
         },
@@ -36,10 +40,14 @@ describe('StatusDetailsView', () => {
           rnodeConnectionType: 'ble',
           state: 'online',
           bitrateBps: 3_120,
+          rxRateBps: 800,
+          txRateBps: 400,
           rxBytes: 9_590,
           txBytes: 4_300,
           rxPackets: 2,
           txPackets: 3,
+          incomingAnnounces: 12,
+          outgoingAnnounces: 7,
           incomingAnnouncesPerSecond: 0.00849,
           outgoingAnnouncesPerSecond: 0.00405,
           rnode: {
@@ -65,6 +73,18 @@ describe('StatusDetailsView', () => {
     expect(screen.getByText('abababababababababababababababab')).toBeInTheDocument();
     expect(screen.getByText('17')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Home relay' })).toBeInTheDocument();
+    const websocketCard = screen.getByRole('heading', { name: 'Home relay' }).closest('article');
+    expect(websocketCard).not.toBeNull();
+    expect(within(websocketCard!).getByText('Max bitrate')).toBeInTheDocument();
+    expect(within(websocketCard!).getByText('Current RX')).toBeInTheDocument();
+    expect(within(websocketCard!).getByText('4.20 kbps')).toBeInTheDocument();
+    expect(within(websocketCard!).getByText('Current TX')).toBeInTheDocument();
+    expect(within(websocketCard!).getByText('2.10 kbps')).toBeInTheDocument();
+    const metricLabels = Array.from(websocketCard!.querySelectorAll('dt'), (label) => label.textContent);
+    expect(metricLabels.indexOf('Incoming announces'))
+      .toBeLessThan(metricLabels.indexOf('Incoming announces / second'));
+    expect(metricLabels.indexOf('Outgoing announces'))
+      .toBeLessThan(metricLabels.indexOf('Outgoing announces / second'));
     const rnodeHeading = screen.getByRole('heading', { name: 'RNode 2' });
     expect(rnodeHeading).toBeInTheDocument();
     expect(rnodeHeading.parentElement?.querySelector('.status-interface-type'))
@@ -83,6 +103,32 @@ describe('StatusDetailsView', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Close all links' }));
     expect(closeAllLinks).toHaveBeenCalledOnce();
+  });
+
+  it('expands and collapses mobile metrics independently for each interface', async () => {
+    render(StatusDetailsView);
+
+    const websocketCard = screen.getByRole('heading', { name: 'Home relay' }).closest('article')!;
+    const rnodeCard = screen.getByRole('heading', { name: 'RNode 2' }).closest('article')!;
+    const websocketToggle = websocketCard.querySelector<HTMLButtonElement>('.status-metrics-toggle')!;
+    const rnodeToggle = rnodeCard.querySelector<HTMLButtonElement>('.status-metrics-toggle')!;
+
+    expect(websocketToggle).toHaveTextContent('Show more');
+    expect(websocketToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(websocketToggle).toHaveAttribute('aria-controls', 'status-interface-metrics-websocket');
+    expect(rnodeToggle).toHaveAttribute('aria-expanded', 'false');
+
+    await fireEvent.click(websocketToggle);
+
+    expect(websocketCard).toHaveClass('metrics-expanded');
+    expect(websocketToggle).toHaveTextContent('Show less');
+    expect(websocketToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(rnodeCard).not.toHaveClass('metrics-expanded');
+    expect(rnodeToggle).toHaveAttribute('aria-expanded', 'false');
+
+    await fireEvent.click(websocketToggle);
+    expect(websocketCard).not.toHaveClass('metrics-expanded');
+    expect(websocketToggle).toHaveTextContent('Show more');
   });
 
   it('shows an empty state when no interfaces are enabled', () => {

@@ -909,6 +909,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .status-radio-details h4 { margin: 0; font-size: .72rem; font-weight: 750; letter-spacing: .025em; }
 .status-radio-metric-grid { border-block-start: 1px solid var(--border); }
 .status-radio-metric-grid div { background: color-mix(in srgb, var(--surface-1) 55%, transparent); }
+.status-metrics-toggle { display: none; width: 100%; min-height: 42px; align-items: center; justify-content: center; gap: 7px; padding: 9px 16px; border: 0; color: var(--accent-strong); background: var(--surface-2); font: inherit; font-size: .72rem; font-weight: 750; cursor: pointer; }
+.status-metrics-toggle svg { transition: transform .18s ease; }
+.status-metrics-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
 
 @media (max-width: 820px) {
   .probe-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -917,6 +920,12 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .status-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .status-metric-grid div:nth-child(4n) { border-inline-end: 1px solid var(--border); }
   .status-metric-grid div:nth-child(2n) { border-inline-end: 0; }
+}
+
+@media (max-width: 699px) {
+  .status-interface-card:not(.metrics-expanded) .status-interface-metrics > .status-metric-grid > div:nth-child(n+5) { display: none; }
+  .status-interface-card:not(.metrics-expanded) .status-radio-details { display: none; }
+  .status-metrics-toggle { display: flex; }
 }
 
 @media (max-width: 520px) {

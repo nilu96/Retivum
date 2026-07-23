@@ -38,11 +38,15 @@ export interface InterfaceStatusDetails {
   mode: InterfaceConfig['mode'];
   rnodeConnectionType?: RNodeConnectionType;
   state: InterfaceRuntimeState;
-  bitrateBps: number;
+  bitrateBps?: number;
+  rxRateBps: number;
+  txRateBps: number;
   rxBytes: number;
   txBytes: number;
   rxPackets: number;
   txPackets: number;
+  incomingAnnounces: number;
+  outgoingAnnounces: number;
   incomingAnnouncesPerSecond: number;
   outgoingAnnouncesPerSecond: number;
   rnode?: RNodeInterfaceTelemetry;

@@ -5,7 +5,7 @@ import type {
 } from './protocol';
 import type { InterfaceConfig } from '../../domain/settings';
 
-const throughputWindowMs = 5_000;
+const liveRateWindowMs = 5_000;
 const announceDecayMs = 10_000;
 const announceSampleLimit = 48;
 
@@ -20,10 +20,13 @@ export class InterfaceTelemetryTracker {
   private readonly txSamples: ByteSample[] = [];
   private readonly incomingAnnounces: number[] = [];
   private readonly outgoingAnnounces: number[] = [];
+  private maximumObservedBitrateBps?: number;
   private rxBytes = 0;
   private txBytes = 0;
   private rxPackets = 0;
   private txPackets = 0;
+  private incomingAnnounceCount = 0;
+  private outgoingAnnounceCount = 0;
   private state: InterfaceRuntimeState = 'offline';
   private rnode?: RNodeInterfaceTelemetry;
 
@@ -46,11 +49,15 @@ export class InterfaceTelemetryTracker {
     this.txBytes += bytes;
     this.txPackets += 1;
     this.txSamples.push({ at, bytes });
-    if (announce) this.appendAnnounce(this.outgoingAnnounces, at);
+    if (announce) {
+      this.outgoingAnnounceCount += 1;
+      this.appendAnnounce(this.outgoingAnnounces, at);
+    }
     this.pruneTraffic(at);
   }
 
   recordIncomingAnnounce(at = Date.now()): void {
+    this.incomingAnnounceCount += 1;
     this.appendAnnounce(this.incomingAnnounces, at);
   }
 
@@ -60,18 +67,22 @@ export class InterfaceTelemetryTracker {
 
   snapshot(at = Date.now()): InterfaceStatusDetails {
     this.pruneTraffic(at);
-    const measuredBitrate = Math.round(
-      (this.sampleBytes(this.rxSamples) + this.sampleBytes(this.txSamples)) * 8
-      / Math.max(1_000, Math.min(throughputWindowMs, at - this.createdAt))
-      * 1_000,
-    );
+    const elapsedWindowMs = Math.max(1_000, Math.min(liveRateWindowMs, at - this.createdAt));
+    const rxRateBps = Math.round(this.sampleBytes(this.rxSamples) * 8 / elapsedWindowMs * 1_000);
+    const txRateBps = Math.round(this.sampleBytes(this.txSamples) * 8 / elapsedWindowMs * 1_000);
+    if (this.config.type !== 'rnode') {
+      const observedBitrateBps = Math.max(rxRateBps, txRateBps);
+      if (observedBitrateBps > (this.maximumObservedBitrateBps ?? 0)) {
+        this.maximumObservedBitrateBps = observedBitrateBps;
+      }
+    }
     const bitrateBps = this.config.type === 'rnode'
       ? computeRNodeBitrate(
           this.config.radio.spreadingFactor,
           this.config.radio.codingRate,
           this.config.radio.bandwidth,
         )
-      : measuredBitrate;
+      : this.maximumObservedBitrateBps;
 
     return {
       id: this.config.id,
@@ -80,11 +91,15 @@ export class InterfaceTelemetryTracker {
       mode: this.config.mode,
       ...(this.config.type === 'rnode' ? { rnodeConnectionType: this.config.connection.type } : {}),
       state: this.state,
-      bitrateBps,
+      ...(bitrateBps !== undefined ? { bitrateBps } : {}),
+      rxRateBps,
+      txRateBps,
       rxBytes: this.rxBytes,
       txBytes: this.txBytes,
       rxPackets: this.rxPackets,
       txPackets: this.txPackets,
+      incomingAnnounces: this.incomingAnnounceCount,
+      outgoingAnnounces: this.outgoingAnnounceCount,
       incomingAnnouncesPerSecond: this.announceRate(this.incomingAnnounces, 2, at),
       outgoingAnnouncesPerSecond: this.announceRate(this.outgoingAnnounces, 1, at),
       ...(this.rnode ? { rnode: { ...this.rnode } } : {}),
@@ -105,7 +120,7 @@ export class InterfaceTelemetryTracker {
   }
 
   private pruneTraffic(at: number): void {
-    const cutoff = at - throughputWindowMs;
+    const cutoff = at - liveRateWindowMs;
     while (this.rxSamples[0]?.at < cutoff) this.rxSamples.shift();
     while (this.txSamples[0]?.at < cutoff) this.txSamples.shift();
   }

@@ -8,6 +8,7 @@
   import Icon from '../../lib/components/Icon.svelte';
 
   let page: HTMLDivElement;
+  let expandedInterfaceIds = $state<Set<string>>(new Set());
 
   onMount(() => {
     page.closest('main')?.scrollTo({ top: 0, left: 0 });
@@ -20,7 +21,8 @@
     return `${(value / 1_000_000_000).toFixed(2)} GB`;
   }
 
-  function formatBitrate(value: number): string {
+  function formatBitrate(value: number | undefined): string {
+    if (value === undefined) return $t('status.metric.notMeasured');
     if (value < 1_000) return `${Math.round(value)} bps`;
     if (value < 1_000_000) return `${(value / 1_000).toFixed(2)} kbps`;
     return `${(value / 1_000_000).toFixed(2)} Mbps`;
@@ -36,6 +38,17 @@
 
   function battery(status: RNodeBatteryState | undefined, percent: number): string {
     return `${percent}% (${translated(`status.battery.${status ?? 'unknown'}`)})`;
+  }
+
+  function interfaceMetricsExpanded(id: string): boolean {
+    return expandedInterfaceIds.has(id);
+  }
+
+  function toggleInterfaceMetrics(id: string): void {
+    const next = new Set(expandedInterfaceIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    expandedInterfaceIds = next;
   }
 </script>
 
@@ -111,7 +124,7 @@
       {:else}
         <div class="status-interface-list" aria-live="polite">
           {#each $statusDetails.interfaces as status (status.id)}
-            <article class="status-interface-card">
+            <article class:metrics-expanded={interfaceMetricsExpanded(status.id)} class="status-interface-card">
               <header>
                 <div class="status-interface-name">
                   <span class="tool-icon"><Icon name={status.type === 'rnode' ? 'radio' : 'interface'} size={22} /></span>
@@ -128,51 +141,68 @@
                 <span class="status-state-pill {status.state}">{translated(`interface.status.${status.state}`)}</span>
               </header>
 
-              <dl class="status-metric-grid">
-                <div><dt>{$t('status.metric.mode')}</dt><dd>{translated(`interface.editor.mode.${status.mode}`)}</dd></div>
-                <div><dt>{$t('status.metric.bitrate')}</dt><dd>{formatBitrate(status.bitrateBps)}</dd></div>
-                <div><dt>{$t('status.metric.rxBytes')}</dt><dd>{formatBytes(status.rxBytes)}</dd></div>
-                <div><dt>{$t('status.metric.txBytes')}</dt><dd>{formatBytes(status.txBytes)}</dd></div>
-                <div><dt>{$t('status.metric.rxPackets')}</dt><dd>{status.rxPackets}</dd></div>
-                <div><dt>{$t('status.metric.txPackets')}</dt><dd>{status.txPackets}</dd></div>
-                <div><dt>{$t('status.metric.incomingAnnounces')}</dt><dd>{formatRate(status.incomingAnnouncesPerSecond)}</dd></div>
-                <div><dt>{$t('status.metric.outgoingAnnounces')}</dt><dd>{formatRate(status.outgoingAnnouncesPerSecond)}</dd></div>
-              </dl>
+              <div class="status-interface-metrics" id="status-interface-metrics-{status.id}">
+                <dl class="status-metric-grid">
+                  <div><dt>{$t('status.metric.mode')}</dt><dd>{translated(`interface.editor.mode.${status.mode}`)}</dd></div>
+                  <div><dt>{$t('status.metric.bitrate')}</dt><dd>{formatBitrate(status.bitrateBps)}</dd></div>
+                  <div><dt>{$t('status.metric.rxRate')}</dt><dd>{formatBitrate(status.rxRateBps)}</dd></div>
+                  <div><dt>{$t('status.metric.txRate')}</dt><dd>{formatBitrate(status.txRateBps)}</dd></div>
+                  <div><dt>{$t('status.metric.rxBytes')}</dt><dd>{formatBytes(status.rxBytes)}</dd></div>
+                  <div><dt>{$t('status.metric.txBytes')}</dt><dd>{formatBytes(status.txBytes)}</dd></div>
+                  <div><dt>{$t('status.metric.rxPackets')}</dt><dd>{status.rxPackets}</dd></div>
+                  <div><dt>{$t('status.metric.txPackets')}</dt><dd>{status.txPackets}</dd></div>
+                  <div><dt>{$t('status.metric.incomingAnnounces')}</dt><dd>{status.incomingAnnounces}</dd></div>
+                  <div><dt>{$t('status.metric.outgoingAnnounces')}</dt><dd>{status.outgoingAnnounces}</dd></div>
+                  <div><dt>{$t('status.metric.incomingAnnounceRate')}</dt><dd>{formatRate(status.incomingAnnouncesPerSecond)}</dd></div>
+                  <div><dt>{$t('status.metric.outgoingAnnounceRate')}</dt><dd>{formatRate(status.outgoingAnnouncesPerSecond)}</dd></div>
+                </dl>
 
-              {#if status.rnode}
-                <section class="status-radio-details" aria-label={$t('status.rnode.title')}>
-                  <header>
-                    <Icon name="radio" size={17} />
-                    <h4>{$t('status.rnode.title')}</h4>
-                  </header>
-                  <dl class="status-metric-grid status-radio-metric-grid">
-                    {#if status.rnode.radioRxPackets !== undefined}
-                      <div><dt>{$t('status.metric.radioRxPackets')}</dt><dd>{status.rnode.radioRxPackets}</dd></div>
-                    {/if}
-                    {#if status.rnode.radioTxPackets !== undefined}
-                      <div><dt>{$t('status.metric.radioTxPackets')}</dt><dd>{status.rnode.radioTxPackets}</dd></div>
-                    {/if}
-                    {#if status.rnode.noiseFloorDbm !== undefined}
-                      <div><dt>{$t('status.metric.noiseFloor')}</dt><dd>{status.rnode.noiseFloorDbm} dBm</dd></div>
-                    {/if}
-                    {#if status.rnode.batteryPercent !== undefined}
-                      <div><dt>{$t('status.metric.battery')}</dt><dd>{battery(status.rnode.batteryState, status.rnode.batteryPercent)}</dd></div>
-                    {/if}
-                    {#if status.rnode.lastPacketRssiDbm !== undefined}
-                      <div><dt>{$t('status.metric.lastRssi')}</dt><dd>{status.rnode.lastPacketRssiDbm} dBm</dd></div>
-                    {/if}
-                    {#if status.rnode.lastPacketSnrDb !== undefined}
-                      <div><dt>{$t('status.metric.lastSnr')}</dt><dd>{status.rnode.lastPacketSnrDb} dB</dd></div>
-                    {/if}
-                    {#if status.rnode.airtimeShortPercent !== undefined && status.rnode.airtimeLongPercent !== undefined}
-                      <div><dt>{$t('status.metric.airtime')}</dt><dd>{status.rnode.airtimeShortPercent}% (15s), {status.rnode.airtimeLongPercent}% (1h)</dd></div>
-                    {/if}
-                    {#if status.rnode.channelLoadShortPercent !== undefined && status.rnode.channelLoadLongPercent !== undefined}
-                      <div><dt>{$t('status.metric.channelLoad')}</dt><dd>{status.rnode.channelLoadShortPercent}% (15s), {status.rnode.channelLoadLongPercent}% (1h)</dd></div>
-                    {/if}
-                  </dl>
-                </section>
-              {/if}
+                {#if status.rnode}
+                  <section class="status-radio-details" aria-label={$t('status.rnode.title')}>
+                    <header>
+                      <Icon name="radio" size={17} />
+                      <h4>{$t('status.rnode.title')}</h4>
+                    </header>
+                    <dl class="status-metric-grid status-radio-metric-grid">
+                      {#if status.rnode.radioRxPackets !== undefined}
+                        <div><dt>{$t('status.metric.radioRxPackets')}</dt><dd>{status.rnode.radioRxPackets}</dd></div>
+                      {/if}
+                      {#if status.rnode.radioTxPackets !== undefined}
+                        <div><dt>{$t('status.metric.radioTxPackets')}</dt><dd>{status.rnode.radioTxPackets}</dd></div>
+                      {/if}
+                      {#if status.rnode.noiseFloorDbm !== undefined}
+                        <div><dt>{$t('status.metric.noiseFloor')}</dt><dd>{status.rnode.noiseFloorDbm} dBm</dd></div>
+                      {/if}
+                      {#if status.rnode.batteryPercent !== undefined}
+                        <div><dt>{$t('status.metric.battery')}</dt><dd>{battery(status.rnode.batteryState, status.rnode.batteryPercent)}</dd></div>
+                      {/if}
+                      {#if status.rnode.lastPacketRssiDbm !== undefined}
+                        <div><dt>{$t('status.metric.lastRssi')}</dt><dd>{status.rnode.lastPacketRssiDbm} dBm</dd></div>
+                      {/if}
+                      {#if status.rnode.lastPacketSnrDb !== undefined}
+                        <div><dt>{$t('status.metric.lastSnr')}</dt><dd>{status.rnode.lastPacketSnrDb} dB</dd></div>
+                      {/if}
+                      {#if status.rnode.airtimeShortPercent !== undefined && status.rnode.airtimeLongPercent !== undefined}
+                        <div><dt>{$t('status.metric.airtime')}</dt><dd>{status.rnode.airtimeShortPercent}% (15s), {status.rnode.airtimeLongPercent}% (1h)</dd></div>
+                      {/if}
+                      {#if status.rnode.channelLoadShortPercent !== undefined && status.rnode.channelLoadLongPercent !== undefined}
+                        <div><dt>{$t('status.metric.channelLoad')}</dt><dd>{status.rnode.channelLoadShortPercent}% (15s), {status.rnode.channelLoadLongPercent}% (1h)</dd></div>
+                      {/if}
+                    </dl>
+                  </section>
+                {/if}
+              </div>
+
+              <button
+                class="status-metrics-toggle"
+                type="button"
+                aria-controls="status-interface-metrics-{status.id}"
+                aria-expanded={interfaceMetricsExpanded(status.id)}
+                onclick={() => toggleInterfaceMetrics(status.id)}
+              >
+                <span>{$t(interfaceMetricsExpanded(status.id) ? 'status.metrics.showLess' : 'status.metrics.showMore')}</span>
+                <Icon name="chevron-down" size={16} />
+              </button>
             </article>
           {/each}
         </div>
