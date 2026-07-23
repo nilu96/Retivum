@@ -73,6 +73,7 @@ import { maximumProbePayloadBytes } from './protocol';
 import { pathRequestTimeoutMs } from './timeouts';
 import {
   chatAnnounces,
+  chatDirectoryReady,
   blockedChatDestinations,
   chatContacts,
   chatMessages,
@@ -86,6 +87,7 @@ export {
   blockedChatDestinations,
   chatAnnounces,
   chatContacts,
+  chatDirectoryReady,
   chatMessages,
   unreadChatMessageCount,
 } from './chat-state';
@@ -192,6 +194,7 @@ class ReticulumRuntimeController {
     if (this.started) return;
     this.started = true;
     runtimeStatus.set('starting');
+    chatDirectoryReady.set(false);
 
     try {
       const [wrappingKey, identity, storedIdentities, settings, networkState, storedProvisioningNodes] = await Promise.all([
@@ -1096,6 +1099,7 @@ class ReticulumRuntimeController {
   }
 
   stop(): void {
+    chatDirectoryReady.set(false);
     if (this.messageRetentionTimer !== undefined) {
       window.clearInterval(this.messageRetentionTimer);
       this.messageRetentionTimer = undefined;
@@ -1700,7 +1704,11 @@ class ReticulumRuntimeController {
   }
 
   private async loadChatDirectory(identityId: string): Promise<void> {
-    if (this.loadedChatIdentityId === identityId) return;
+    if (this.loadedChatIdentityId === identityId) {
+      chatDirectoryReady.set(true);
+      return;
+    }
+    chatDirectoryReady.set(false);
     const directory = await this.chatRepository.load(identityId);
     if (get(activeIdentity)?.id !== identityId) return;
     if (this.loadedChatIdentityId && this.loadedChatIdentityId !== identityId) markChatMessagesRead();
@@ -1716,6 +1724,7 @@ class ReticulumRuntimeController {
       .reduce((items, item) => upsertChatMessage(items, item), directory.messages));
     blockedChatDestinations.set(directory.blockedDestinations);
     await this.pruneExpiredChatMessages();
+    chatDirectoryReady.set(true);
   }
 
   private scheduleMessageRetention(): void {

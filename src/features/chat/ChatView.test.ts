@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startRouter } from '../../app/router';
@@ -7,6 +8,7 @@ import {
   chatAnnounces,
   blockedChatDestinations,
   chatContacts,
+  chatDirectoryReady,
   chatMessages,
   markChatMessagesRead,
   noteUnreadChatMessage,
@@ -34,6 +36,7 @@ describe('ChatView', () => {
     chatAnnounces.set([]);
     chatContacts.set([]);
     chatMessages.set([]);
+    chatDirectoryReady.set(true);
     blockedChatDestinations.set([]);
     destinationPathStatuses.set({});
     chatInboundTransfers.set([]);
@@ -105,6 +108,7 @@ describe('ChatView', () => {
   });
 
   it('selects contacts when they finish loading after the view opens', async () => {
+    chatDirectoryReady.set(false);
     render(ChatView);
     expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
 
@@ -117,11 +121,49 @@ describe('ChatView', () => {
       createdAt: '2026-07-16T10:00:00.000Z',
       updatedAt: '2026-07-16T10:00:00.000Z',
     }]);
+    chatDirectoryReady.set(true);
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'Contacts' })).toHaveAttribute('aria-selected', 'true');
     });
     expect(screen.getByText('Loaded contact')).toBeInTheDocument();
+  });
+
+  it('does not switch from contacts when the first chat starts while the view is open', async () => {
+    const destinationHash = '5'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'New chat contact',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+    expect(screen.getByRole('tab', { name: 'Contacts' })).toHaveAttribute('aria-selected', 'true');
+    await fireEvent.click(screen.getByText('New chat contact').closest('button')!);
+
+    chatMessages.set([{
+      id: 'identity:first-chat-message',
+      identityId: 'identity',
+      messageId: 'first-chat-message',
+      sourceHash: '6'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'First chat message',
+      direction: 'outgoing',
+      status: 'sent',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+
+    await tick();
+    await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() => expect(screen.queryByRole('log', { name: 'Conversation messages' }))
+      .not.toBeInTheDocument());
+    expect(screen.getByRole('tab', { name: 'Contacts' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getByText('New chat contact')).toBeInTheDocument();
+    expect(screen.queryByText('First chat message')).not.toBeInTheDocument();
   });
 
   it('syncs from the preferred or best discovered propagation node independently of sending preferences', async () => {
@@ -706,18 +748,31 @@ describe('ChatView', () => {
       status: 'delivered',
       receivedAt: '2026-07-16T10:01:00.000Z',
     }]);
-    const remove = vi.spyOn(reticulumRuntime, 'deleteChatConversation').mockResolvedValue(true);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Conversation contact',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const remove = vi.spyOn(reticulumRuntime, 'deleteChatConversation').mockImplementation(async () => {
+      chatMessages.set([]);
+      return true;
+    });
     render(ChatView);
 
     const row = screen.getByRole('button', { name: /Delete this conversation/ });
     await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
     expect(screen.getByRole('menu', { name: 'Chat actions' })).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Delete conversation' }));
-    expect(screen.getByRole('alertdialog')).toHaveTextContent(`Delete the chat with “${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}”?`);
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Delete the chat with “Conversation contact”?');
     expect(remove).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole('button', { name: 'Delete conversation' }));
 
     expect(remove).toHaveBeenCalledWith(destinationHash);
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'No conversations yet' })).toBeInTheDocument();
   });
 
   it('copies a chat destination hash and offers to add an unknown destination as a contact', async () => {
@@ -1246,11 +1301,11 @@ describe('ChatView', () => {
       receivedAt: '2026-07-16T10:01:00.000Z',
     }]);
 
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true'));
-    expect(screen.getByText('Arrived after mount')).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
-    expect(screen.getByText('Live Alice')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Live Alice')).toBeInTheDocument());
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText(sourceHash)).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('tab', { name: 'Chats' }));
+    expect(screen.getByText('Arrived after mount')).toBeInTheDocument();
   });
 
   it('prefills a contact name from the selected announce and saves a custom name', async () => {

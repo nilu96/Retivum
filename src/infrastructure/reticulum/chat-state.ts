@@ -7,6 +7,7 @@ import type { ChatAnnounce, ChatBlockedDestination, ChatContact, ChatMessage } f
 export const chatAnnounces = writable<ChatAnnounce[]>([]);
 export const chatContacts = writable<ChatContact[]>([]);
 export const chatMessages = writable<ChatMessage[]>([]);
+export const chatDirectoryReady = writable(false);
 export const blockedChatDestinations = writable<ChatBlockedDestination[]>([]);
 export const unreadChatMessageIds = writable<Record<string, string[]>>({});
 export const unreadChatMessageCounts = derived(

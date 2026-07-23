@@ -36,6 +36,7 @@
   } from '../../infrastructure/reticulum/chat-state';
   import {
     appPreferences,
+    chatDirectoryReady,
     chatInboundTransfers,
     destinationPathStatuses,
     propagationSyncActive,
@@ -79,7 +80,14 @@
     resolve: (downscale: boolean) => void;
   };
 
-  let selectedScope = $state<ChatScope>();
+  function preferredChatScope(): ChatScope {
+    if (chatConversationSummaries($chatMessages, $chatAnnounces, $chatContacts).length) return 'chats';
+    return $chatContacts.length ? 'contacts' : 'announces';
+  }
+
+  let selectedScope = $state<ChatScope | undefined>(
+    $chatDirectoryReady ? preferredChatScope() : undefined,
+  );
   let query = $state('');
   let selectedDestination = $state<string | undefined>();
   let contactEditorDestination = $state<string | undefined>();
@@ -174,9 +182,7 @@
   };
 
   const conversations = $derived(chatConversationSummaries($chatMessages, $chatAnnounces, $chatContacts));
-  const scope = $derived<ChatScope>(
-    selectedScope ?? (conversations.length ? 'chats' : $chatContacts.length ? 'contacts' : 'announces'),
-  );
+  const scope = $derived<ChatScope>(selectedScope ?? 'announces');
   const blockedDestinationHashes = $derived(new Set($blockedChatDestinations.map((item) => item.destinationHash)));
   const normalizedQuery = $derived(query.trim().toLowerCase());
   const visibleConversations = $derived(conversations.filter((conversation) => [
@@ -223,6 +229,11 @@
     ? 'chat.propagationSync.running'
     : 'chat.propagationSync.action');
   const dateFormatter = $derived(createDateFormatter($locale));
+
+  $effect(() => {
+    if (selectedScope !== undefined || !$chatDirectoryReady) return;
+    selectedScope = preferredChatScope();
+  });
 
   function transferPercent(progress: number | undefined): number {
     return Math.round(Math.min(1, Math.max(0, progress ?? 0)) * 100);
