@@ -27,6 +27,7 @@
     | 'edit'
     | 'download'
     | 'upload'
+    | 'external-link'
     | 'check'
     | 'announce'
     | 'qr'
@@ -147,6 +148,9 @@
     <path d="M12 3v12m-5-5 5 5 5-5M4 20h16" />
   {:else if name === 'upload'}
     <path d="M12 16V4m-5 5 5-5 5 5M4 20h16" />
+  {:else if name === 'external-link'}
+    <path d="M14 4h6v6M20 4l-9 9" />
+    <path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" />
   {:else if name === 'check'}
     <path d="m5 12 4 4L19 6" />
   {:else if name === 'announce'}

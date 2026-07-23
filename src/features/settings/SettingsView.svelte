@@ -769,7 +769,31 @@
 
     <section class="settings-card about-card">
       <div class="section-icon"><Icon name="info" size={21} /></div>
-      <div><h2>{$t('settings.about.title')}</h2><p>{$t('settings.about.version')} · {$t('settings.about.license')}</p></div>
+      <div class="about-card-copy">
+        <div class="about-heading">
+          <h2>{$t('settings.about.title')}</h2>
+          <span>{$t('settings.about.version', { version: __APP_VERSION__ })}</span>
+        </div>
+        <p class="about-description">
+          {$t('settings.about.basedOnIntro')}
+          <a
+            href="https://github.com/markqvist/Reticulum"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={$t('settings.about.reticulumLink')}
+          >{$t('settings.about.reticulum')}<Icon name="external-link" size={12} /></a>
+          {$t('settings.about.poweredBy')}
+          <a
+            href="https://codeberg.org/Lew_Palm/leviculum"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={$t('settings.about.leviculumLink')}
+          >{$t('settings.about.leviculum')}<Icon name="external-link" size={12} /></a>.
+        </p>
+        <p class="about-description">
+          {$t('settings.about.licenseNotice', { license: $t('settings.about.license') })}
+        </p>
+      </div>
     </section>
   </div>
 </div>

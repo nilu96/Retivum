@@ -772,7 +772,15 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .lxmf-stamp-cost { grid-area: stamp-cost; }
   .lxmf-contacts-only { grid-area: contacts-only; }
 }
-.about-card { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 13px; padding: 18px 20px; }
+.about-card { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: start; gap: 13px; padding: 18px 20px; }
+.about-card-copy { display: grid; min-width: 0; gap: 7px; }
+.about-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.about-heading > span { padding: 3px 7px; border-radius: 999px; color: var(--text-subtle); background: var(--surface-2); font-size: .62rem; font-weight: 700; }
+.about-description { max-width: 780px; margin: 0; color: var(--text-muted); font-size: .76rem; line-height: 1.55; }
+.about-description a { display: inline-flex; align-items: baseline; gap: 4px; color: var(--accent-strong); font-weight: 700; text-decoration: none; white-space: nowrap; }
+.about-description a svg { flex: none; translate: 0 2px; color: var(--text-subtle); }
+.about-description a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.about-description a:focus-visible { border-radius: 3px; outline: 2px solid var(--accent); outline-offset: 3px; }
 .interface-list { display: grid; gap: 8px; padding: 0 20px 20px 70px; }
 .interface-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 40px 40px 40px; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
 .interface-state { width: 8px; height: 8px; border-radius: 50%; background: var(--text-subtle); }
