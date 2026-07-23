@@ -449,6 +449,7 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .message-attachment img { display: block; width: auto; max-width: min(100%, 440px); max-height: 420px; object-fit: contain; border-radius: 7px; }
 .message-attachment audio { display: block; width: min(100%, 360px); height: 40px; }
 .message-file-copy { display: flex; min-width: 0; align-items: center; gap: 9px; padding-inline-end: 58px; }
+.message-file-copy > svg, .message-attachment-save > svg { flex: none; }
 .message-file-copy > span { display: flex; min-width: 0; flex-direction: column; }
 .message-file-copy strong { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; font-size: .72rem; }
 .message-file-copy small { color: var(--text-subtle); font-size: .62rem; }
