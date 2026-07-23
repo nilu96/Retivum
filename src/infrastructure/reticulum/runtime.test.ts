@@ -228,6 +228,41 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(onUpdate).toHaveBeenCalledWith({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
   });
 
+  it('uses a globally known NomadNet public key after the active identity changes', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '2'.repeat(32);
+    const publicKey = '3'.repeat(128);
+    nomadAnnounces.set([{
+      id: destinationHash,
+      destinationHash,
+      publicKey,
+      heardAt: '2026-07-22T10:00:00.000Z',
+    }]);
+    activeIdentity.set({
+      id: 'identity-2',
+      displayName: 'Second identity',
+      identityHashHex: '4'.repeat(32),
+      publicKeyHex: '5'.repeat(128),
+    });
+
+    const pending = reticulumRuntime.requestNomadPage(destinationHash, '/page/index.mu');
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+
+    expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'requestNomadPage',
+      destinationHash,
+      publicKey,
+    }));
+    await internals.handleEvent({
+      type: 'nomadPageFailed',
+      requestId: command.requestId,
+      code: 'NOMAD_REQUEST_TIMEOUT',
+    });
+    await expect(pending).resolves.toBeUndefined();
+  });
+
   it('lets the worker discover an unannounced provisioning destination public key', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();

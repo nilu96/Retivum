@@ -27,7 +27,7 @@ The initial application foundation includes:
 - outbound LXMF composition that first uses direct or opportunistic delivery, then falls back to a configured propagation node after terminal failure, with persistent delivery-state updates, stable message IDs, and open-link reuse;
 - manual or interval-based retrieval of waiting LXMF messages from a configured propagation node, independently of whether propagation sending is enabled; automatic synchronization defaults to never;
 - persistent identity-scoped contacts with local custom names, including announce-name prefilling;
-- persistent, identity-scoped announced and bookmarked NomadNet destinations with searchable local bookmark names;
+- persistent global NomadNet announces plus identity-scoped bookmarks with searchable local names;
 - live NomadNet page requests over reusable Reticulum links, bounded resource handling, Micron rendering, and same-node or announced cross-node page navigation;
 - native Reticulum provisioning for announced microReticulum management destinations, including schema-driven settings, staged save/commit, discard, reboot, and factory reset without an `rnsapid` WebSocket dependency;
 - direct/opportunistic LXMF delivery preferences plus explicitly enabled, hash-validated propagation-node routing;

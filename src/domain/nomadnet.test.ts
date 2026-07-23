@@ -15,8 +15,7 @@ import {
 describe('upsertNomadAnnounce', () => {
   it('preserves the last known name and public key when a later projection omits them', () => {
     const previous = {
-      id: 'identity:destination',
-      identityId: 'identity',
+      id: 'a'.repeat(32),
       destinationHash: 'a'.repeat(32),
       displayName: 'Forest Node',
       publicKey: 'b'.repeat(128),
@@ -25,7 +24,6 @@ describe('upsertNomadAnnounce', () => {
     };
     expect(upsertNomadAnnounce([previous], {
       id: previous.id,
-      identityId: previous.identityId,
       destinationHash: previous.destinationHash,
       hops: undefined,
       heardAt: '2026-07-19T09:00:00.000Z',
@@ -38,8 +36,7 @@ describe('upsertNomadAnnounce', () => {
 
   it('uses a newly announced name when one is present', () => {
     const previous = {
-      id: 'identity:destination',
-      identityId: 'identity',
+      id: 'a'.repeat(32),
       destinationHash: 'a'.repeat(32),
       displayName: 'Old name',
       heardAt: '2026-07-19T08:00:00.000Z',

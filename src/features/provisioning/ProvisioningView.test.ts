@@ -158,8 +158,7 @@ describe('ProvisioningView', () => {
   it('uses the shared naming editor from a destination context menu', async () => {
     provisioningNodes.set([announcedNode]);
     nomadAnnounces.set([{
-      id: `identity:${announcedNode.destinationHash}`,
-      identityId: 'identity',
+      id: announcedNode.destinationHash,
       destinationHash: announcedNode.destinationHash,
       publicKey: announcedNode.publicKey,
       displayName: 'Management node',
@@ -190,8 +189,7 @@ describe('ProvisioningView', () => {
   it('probes a management destination with its name and provisioning aspect', async () => {
     provisioningNodes.set([announcedNode]);
     nomadAnnounces.set([{
-      id: `identity:${announcedNode.destinationHash}`,
-      identityId: 'identity',
+      id: announcedNode.destinationHash,
       destinationHash: announcedNode.destinationHash,
       publicKey: announcedNode.publicKey,
       displayName: 'Workshop router',

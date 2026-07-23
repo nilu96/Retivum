@@ -3,7 +3,6 @@ import { openRetivumDatabase, requestResult, transactionDone } from './database'
 
 export class BrowserNomadRepository {
   async load(identityId?: string): Promise<{ announces: NomadAnnounce[]; bookmarks: NomadBookmark[] }> {
-    if (!identityId) return { announces: [], bookmarks: [] };
     const database = await openRetivumDatabase();
     try {
       const transaction = database.transaction(['nomadAnnounces', 'nomadBookmarks'], 'readonly');
@@ -13,8 +12,11 @@ export class BrowserNomadRepository {
         transactionDone(transaction),
       ]);
       return {
-        announces: announces.filter((item) => item.identityId === identityId).sort((left, right) => right.heardAt.localeCompare(left.heardAt)),
-        bookmarks: bookmarks.filter((item) => item.identityId === identityId).sort((left, right) => left.createdAt.localeCompare(right.createdAt)),
+        announces: announces.sort((left, right) => right.heardAt.localeCompare(left.heardAt)),
+        bookmarks: identityId
+          ? bookmarks.filter((item) => item.identityId === identityId)
+            .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+          : [],
       };
     } finally {
       database.close();

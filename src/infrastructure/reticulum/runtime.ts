@@ -776,7 +776,7 @@ class ReticulumRuntimeController {
       return undefined;
     }
     const announce = get(nomadAnnounces).find((item) => (
-      item.identityId === identity.id && item.destinationHash === normalizedDestination && item.publicKey
+      item.destinationHash === normalizedDestination && item.publicKey
     ));
     const requestId = crypto.randomUUID();
     return new Promise((resolve) => {
@@ -1138,8 +1138,7 @@ class ReticulumRuntimeController {
     }
     if (event.type === 'nomadAnnounce') {
       const announce: NomadAnnounce = {
-        id: `${event.identityId}:${event.destinationHash}`,
-        identityId: event.identityId,
+        id: event.destinationHash,
         destinationHash: event.destinationHash,
         displayName: event.displayName,
         publicKey: event.publicKey,
@@ -1569,7 +1568,8 @@ class ReticulumRuntimeController {
     if (this.loadedNomadIdentityId === identityId) return;
     const directory = await this.nomadRepository.load(identityId);
     this.loadedNomadIdentityId = identityId;
-    nomadAnnounces.set(directory.announces);
+    nomadAnnounces.update((liveItems) => liveItems
+      .reduce((items, item) => upsertNomadAnnounce(items, item), directory.announces));
     nomadBookmarks.set(directory.bookmarks);
   }
 

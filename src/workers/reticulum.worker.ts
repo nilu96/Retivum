@@ -2876,7 +2876,6 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
     const publicKeyHex = publicKey?.byteLength === 64 ? bytesToHex(publicKey) : undefined;
     emit({
       type: 'nomadAnnounce',
-      identityId: identity.id,
       destinationHash: destinationHashHex,
       displayName: decodeNomadNodeName(appData),
       publicKey: publicKeyHex,

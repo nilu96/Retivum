@@ -822,6 +822,7 @@ Use Svelte context for app-scoped service injection and small rune/store modules
 | `attempts` | `identityId`, resolved direct/opportunistic method, resolved propagation-attempt flag/node reference, delivery attempt history, and redacted failure details |
 | `outbox` | `identityId`, durable commands awaiting reconciliation only by that identity's runtime |
 | `drafts` | `identityId`, per-conversation composer content |
+| `nomadAnnounces` | Global latest verified NomadNet node announce per destination, including safe label, public key, receiving interface/hops, and last-heard time |
 | `nomadBookmarks` | `identityId`, destination/path and an optional editable local user label used for display and search |
 | `nomadHistory` | `identityId`, bounded navigation history |
 | `nomadCache` | `identityId`, bounded raw response, parsed version, validation metadata |

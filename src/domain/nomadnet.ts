@@ -1,6 +1,5 @@
 export interface NomadAnnounce {
   id: string;
-  identityId: string;
   destinationHash: string;
   displayName?: string;
   publicKey?: string;

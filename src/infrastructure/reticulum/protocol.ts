@@ -294,7 +294,6 @@ export type RuntimeEvent =
   | { type: 'platformInterfaceWrite'; id: string; data: Uint8Array; highPriority?: boolean }
   | {
       type: 'nomadAnnounce';
-      identityId: string;
       destinationHash: string;
       displayName?: string;
       publicKey?: string;
