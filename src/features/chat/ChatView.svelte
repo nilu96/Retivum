@@ -41,7 +41,10 @@
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
-  import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
+  import {
+    contextMenuTrigger,
+    type ContextMenuOpenMethod,
+  } from '../../lib/actions/contextMenuTrigger';
   import { copyText } from '../../lib/clipboard';
   import ContactEditor from './ContactEditor.svelte';
   import ChatDeleteConfirmation from './ChatDeleteConfirmation.svelte';
@@ -90,13 +93,21 @@
   let openedUnreadMessageIds = $state<string[]>([]);
   let observedIncomingDestination = $state<string | undefined>();
   let observedIncomingMessageId = $state<string | undefined>();
-  let messageActions = $state<{ message: ChatMessage; x: number; y: number } | undefined>();
+  let messageActions = $state<{
+    message: ChatMessage;
+    x: number;
+    y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
+  } | undefined>();
   let chatActions = $state<{
     destinationHash: string;
     displayName: string;
     blocked: boolean;
     x: number;
     y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
   } | undefined>();
   let messageActionPending = $state(false);
   let chatActionPending = $state(false);
@@ -340,12 +351,19 @@
     }
   }
 
-  function openMessageActions(message: ChatMessage, clientX: number, clientY: number): void {
+  function openMessageActions(
+    message: ChatMessage,
+    clientX: number,
+    clientY: number,
+    method: ContextMenuOpenMethod,
+  ): void {
     closeChatActions();
     messageActions = {
       message,
       x: clientX,
       y: clientY,
+      autofocus: method === 'keyboard',
+      guardOpeningRelease: method === 'longpress',
     };
   }
 
@@ -363,13 +381,20 @@
     );
   }
 
-  function openChatActions(target: DestinationActionTarget, clientX: number, clientY: number): void {
+  function openChatActions(
+    target: DestinationActionTarget,
+    clientX: number,
+    clientY: number,
+    method: ContextMenuOpenMethod,
+  ): void {
     messageActions = undefined;
     chatActions = {
       ...target,
       blocked: blockedDestinationHashes.has(target.destinationHash),
       x: clientX,
       y: clientY,
+      autofocus: method === 'keyboard',
+      guardOpeningRelease: method === 'longpress',
     };
   }
 
@@ -810,7 +835,7 @@
               })}
               onclick={() => { void chatRowClick(conversation.destinationHash); }}
               use:contextMenuTrigger={{
-                onopen: (x, y) => openChatActions(actionTarget, x, y),
+                onopen: (x, y, method) => openChatActions(actionTarget, x, y, method),
               }}
             >
               <span class="chat-peer-avatar">{(conversation.displayName ?? conversation.destinationHash).slice(0, 1).toUpperCase()}</span>
@@ -847,7 +872,7 @@
                 aria-haspopup="menu"
                 onclick={() => { void chatRowClick(contact.destinationHash); }}
                 use:contextMenuTrigger={{
-                  onopen: (x, y) => openChatActions(actionTarget, x, y),
+                  onopen: (x, y, method) => openChatActions(actionTarget, x, y, method),
                 }}
               >
                 <span class="chat-peer-avatar">{contact.name.slice(0, 1).toUpperCase()}</span>
@@ -897,7 +922,7 @@
               aria-haspopup="menu"
               onclick={() => { void chatRowClick(announce.destinationHash); }}
               use:contextMenuTrigger={{
-                onopen: (x, y) => openChatActions(actionTarget, x, y),
+                onopen: (x, y, method) => openChatActions(actionTarget, x, y, method),
               }}
             >
               <span class="chat-peer-avatar announce">{(announce.displayName ?? announce.destinationHash).slice(0, 1).toUpperCase()}</span>
@@ -991,7 +1016,7 @@
               aria-haspopup="menu"
               aria-label={$t('chat.message.actions.open', { message: chatMessagePreview(message) })}
               use:contextMenuTrigger={{
-                onopen: (x, y) => openMessageActions(message, x, y),
+                onopen: (x, y, method) => openMessageActions(message, x, y, method),
                 openOnActivate: true,
               }}
             >
@@ -1180,6 +1205,8 @@
   <ContextMenu
     x={messageActions.x}
     y={messageActions.y}
+    autofocus={messageActions.autofocus}
+    guardOpeningRelease={messageActions.guardOpeningRelease}
     label={$t('chat.message.actions.label')}
     closeLabel={$t('chat.message.actions.close')}
     onclose={() => { messageActions = undefined; }}
@@ -1215,6 +1242,8 @@
   <ContextMenu
     x={chatActions.x}
     y={chatActions.y}
+    autofocus={chatActions.autofocus}
+    guardOpeningRelease={chatActions.guardOpeningRelease}
     label={$t('chat.conversation.actions.label')}
     closeLabel={$t('chat.conversation.actions.close')}
     onclose={closeChatActions}

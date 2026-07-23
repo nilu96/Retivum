@@ -1,5 +1,7 @@
+export type ContextMenuOpenMethod = 'keyboard' | 'longpress' | 'pointer';
+
 export interface ContextMenuTriggerOptions {
-  onopen: (clientX: number, clientY: number) => void;
+  onopen: (clientX: number, clientY: number, method: ContextMenuOpenMethod) => void;
   openOnActivate?: boolean;
   disabled?: boolean;
 }
@@ -18,6 +20,16 @@ export function contextMenuTrigger(
   let pointerOrigin: { x: number; y: number } | undefined;
   let suppressNextClick = false;
   let suppressNativeContextMenuUntil = 0;
+  let suppressionResetTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function resetClickSuppressionAfterPointerEnd(): void {
+    window.removeEventListener('pointerup', resetClickSuppressionAfterPointerEnd, true);
+    window.removeEventListener('pointercancel', resetClickSuppressionAfterPointerEnd, true);
+    suppressionResetTimer = setTimeout(() => {
+      suppressNextClick = false;
+      suppressionResetTimer = undefined;
+    }, 0);
+  }
 
   function cancelLongPress(event?: PointerEvent): void {
     if (event && pointerId !== undefined && event.pointerId !== pointerId) return;
@@ -30,14 +42,14 @@ export function contextMenuTrigger(
 
   function openFromElement(): void {
     const bounds = node.getBoundingClientRect();
-    options.onopen(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+    options.onopen(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2, 'keyboard');
   }
 
   function handleContextMenu(event: MouseEvent): void {
     event.preventDefault();
     if (options.disabled || Date.now() < suppressNativeContextMenuUntil) return;
     cancelLongPress();
-    options.onopen(event.clientX, event.clientY);
+    options.onopen(event.clientX, event.clientY, 'pointer');
   }
 
   function handleKeydown(event: KeyboardEvent): void {
@@ -57,9 +69,12 @@ export function contextMenuTrigger(
     pointerOrigin = { x: event.clientX, y: event.clientY };
     longPressTimer = setTimeout(() => {
       longPressTimer = undefined;
+      cancelLongPress();
       suppressNextClick = true;
       suppressNativeContextMenuUntil = Date.now() + nativeContextMenuSuppressionMs;
-      options.onopen(event.clientX, event.clientY);
+      window.addEventListener('pointerup', resetClickSuppressionAfterPointerEnd, true);
+      window.addEventListener('pointercancel', resetClickSuppressionAfterPointerEnd, true);
+      options.onopen(event.clientX, event.clientY, 'longpress');
     }, longPressDelayMs);
   }
 
@@ -101,6 +116,9 @@ export function contextMenuTrigger(
       node.removeEventListener('pointercancel', cancelLongPress);
       node.removeEventListener('pointerleave', cancelLongPress);
       node.removeEventListener('click', handleClick, true);
+      window.removeEventListener('pointerup', resetClickSuppressionAfterPointerEnd, true);
+      window.removeEventListener('pointercancel', resetClickSuppressionAfterPointerEnd, true);
+      if (suppressionResetTimer !== undefined) clearTimeout(suppressionResetTimer);
     },
   };
 }

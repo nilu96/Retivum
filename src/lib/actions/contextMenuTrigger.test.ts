@@ -29,10 +29,10 @@ describe('contextMenuTrigger', () => {
     });
     node.dispatchEvent(contextEvent);
     expect(contextEvent.defaultPrevented).toBe(true);
-    expect(onopen).toHaveBeenLastCalledWith(80, 90);
+    expect(onopen).toHaveBeenLastCalledWith(80, 90, 'pointer');
 
     await fireEvent.keyDown(node, { key: 'F10', shiftKey: true });
-    expect(onopen).toHaveBeenLastCalledWith(70, 50);
+    expect(onopen).toHaveBeenLastCalledWith(70, 50, 'keyboard');
     action.destroy();
   });
 
@@ -65,7 +65,8 @@ describe('contextMenuTrigger', () => {
     });
     expect(node).toHaveClass('touch-active');
     await vi.advanceTimersByTimeAsync(550);
-    expect(onopen).toHaveBeenCalledWith(40, 50);
+    expect(onopen).toHaveBeenCalledWith(40, 50, 'longpress');
+    expect(node).not.toHaveClass('touch-active');
 
     const pointerUp = new Event('pointerup', { bubbles: true });
     Object.defineProperties(pointerUp, {
@@ -105,6 +106,39 @@ describe('contextMenuTrigger', () => {
 
     expect(onopen).not.toHaveBeenCalled();
     expect(node).not.toHaveClass('touch-active');
+    action.destroy();
+  });
+
+  it('expires click suppression when the opening touch ends outside the trigger', async () => {
+    vi.useFakeTimers();
+    const node = document.createElement('button');
+    const onopen = vi.fn();
+    const click = vi.fn();
+    const action = contextMenuTrigger(node, { onopen });
+    node.addEventListener('click', click);
+
+    await fireEvent.pointerDown(node, {
+      pointerType: 'touch',
+      pointerId: 6,
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    });
+    await vi.advanceTimersByTimeAsync(550);
+
+    const pointerUp = new Event('pointerup');
+    Object.defineProperties(pointerUp, {
+      pointerId: { value: 6 },
+      pointerType: { value: 'touch' },
+    });
+    window.dispatchEvent(pointerUp);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const nextClick = new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 });
+    node.dispatchEvent(nextClick);
+
+    expect(nextClick.defaultPrevented).toBe(false);
+    expect(click).toHaveBeenCalledOnce();
     action.destroy();
   });
 });

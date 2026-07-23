@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NomadPage, NomadPageLoadUpdate } from '../../domain/nomadnet';
 import {
   activeIdentity,
@@ -18,6 +18,8 @@ describe('NomadNetView', () => {
     nomadBookmarks.set([]);
     destinationPathStatuses.set({});
   });
+
+  afterEach(() => vi.useRealTimers());
 
   it('switches between announced and bookmarked destinations', async () => {
     render(NomadNetView);
@@ -253,6 +255,81 @@ describe('NomadNetView', () => {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
+  });
+
+  it('keeps a long-press destination menu open when the opening touch is released', async () => {
+    vi.useFakeTimers();
+    const destinationHash = 'e'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      displayName: 'Touch node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(NomadNetView);
+
+    const row = screen.getByRole('button', { name: /Touch node/ });
+    await fireEvent.pointerDown(row, {
+      pointerType: 'touch',
+      pointerId: 7,
+      button: 0,
+      clientX: 100,
+      clientY: 100,
+    });
+    await vi.advanceTimersByTimeAsync(550);
+
+    const menu = screen.getByRole('menu', { name: 'NomadNet destination actions' });
+    const dismiss = screen.getByRole('button', { name: 'Close destination actions' });
+    expect(screen.getByRole('menuitem', { name: 'Copy destination hash' })).not.toHaveFocus();
+    expect(row).not.toHaveClass('touch-active');
+    await fireEvent.pointerUp(dismiss, {
+      pointerType: 'touch',
+      pointerId: 7,
+      clientX: 100,
+      clientY: 100,
+    });
+    await fireEvent.click(dismiss, { detail: 1 });
+
+    expect(menu).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(0);
+    await fireEvent.pointerDown(dismiss, {
+      pointerType: 'touch',
+      pointerId: 8,
+      button: 0,
+    });
+    expect(menu).toBeInTheDocument();
+    await fireEvent.pointerUp(dismiss, {
+      pointerType: 'touch',
+      pointerId: 8,
+    });
+    expect(menu).toBeInTheDocument();
+    await fireEvent.click(dismiss, { detail: 1 });
+
+    expect(screen.queryByRole('menu', { name: 'NomadNet destination actions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Announced' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
+    expect(row).not.toHaveClass('touch-active');
+  });
+
+  it('focuses the first destination action when the menu is opened from the keyboard', async () => {
+    const destinationHash = 'f'.repeat(32);
+    nomadAnnounces.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      displayName: 'Keyboard node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(NomadNetView);
+
+    const row = screen.getByRole('button', { name: /Keyboard node/ });
+    row.focus();
+    await fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole('menuitem', { name: 'Copy destination hash' })).toHaveFocus();
+    });
   });
 
   it('offers edit and remove actions for a bookmarked destination', async () => {

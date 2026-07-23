@@ -24,7 +24,10 @@
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import PathStatus from '../../lib/components/PathStatus.svelte';
-  import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
+  import {
+    contextMenuTrigger,
+    type ContextMenuOpenMethod,
+  } from '../../lib/actions/contextMenuTrigger';
   import { copyText } from '../../lib/clipboard';
   import MicronPage from './MicronPage.svelte';
   import NomadBookmarkEditor from './NomadBookmarkEditor.svelte';
@@ -72,7 +75,12 @@
     currentIdentifyBeforeLoad: boolean;
     bookmarkId?: string;
   }>();
-  let destinationActions = $state<(DestinationActionTarget & { x: number; y: number }) | undefined>();
+  let destinationActions = $state<(DestinationActionTarget & {
+    x: number;
+    y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
+  }) | undefined>();
 
   const parsedAddress = $derived(parseNomadAddress(address));
   const currentPageTarget = $derived(pendingPageRequest ?? failedPageRequest ?? loadedPage);
@@ -161,6 +169,7 @@
     target: DestinationActionTarget,
     clientX: number,
     clientY: number,
+    method: ContextMenuOpenMethod,
   ): void {
     const bookmarkId = target.bookmarkId
       ?? bookmarkForPage(target.destinationHash, target.path, target.requestData)?.id;
@@ -169,6 +178,8 @@
       bookmarkId,
       x: clientX,
       y: clientY,
+      autofocus: method === 'keyboard',
+      guardOpeningRelease: method === 'longpress',
     };
   }
 
@@ -712,7 +723,7 @@
                 title={$t('nomadnet.destination.actions.open')}
                 onclick={() => destinationRowClick(actionTarget)}
                 use:contextMenuTrigger={{
-                  onopen: (x, y) => openDestinationActions(actionTarget, x, y),
+                  onopen: (x, y, method) => openDestinationActions(actionTarget, x, y, method),
                 }}
               >
                 <span class="destination-mark"><Icon name="network" size={17} /></span>
@@ -747,7 +758,7 @@
                   title={$t('nomadnet.destination.actions.open')}
                   onclick={() => destinationRowClick(actionTarget)}
                   use:contextMenuTrigger={{
-                    onopen: (x, y) => openDestinationActions(actionTarget, x, y),
+                    onopen: (x, y, method) => openDestinationActions(actionTarget, x, y, method),
                   }}
                 >
                   <span class="destination-mark"><Icon name="bookmark" size={17} /></span>
@@ -849,6 +860,8 @@
   <ContextMenu
     x={destinationActions.x}
     y={destinationActions.y}
+    autofocus={destinationActions.autofocus}
+    guardOpeningRelease={destinationActions.guardOpeningRelease}
     label={$t('nomadnet.destination.actions.label')}
     closeLabel={$t('nomadnet.destination.actions.close')}
     onclose={closeDestinationActions}

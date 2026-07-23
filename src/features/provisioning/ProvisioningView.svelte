@@ -15,7 +15,10 @@
   import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
   import { destinationPathStatuses, nomadAnnounces, provisioningNodes, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
   import { createDateFormatter, locale, t } from '../../i18n';
-  import { contextMenuTrigger } from '../../lib/actions/contextMenuTrigger';
+  import {
+    contextMenuTrigger,
+    type ContextMenuOpenMethod,
+  } from '../../lib/actions/contextMenuTrigger';
   import { copyText } from '../../lib/clipboard';
   import BookmarkEditor from '../../lib/components/BookmarkEditor.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
@@ -40,7 +43,13 @@
   let query = $state('');
   let selectedNodeSnapshot = $state<ProvisioningNode>();
   let bookmarkEditor = $state<{ node: ProvisioningNode; mode: 'add' | 'edit' }>();
-  let destinationActions = $state<{ node: ProvisioningNode; x: number; y: number }>();
+  let destinationActions = $state<{
+    node: ProvisioningNode;
+    x: number;
+    y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
+  }>();
   let loadSequence = 0;
   const heardAtFormatter = $derived(createDateFormatter($locale));
   const selectedNode = $derived(
@@ -134,8 +143,19 @@
     }
   }
 
-  function openDestinationActions(node: ProvisioningNode, x: number, y: number): void {
-    destinationActions = { node, x, y };
+  function openDestinationActions(
+    node: ProvisioningNode,
+    x: number,
+    y: number,
+    method: ContextMenuOpenMethod,
+  ): void {
+    destinationActions = {
+      node,
+      x,
+      y,
+      autofocus: method === 'keyboard',
+      guardOpeningRelease: method === 'longpress',
+    };
   }
 
   function closeDestinationActions(): void {
@@ -449,7 +469,7 @@
                   title={$t('provisioning.destination.actions.open')}
                   onclick={() => void selectNode(node)}
                   use:contextMenuTrigger={{
-                    onopen: (x, y) => openDestinationActions(node, x, y),
+                    onopen: (x, y, method) => openDestinationActions(node, x, y, method),
                   }}
                 >
                   <span class="destination-mark"><Icon name="bookmark" size={17} /></span>
@@ -479,7 +499,7 @@
                   title={$t('provisioning.destination.actions.open')}
                   onclick={() => void selectNode(node)}
                   use:contextMenuTrigger={{
-                    onopen: (x, y) => openDestinationActions(node, x, y),
+                    onopen: (x, y, method) => openDestinationActions(node, x, y, method),
                   }}
                 >
                   <span class="destination-mark"><Icon name="network" size={17} /></span>
@@ -639,6 +659,8 @@
   <ContextMenu
     x={destinationActions.x}
     y={destinationActions.y}
+    autofocus={destinationActions.autofocus}
+    guardOpeningRelease={destinationActions.guardOpeningRelease}
     label={$t('provisioning.destination.actions.label')}
     closeLabel={$t('provisioning.destination.actions.close')}
     onclose={closeDestinationActions}

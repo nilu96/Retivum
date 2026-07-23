@@ -416,6 +416,8 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 @media (hover: none) and (pointer: coarse) {
   .message-bubble, .chat-directory-row[aria-haspopup="menu"], .nomad-destination[aria-haspopup="menu"] { -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; user-select: none; }
   .context-menu-dismiss, .context-menu button { -webkit-tap-highlight-color: transparent; }
+  .context-menu button:active { background: var(--surface-hover); }
+  .context-menu button.danger:active { background: var(--danger-soft); }
 }
 .conversation-detail-empty { display: grid; width: 100%; min-height: 100%; flex: 1; place-items: center; padding: 24px; }
 .message-composer { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; padding: 12px 16px; border-block-start: 1px solid var(--border); background: var(--surface-1); }
@@ -516,7 +518,9 @@ button.tool-card:hover { border-color: var(--border-strong); background: var(--s
 .nomad-destination-list { display: grid; width: 100%; gap: 7px; }
 .nomad-destination, .nomad-bookmark-row { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
 .nomad-destination { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px; color: var(--text); text-align: start; }
-.nomad-destination:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+@media (hover: hover) and (pointer: fine) {
+  .nomad-destination:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+}
 .nomad-destination.active { border-color: var(--border-strong); background: var(--accent-soft); }
 .nomad-destination.touch-active { border-color: var(--border-strong); background: var(--surface-hover); }
 .nomad-destination > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; gap: 3px; }

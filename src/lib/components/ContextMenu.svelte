@@ -4,6 +4,8 @@
   let {
     x,
     y,
+    autofocus,
+    guardOpeningRelease,
     label,
     closeLabel,
     onclose,
@@ -11,6 +13,8 @@
   }: {
     x: number;
     y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
     label: string;
     closeLabel: string;
     onclose: () => void;
@@ -20,12 +24,25 @@
   let menu = $state<HTMLDivElement>();
   let left = $state(12);
   let top = $state(12);
+  let dismissalArmed = false;
   const viewportMargin = 12;
 
   function placeMenu(): void {
     if (!menu) return;
     left = Math.max(viewportMargin, Math.min(x, window.innerWidth - menu.offsetWidth - viewportMargin));
     top = Math.max(viewportMargin, Math.min(y, window.innerHeight - menu.offsetHeight - viewportMargin));
+  }
+
+  function dismissFromClick(event: MouseEvent): void {
+    if (event.detail === 0 || dismissalArmed) {
+      onclose();
+      return;
+    }
+    dismissalArmed = true;
+  }
+
+  function armDismissal(): void {
+    dismissalArmed = true;
   }
 
   $effect(() => {
@@ -40,10 +57,13 @@
       if (event.key === 'Escape') onclose();
     };
     const handleResize = () => placeMenu();
+    dismissalArmed = !guardOpeningRelease;
     window.addEventListener('keydown', handleKeydown);
     window.addEventListener('resize', handleResize);
     window.visualViewport?.addEventListener('resize', handleResize);
-    void tick().then(() => menu?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus());
+    if (autofocus) {
+      void tick().then(() => menu?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus());
+    }
     return () => {
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('resize', handleResize);
@@ -52,7 +72,12 @@
   });
 </script>
 
-<button class="context-menu-dismiss" aria-label={closeLabel} onclick={onclose}></button>
+<button
+  class="context-menu-dismiss"
+  aria-label={closeLabel}
+  onpointerdown={armDismissal}
+  onclick={dismissFromClick}
+></button>
 <div
   bind:this={menu}
   class="context-menu"
