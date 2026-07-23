@@ -119,6 +119,28 @@ describe('ToastViewport', () => {
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 
+  it('uses the regular exit animation for the oldest toast when the visible limit is reached', async () => {
+    vi.useFakeTimers();
+    render(ToastViewport);
+
+    for (let count = 1; count <= 4; count += 1) {
+      toast.success('chat.propagationSync.complete.many', { count });
+    }
+    const oldest = (await screen.findByText('Sync complete. 1 new messages.')).closest('article');
+
+    toast.success('chat.propagationSync.complete.many', { count: 5 });
+    await screen.findByText('Sync complete. 5 new messages.');
+
+    expect(oldest).toHaveClass('flick-dismissing');
+    expect(oldest).toBeInTheDocument();
+    expect(oldest?.style.getPropertyValue('--toast-flick-dismiss-offset')).not.toBe('');
+    expect(screen.getAllByRole('status')).toHaveLength(5);
+
+    await vi.advanceTimersByTimeAsync(180);
+    expect(screen.queryByText('Sync complete. 1 new messages.')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('status')).toHaveLength(4);
+  });
+
   it('returns a transient toast after an upward drag below the dismissal threshold', async () => {
     vi.useFakeTimers();
     toast.info('chat.attachment.imageDownscale.originalKept', {

@@ -53,7 +53,7 @@ function showToast(
   durationMs = defaultDuration[kind],
 ): number {
   const id = nextId++;
-  toasts.update((items) => trimTransientToasts([...items, { id, kind, messageKey, parameters }]));
+  toasts.update((items) => dismissExcessTransientToasts([...items, { id, kind, messageKey, parameters }]));
   scheduleDismissal(id, durationMs);
   return id;
 }
@@ -95,7 +95,7 @@ function finishLiveActivity(
   durationMs: number,
 ): void {
   let finished = false;
-  toasts.update((items) => trimTransientToasts(items.map((item) => {
+  toasts.update((items) => dismissExcessTransientToasts(items.map((item) => {
     if (item.id !== id || item.kind !== 'activity') return item;
     finished = true;
     return { id, kind, messageKey, parameters };
@@ -103,15 +103,19 @@ function finishLiveActivity(
   if (finished) scheduleDismissal(id, durationMs);
 }
 
-function trimTransientToasts(items: ToastNotification[]): ToastNotification[] {
-  const transient = items.filter((item) => item.kind !== 'activity');
-  const removed = new Set(transient.slice(0, Math.max(0, transient.length - maximumVisibleToasts)).map((item) => item.id));
-  for (const id of removed) {
+function dismissExcessTransientToasts(items: ToastNotification[]): ToastNotification[] {
+  const activeTransient = items.filter((item) => item.kind !== 'activity' && !item.dismissing);
+  const dismissing = new Set(
+    activeTransient
+      .slice(0, Math.max(0, activeTransient.length - maximumVisibleToasts))
+      .map((item) => item.id),
+  );
+  for (const id of dismissing) {
     const timer = timers.get(id);
     if (timer) clearTimeout(timer);
     timers.delete(id);
   }
-  return items.filter((item) => !removed.has(item.id));
+  return items.map((item) => dismissing.has(item.id) ? { ...item, dismissing: true } : item);
 }
 
 function scheduleDismissal(id: number, durationMs: number): void {
