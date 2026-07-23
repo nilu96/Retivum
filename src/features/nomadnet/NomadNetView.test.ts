@@ -4,6 +4,7 @@ import type { NomadPage, NomadPageLoadUpdate } from '../../domain/nomadnet';
 import {
   activeIdentity,
   destinationPathStatuses,
+  interfaceStatuses,
   nomadAnnounces,
   nomadBookmarks,
   reticulumRuntime,
@@ -17,6 +18,7 @@ describe('NomadNetView', () => {
     nomadAnnounces.set([]);
     nomadBookmarks.set([]);
     destinationPathStatuses.set({});
+    interfaceStatuses.set({});
   });
 
   afterEach(() => vi.useRealTimers());
@@ -32,6 +34,22 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     expect(screen.getByRole('heading', { name: 'No bookmarks yet' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search bookmarks')).toBeInTheDocument();
+  });
+
+  it('shows the interface-required hint only while every interface is disconnected', async () => {
+    render(NomadNetView);
+
+    expect(screen.getAllByText('A connected interface is required to request pages.')).toHaveLength(2);
+
+    interfaceStatuses.set({ websocket: 'online' });
+    await waitFor(() => {
+      expect(screen.queryByText('A connected interface is required to request pages.')).not.toBeInTheDocument();
+    });
+
+    interfaceStatuses.set({ websocket: 'reconnecting' });
+    await waitFor(() => {
+      expect(screen.getAllByText('A connected interface is required to request pages.')).toHaveLength(2);
+    });
   });
 
   it('collapses the mobile directory immediately after choosing an announce or bookmark', async () => {

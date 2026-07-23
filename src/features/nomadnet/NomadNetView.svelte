@@ -15,6 +15,7 @@
   import {
     activeIdentity,
     destinationPathStatuses,
+    interfaceStatuses,
     nomadAnnounces,
     nomadBookmarks,
     reticulumRuntime,
@@ -118,6 +119,11 @@
   const destinationActionBookmark = $derived(destinationActions?.bookmarkId
     ? $nomadBookmarks.find((bookmark) => bookmark.id === destinationActions?.bookmarkId)
     : undefined);
+  const interfaceRequiredHint = $derived(
+    Object.values($interfaceStatuses).some((state) => state === 'online')
+      ? undefined
+      : $t('nomadnet.offlineHint'),
+  );
 
   const scopes: Array<{ id: 'announces' | 'bookmarks'; label: MessageKey; searchName: MessageKey }> = [
     { id: 'announces', label: 'nomadnet.scope.announces', searchName: 'nomadnet.scope.announces.searchName' },
@@ -788,7 +794,7 @@
             icon={scope === 'announces' ? 'network' : 'bookmark'}
             title={$t(scope === 'announces' ? 'nomadnet.empty.announces.title' : 'nomadnet.empty.bookmarks.title')}
             body={$t(scope === 'announces' ? 'nomadnet.empty.announces.body' : 'nomadnet.empty.bookmarks.body')}
-            hint={scope === 'announces' ? $t('nomadnet.offlineHint') : undefined}
+            hint={scope === 'announces' ? interfaceRequiredHint : undefined}
           />
         {/if}
       </div>
@@ -826,7 +832,7 @@
           icon="nomadnet"
           title={$t('nomadnet.empty.title')}
           body={$t('nomadnet.empty.body')}
-          hint={$t('nomadnet.offlineHint')}
+          hint={interfaceRequiredHint}
         />
       {/if}
     </section>
