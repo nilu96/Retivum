@@ -59,8 +59,8 @@
   aria-hidden="true"
 >
   {#if name === 'chat'}
-    <path d="M7 18.5 3.5 21v-5A8.5 8.5 0 1 1 7 18.5Z" />
-    <path d="M7.5 10h7M8.5 14h5" />
+    <path d="M6 4h12a3 3 0 0 1 3 3v8a3 3 0 0 1-3 3h-4l-2 3-2-3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z" />
+    <path d="M8 9.5h8.5M8 12.5h5.5" />
   {:else if name === 'nomadnet'}
     <circle cx="12" cy="12" r="9" />
     <path d="m15.5 8.5-2.1 4.9-4.9 2.1 2.1-4.9 4.9-2.1Z" />
