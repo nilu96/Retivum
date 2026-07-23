@@ -97,7 +97,7 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `01096465919784d00f73e384b6534967d9b1c933`. The generated WASM below was rebuilt from this committed `feat/wasm` source with a clean Leviculum worktree.
+The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `216c44f0505dee8e1790a675496f3a3dd57aa761`. The generated WASM below was rebuilt from this committed `feat/wasm` source with a clean Leviculum worktree. This source includes optional `interfaceIndex` targeting for `announceLxmf()`.
 
 If provenance matters, capture the complete dirty source state or create an immutable commit/archive before publishing a rebuilt artifact.
 
@@ -115,7 +115,7 @@ Current fingerprints:
 | Artifact | SHA-256 |
 | --- | --- |
 | `leviculum_wasm.js` | `2ccdd05f46d6b95b4ef23ef92afd066bb70bb02063bf903e9a1a6c3b2d26859f` |
-| `leviculum_wasm_bg.wasm` | `bf4d5f4349d52fa07e6d03597858db839a0a7077a9317fa84f118facda7481af` |
+| `leviculum_wasm_bg.wasm` | `8f48e01aa3eaef095d7f2803be87346c2ef41c0048f89e2d6a9f466e34693f82` |
 | `leviculum_wasm.d.ts` | `d142050185cd595c1c88e588313f524e8f091e0dd74cf60bf17b4528151013ce` |
 | `leviculum_wasm_bg.wasm.d.ts` | `e07a872c38ff5d585a3f20131ba74152293001b8ad55a1340fb6fec673f43692` |
 

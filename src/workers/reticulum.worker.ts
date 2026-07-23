@@ -42,6 +42,7 @@ import type {
   RuntimeState,
 } from '../infrastructure/reticulum/protocol';
 import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
+import { isSuppressedAnnounce } from '../infrastructure/reticulum/announce-output';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
@@ -178,6 +179,7 @@ interface InterfaceDriver {
   readonly stableId: string;
   readonly reannounceOnReconnect: boolean;
   readonly telemetry: InterfaceTelemetryTracker;
+  runtimeIndex(): number | undefined;
   hasRuntimeId(runtimeId: number | undefined): boolean;
   attach(owner: ReticulumNode): void;
   connect(): void;
@@ -199,6 +201,7 @@ const probeJobs = new Map<string, ProbeJob>();
 const probeJobsByPacketHash = new Map<string, ProbeJob>();
 const knownDestinationPublicKeys = new Map<string, Uint8Array>();
 const localDestinationHashes = new Set<string>();
+const interfaceOnlineSuppressedAnnounceDestinations = new Set<string>();
 let knownDestinationSnapshotSignature = '';
 const lxmfOutboundStatusCache = new Map<string, string>();
 const lxmfDeliveryLinks = new Set<string>();
@@ -227,12 +230,12 @@ const pendingInboundResourceAdvertisements = new Map<string, {
 const observedDestinationPaths = new Set<string>();
 const destinationPathStatusCache = new Map<string, string>();
 // Leviculum Core emits fresh destination announces whenever an interface is
-// marked online. Retivum owns the higher-level announce policy, so interface
-// state transitions must retain all other actions/events while suppressing
-// these implicit announces. An empty allow-list does exactly that in
-// processOutput(). handleInterfaceOnline() then emits a metadata-complete LXMF
-// announce targeted only to the interface that became online when required.
-const noAnnounceInterfaces: ReadonlySet<string> = new Set();
+// marked online. Retivum owns the higher-level LXMF announce policy, so
+// interface state transitions pass the delivery destination in a suppression
+// set. processOutput() drops announces whose destination is in that set while
+// retaining every other locally owned destination announce, action, and event.
+// handleInterfaceOnline() then emits a metadata-complete LXMF announce targeted
+// to the interface that became online when required.
 
 function emit(event: RuntimeEvent): void {
   if (event.type === 'platformInterfaceWrite') {
@@ -573,7 +576,9 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
     deliveryDestinationHash?: Uint8Array;
   };
   if (lxmf.deliveryDestinationHash) {
-    localDestinationHashes.add(bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash)));
+    const deliveryDestinationHashHex = bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash));
+    localDestinationHashes.add(deliveryDestinationHashHex);
+    interfaceOnlineSuppressedAnnounceDestinations.add(deliveryDestinationHashHex);
   }
   applyBlockedDestinationPolicy();
 
@@ -775,6 +780,7 @@ function cleanupRuntime(): void {
   clearProbeState('PROBE_RUNTIME_RESET');
   knownDestinationPublicKeys.clear();
   localDestinationHashes.clear();
+  interfaceOnlineSuppressedAnnounceDestinations.clear();
   knownDestinationSnapshotSignature = '';
   emit({ type: 'knownDestinationSnapshot', destinationHashes: [] });
   lxmfOutboundStatusCache.clear();
@@ -802,13 +808,15 @@ function cleanupRuntime(): void {
   node = undefined;
 }
 
-function processOutput(output?: WasmOutput, announceInterfaceIds?: ReadonlySet<string>): void {
+function processOutput(
+  output?: WasmOutput,
+  suppressedAnnounceDestinations?: ReadonlySet<string>,
+): void {
   if (!output) return;
   for (const action of output.actions ?? []) {
+    if (isSuppressedAnnounce(action.packet, suppressedAnnounceDestinations)) continue;
     let dispatched = 0;
-    const restrictAnnounce = announceInterfaceIds && action.packet.packetType === 'announce';
     for (const driver of drivers.values()) {
-      if (restrictAnnounce && !announceInterfaceIds.has(driver.stableId)) continue;
       if (driver.dispatch(action)) dispatched += 1;
     }
     logNomadProtocolAction(action, dispatched);
@@ -915,13 +923,14 @@ function finishPropagationSync(
 
 function announceLxmf(
   source: 'manual' | 'automatic',
-  requestedInterfaceIds?: ReadonlySet<string>,
+  requestedInterface?: InterfaceDriver,
 ): boolean {
-  const onlineInterfaceIds = new Set(Array.from(drivers.values())
+  const onlineDrivers = Array.from(drivers.values())
     .filter((driver) => driver.state === 'online'
-      && (!requestedInterfaceIds || requestedInterfaceIds.has(driver.stableId)))
-    .map((driver) => driver.stableId));
-  if (!node || !identity || onlineInterfaceIds.size === 0) {
+      && (!requestedInterface || driver === requestedInterface));
+  const requestedInterfaceIndex = requestedInterface?.runtimeIndex();
+  if (!node || !identity || onlineDrivers.length === 0
+    || (requestedInterface && requestedInterfaceIndex === undefined)) {
     log('warning', 'runtime', `LXMF_ANNOUNCE_${source.toUpperCase()}_SKIPPED_OFFLINE`);
     return false;
   }
@@ -930,11 +939,12 @@ function announceLxmf(
     processOutput(node.announceLxmf({
       displayName: identity.displayName,
       stampCost: stampCost > 0 ? stampCost : undefined,
-    }) as WasmOutput, requestedInterfaceIds ? onlineInterfaceIds : undefined);
-    if (!requestedInterfaceIds) recordSuccessfulBroadcastAnnounce();
+      ...(requestedInterfaceIndex !== undefined ? { interfaceIndex: requestedInterfaceIndex } : {}),
+    }) as WasmOutput);
+    if (!requestedInterface) recordSuccessfulBroadcastAnnounce();
     log('info', 'runtime', `LXMF_ANNOUNCE_${source.toUpperCase()}_SENT`, {
-      interfaces: Array.from(onlineInterfaceIds).join(','),
-      targeted: requestedInterfaceIds !== undefined,
+      interfaces: onlineDrivers.map((driver) => driver.stableId).join(','),
+      targeted: requestedInterface !== undefined,
     });
     return true;
   } catch {
@@ -2098,7 +2108,7 @@ function handleInterfaceOnline(driver: InterfaceDriver, firstOnline: boolean): v
     // reconnect policy. The announce is always targeted to the single interface
     // that became online, so bringing several interfaces up cannot multiply
     // announcements across all interfaces.
-    announceLxmf('automatic', new Set([driver.stableId]));
+    announceLxmf('automatic', driver);
   }
   // Interface-online announcements do not move the regular broadcast
   // schedule. A due scheduled announce still reaches every online interface.
@@ -3484,6 +3494,10 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     return this.config.reannounceOnReconnect;
   }
 
+  runtimeIndex(): number | undefined {
+    return this.runtimeId;
+  }
+
   hasRuntimeId(runtimeId: number | undefined): boolean {
     return runtimeId !== undefined && runtimeId === this.runtimeId;
   }
@@ -3575,7 +3589,10 @@ class PlatformInterfaceDriver implements InterfaceDriver {
 
   private setOnline(online: boolean): void {
     if (node && this.runtimeId !== undefined) {
-      processOutput(node.setInterfaceOnline(this.runtimeId, online) as WasmOutput, noAnnounceInterfaces);
+      processOutput(
+        node.setInterfaceOnline(this.runtimeId, online) as WasmOutput,
+        online ? interfaceOnlineSuppressedAnnounceDestinations : undefined,
+      );
     }
   }
 
@@ -3658,6 +3675,10 @@ class WebSocketDriver {
     return this.config.reannounceOnReconnect;
   }
 
+  runtimeIndex(): number | undefined {
+    return this.runtimeId;
+  }
+
   hasRuntimeId(runtimeId: number | undefined): boolean {
     return runtimeId !== undefined && this.runtimeId === runtimeId;
   }
@@ -3683,7 +3704,10 @@ class WebSocketDriver {
         this.hasBeenOnline = true;
         this.reconnectAttempt = 0;
         this.setState('online');
-        processOutput(node.setInterfaceOnline(this.runtimeId, true) as WasmOutput, noAnnounceInterfaces);
+        processOutput(
+          node.setInterfaceOnline(this.runtimeId, true) as WasmOutput,
+          interfaceOnlineSuppressedAnnounceDestinations,
+        );
         handleInterfaceOnline(this, firstOnline);
       });
       socket.addEventListener('message', (event) => void this.receive(socket, generation, event.data));
@@ -3694,7 +3718,7 @@ class WebSocketDriver {
         if (!this.isCurrent(socket, generation)) return;
         this.socket = undefined;
         if (node && this.runtimeId !== undefined) {
-          processOutput(node.setInterfaceOnline(this.runtimeId, false) as WasmOutput, noAnnounceInterfaces);
+          processOutput(node.setInterfaceOnline(this.runtimeId, false) as WasmOutput);
         }
         if (!this.closedByRuntime) this.scheduleReconnect();
         else this.setState('offline');
