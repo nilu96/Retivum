@@ -1548,22 +1548,22 @@
     >
       <Icon name="block" size={17} />{$t(chatActions.blocked ? 'chat.unblock.action' : 'chat.block.action')}
     </button>
-    {#if chatActionConversation && chatActionConversation.messageCount > 0}
-      <button
-        class="danger"
-        role="menuitem"
-        onclick={() => {
-          deleteConfirmation = {
-            kind: 'conversation',
-            destinationHash: chatActions!.destinationHash,
-            displayName: chatActions!.displayName,
-          };
-          closeChatActions();
-        }}
-      >
-        <Icon name="trash" size={17} />{$t('chat.conversation.actions.delete')}
-      </button>
-    {/if}
+    <button
+      class="danger"
+      role="menuitem"
+      disabled={!chatActionConversation || chatActionConversation.messageCount === 0}
+      onclick={() => {
+        if (!chatActionConversation || chatActionConversation.messageCount === 0) return;
+        deleteConfirmation = {
+          kind: 'conversation',
+          destinationHash: chatActions!.destinationHash,
+          displayName: chatActions!.displayName,
+        };
+        closeChatActions();
+      }}
+    >
+      <Icon name="trash" size={17} />{$t('chat.conversation.actions.delete')}
+    </button>
   </ContextMenu>
 {/if}
 

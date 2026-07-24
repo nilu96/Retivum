@@ -961,7 +961,7 @@ describe('ChatView', () => {
     if (contactRow) await fireEvent.contextMenu(contactRow, { clientX: 100, clientY: 100 });
     expect(screen.getByRole('menuitem', { name: 'Edit contact' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Remove contact' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Delete conversation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeDisabled();
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Edit contact' }));
     expect(screen.getByRole('textbox', { name: /^Contact name/ })).toHaveValue('Known Alice');
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -980,7 +980,7 @@ describe('ChatView', () => {
     }]);
 
     if (contactRow) await fireEvent.contextMenu(contactRow, { clientX: 100, clientY: 100 });
-    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeEnabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Close chat actions' }));
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
@@ -991,7 +991,7 @@ describe('ChatView', () => {
     expect(screen.getByRole('menuitem', { name: 'Edit contact' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Remove contact' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Block destination' })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete conversation' })).toBeEnabled();
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Remove contact' }));
     expect(removeContact).toHaveBeenCalledWith(`identity:${destinationHash}`);
   });
