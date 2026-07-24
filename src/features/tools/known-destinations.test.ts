@@ -37,6 +37,7 @@ describe('knownDestinationPresentations', () => {
 
     expect(presentations.get(destinationHash)).toEqual({
       application: 'lxmfDelivery',
+      fullDestinationName: 'lxmf.delivery',
       localContactName: 'Local Alice',
       announcedName: 'Shared Alice',
       path,
@@ -83,11 +84,18 @@ describe('knownDestinationPresentations', () => {
       'management',
       'unknown',
     ]);
+    expect(hashes.map((hash) => presentations.get(hash)?.fullDestinationName)).toEqual([
+      'lxmf.propagation',
+      'nomadnetwork.node',
+      'rnstransport.remote.management',
+      undefined,
+    ]);
   });
 
-  it('classifies the known local LXMF delivery hash and leaves other local hashes unknown', () => {
+  it('classifies explicit local delivery and probe destinations and leaves other hashes unknown', () => {
     const deliveryHash = '5'.repeat(32);
     const propagationHash = '6'.repeat(32);
+    const probeHash = '7'.repeat(32);
     const presentations = knownDestinationPresentations(
       [{
         destinationHash: deliveryHash,
@@ -96,6 +104,10 @@ describe('knownDestinationPresentations', () => {
       }, {
         destinationHash: propagationHash,
         isLocal: true,
+      }, {
+        destinationHash: probeHash,
+        publicKey: '8'.repeat(128),
+        fullDestinationName: 'rnstransport.probe',
       }],
       [],
       [],
@@ -107,6 +119,10 @@ describe('knownDestinationPresentations', () => {
 
     expect(presentations.get(deliveryHash)?.application).toBe('lxmfDelivery');
     expect(presentations.get(propagationHash)?.application).toBe('unknown');
+    expect(presentations.get(probeHash)).toEqual(expect.objectContaining({
+      application: 'probe',
+      fullDestinationName: 'rnstransport.probe',
+    }));
   });
 
   it('sorts identity groups by their latest announce and groups matching public keys', () => {

@@ -621,6 +621,7 @@
   "pathManagement.destination.application.lxmfPropagation": "LXMF propagation",
   "pathManagement.destination.application.nomadnet": "NomadNet",
   "pathManagement.destination.application.management": "Management",
+  "pathManagement.destination.application.probe": "Probe",
   "pathManagement.destination.application.unknown": "Unknown",
   "pathManagement.destination.localContact": "Local contact",
   "pathManagement.destination.localSection": "Local destinations",

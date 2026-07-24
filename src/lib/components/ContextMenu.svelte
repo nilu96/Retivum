@@ -26,6 +26,7 @@
   let top = $state(12);
   let dismissalArmed = false;
   const viewportMargin = 12;
+  const scrollKeys = new Set([' ', 'ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp']);
 
   function placeMenu(): void {
     if (!menu) return;
@@ -54,12 +55,23 @@
 
   onMount(() => {
     const handleKeydown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onclose();
+      if (event.key === 'Escape') {
+        onclose();
+        return;
+      }
+      const target = event.target;
+      const activatesMenuButton = event.key === ' '
+        && target instanceof HTMLElement
+        && Boolean(target.closest('.context-menu'));
+      if (scrollKeys.has(event.key) && !activatesMenuButton) event.preventDefault();
     };
     const handleResize = () => placeMenu();
+    const preventBackgroundScroll = (event: Event) => event.preventDefault();
     dismissalArmed = !guardOpeningRelease;
     window.addEventListener('keydown', handleKeydown);
     window.addEventListener('resize', handleResize);
+    window.addEventListener('wheel', preventBackgroundScroll, { passive: false });
+    window.addEventListener('touchmove', preventBackgroundScroll, { passive: false });
     window.visualViewport?.addEventListener('resize', handleResize);
     if (autofocus) {
       void tick().then(() => menu?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus());
@@ -67,6 +79,8 @@
     return () => {
       window.removeEventListener('keydown', handleKeydown);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('wheel', preventBackgroundScroll);
+      window.removeEventListener('touchmove', preventBackgroundScroll);
       window.visualViewport?.removeEventListener('resize', handleResize);
     };
   });

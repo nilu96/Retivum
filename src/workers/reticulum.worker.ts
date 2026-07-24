@@ -761,6 +761,11 @@ function emitPathManagementSnapshot(
     knownByHash.set(hash, {
       destinationHash: hash,
       ...(publicKey?.byteLength === 64 ? { publicKey: bytesToHex(publicKey) } : {}),
+      ...(publicKey?.byteLength === 64 && destinationMatchesFullName(
+        hash,
+        publicKey,
+        'rnstransport.probe',
+      ) ? { fullDestinationName: 'rnstransport.probe' } : {}),
     });
   }
   for (const entry of arrayRecords(persistentState.knownDestinations)) {
@@ -780,10 +785,22 @@ function emitPathManagementSnapshot(
       ...current,
       destinationHash,
       publicKey: bytesToHex(publicKey),
+      ...(destinationMatchesFullName(destinationHash, publicKey, 'rnstransport.probe')
+        ? { fullDestinationName: 'rnstransport.probe' }
+        : {}),
     });
   }
   for (const destinationHash of inDestinationHashes) {
     const current = knownByHash.get(destinationHash);
+    const fullDestinationName = destinationHash === localLxmfDeliveryDestinationHash
+      ? 'lxmf.delivery'
+      : identity && destinationMatchesFullName(
+        destinationHash,
+        identity.publicKey,
+        'rnstransport.probe',
+      )
+        ? 'rnstransport.probe'
+        : undefined;
     knownByHash.set(destinationHash, {
       destinationHash,
       ...(current?.lastAnnouncedAt
@@ -792,9 +809,7 @@ function emitPathManagementSnapshot(
           ? { lastAnnouncedAt: identity.lastAnnouncedAt }
           : {}),
       isLocal: true,
-      ...(destinationHash === localLxmfDeliveryDestinationHash
-        ? { fullDestinationName: 'lxmf.delivery' }
-        : {}),
+      ...(fullDestinationName ? { fullDestinationName } : {}),
     });
   }
   const knownDestinations = Array.from(knownByHash.values()).sort((left, right) => (
@@ -806,6 +821,21 @@ function emitPathManagementSnapshot(
   if (nextSignature === pathManagementSnapshotSignature) return;
   pathManagementSnapshotSignature = nextSignature;
   emit({ type: 'pathManagementSnapshot', paths, knownDestinations });
+}
+
+function destinationMatchesFullName(
+  destinationHash: string,
+  publicKey: Uint8Array,
+  fullDestinationName: string,
+): boolean {
+  if (!/^[0-9a-f]{32}$/.test(destinationHash) || publicKey.byteLength !== 64) return false;
+  try {
+    return bytesToHex(
+      ReticulumNode.hashFromNameAndIdentity(fullDestinationName, publicKey),
+    ) === destinationHash;
+  } catch {
+    return false;
+  }
 }
 
 function arrayRecords(value: unknown): Record<string, unknown>[] {

@@ -7,6 +7,7 @@
   import {
     chatAnnounces,
     chatContacts,
+    destinationPathStatuses,
     knownDestinations,
     nomadAnnounces,
     pathTableEntries,
@@ -16,12 +17,15 @@
     runtimeStatus,
     statusDetails,
   } from '../../infrastructure/reticulum/runtime';
+  import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
+  import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
   import type { ContextMenuOpenMethod } from '../../lib/actions/contextMenuTrigger';
   import { copyText } from '../../lib/clipboard';
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { liveActivity, toast } from '../../lib/notifications/toasts';
   import {
     groupKnownDestinationsByIdentity,
@@ -37,6 +41,7 @@
     'lxmfPropagation',
     'nomadnet',
     'management',
+    'probe',
     'unknown',
   ];
   const counterpartHighlightDurationMs = 2_000;
@@ -326,6 +331,18 @@
     entryActions = undefined;
     if (await copyText(destination)) toast.success('common.copied');
     else toast.error('common.copyFailed');
+  }
+
+  function probeDestination(destination: string): void {
+    const presentation = destinationPresentations.get(destination);
+    if (!presentation?.fullDestinationName) return;
+    entryActions = undefined;
+    showDestinationProbeActivity({
+      destinationHash: destination,
+      displayName: presentation?.localContactName ?? presentation?.announcedName,
+      fullDestinationName: presentation.fullDestinationName,
+      timeoutMs: probeTimeoutMsForPath($destinationPathStatuses[destination]),
+    });
   }
 
   function showEntryCounterpart(): void {
@@ -829,22 +846,32 @@
     closeLabel={$t('pathManagement.contextMenu.close')}
     onclose={() => { entryActions = undefined; }}
   >
-    {#if hasCounterpart(entryActions.destinationHash, entryActions.counterpartTab)}
-      <button role="menuitem" onclick={showEntryCounterpart}>
-        <Icon
-          name={entryActions.counterpartTab === 'paths' ? 'route' : 'announce'}
-          size={17}
-        />
-        {$t(entryActions.counterpartTab === 'paths'
-          ? 'pathManagement.contextMenu.showPath'
-          : 'pathManagement.contextMenu.showDestination')}
-      </button>
-    {/if}
     <button
       role="menuitem"
       onclick={() => { void copyDestinationHash(entryActions!.destinationHash); }}
     >
       <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={!hasCounterpart(entryActions.destinationHash, entryActions.counterpartTab)}
+      onclick={showEntryCounterpart}
+    >
+      <Icon
+        name={entryActions.counterpartTab === 'paths' ? 'route' : 'announce'}
+        size={17}
+      />
+      {$t(entryActions.counterpartTab === 'paths'
+        ? 'pathManagement.contextMenu.showPath'
+        : 'pathManagement.contextMenu.showDestination')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={!destinationPresentations.get(entryActions.destinationHash)?.fullDestinationName
+        || $pendingProbeDestinationHashes.has(entryActions.destinationHash)}
+      onclick={() => { probeDestination(entryActions!.destinationHash); }}
+    >
+      <Icon name="probe" size={17} />{$t('chat.destination.actions.probe')}
     </button>
   </ContextMenu>
 {/if}

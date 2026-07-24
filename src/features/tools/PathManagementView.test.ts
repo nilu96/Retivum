@@ -1,8 +1,10 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history';
 import {
   chatAnnounces,
   chatContacts,
+  destinationPathStatuses,
   knownDestinations,
   nomadAnnounces,
   pathTableEntries,
@@ -23,7 +25,9 @@ describe('PathManagementView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     clearToasts();
+    clearProbeHistory();
     runtimeStatus.set('online');
+    destinationPathStatuses.set({});
     chatAnnounces.set([]);
     chatContacts.set([]);
     nomadAnnounces.set([]);
@@ -555,8 +559,7 @@ describe('PathManagementView', () => {
       expect(pathEntry!.querySelector('.path-management-entry-copy'))
         .toHaveAttribute('aria-haspopup', 'menu');
       await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
-      expect(screen.queryByRole('menuitem', { name: 'Show known destination' }))
-        .not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Show known destination' })).toBeDisabled();
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenLastCalledWith(pathDestination);
 
@@ -566,13 +569,141 @@ describe('PathManagementView', () => {
       expect(destinationEntry!.querySelector('.path-management-entry-copy'))
         .toHaveAttribute('aria-haspopup', 'menu');
       await fireEvent.contextMenu(destinationEntry!, { clientX: 120, clientY: 120 });
-      expect(screen.queryByRole('menuitem', { name: 'Show path' })).not.toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Show path' })).toBeDisabled();
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenLastCalledWith(knownDestination);
     } finally {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
+  });
+
+  it('probes from the ordered destination actions and reports live progress', async () => {
+    knownDestinations.set([{
+      destinationHash: pathDestination,
+      publicKey: '4'.repeat(128),
+      lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
+    }]);
+    chatAnnounces.set([{
+      id: `identity-1:${pathDestination}`,
+      identityId: 'identity-1',
+      destinationHash: pathDestination,
+      identityHash: '9'.repeat(32),
+      publicKey: '4'.repeat(128),
+      displayName: 'Remote Alice',
+      stampCost: 8,
+      compressionSupported: true,
+      heardAt: '2026-07-23T10:00:00.000Z',
+    }]);
+    destinationPathStatuses.set({
+      [pathDestination]: {
+        destinationHash: pathDestination,
+        hasPath: true,
+        hops: 3,
+      },
+    });
+    let resolveProbe!: (result: Awaited<ReturnType<typeof reticulumRuntime.probeDestination>>) => void;
+    const probe = vi.spyOn(reticulumRuntime, 'probeDestination').mockImplementation(() => new Promise((resolve) => {
+      resolveProbe = resolve;
+    }));
+    render(PathManagementView);
+    render(ToastViewport);
+
+    const pathEntry = screen.getByText(pathDestination).closest('li');
+    await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+      'Copy destination hash',
+      'Show known destination',
+      'Probe destination',
+    ]);
+
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
+    expect(probe).toHaveBeenCalledWith(
+      pathDestination,
+      'lxmf.delivery',
+      22_000,
+      8,
+      expect.any(AbortSignal),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      `Probe sent to Remote Alice <${pathDestination.slice(0, 8)}…${pathDestination.slice(-6)}>. Waiting for a response…`,
+    );
+
+    await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Probe destination' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Close destination actions' }));
+
+    resolveProbe({
+      ok: true,
+      destinationHash: pathDestination,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 8,
+      roundTripTimeMs: 31.25,
+      hops: 3,
+    });
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
+      `Probe to Remote Alice <${pathDestination.slice(0, 8)}…${pathDestination.slice(-6)}> succeeded in 0.0 s.`,
+    ));
+  });
+
+  it('globally prevents background scrolling while a context menu is open', async () => {
+    render(PathManagementView);
+    const pathEntry = screen.getByText(pathDestination).closest('li');
+    await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+
+    const wheelEvent = new WheelEvent('wheel', { cancelable: true, deltaY: 100 });
+    const pageDownEvent = new KeyboardEvent('keydown', { cancelable: true, key: 'PageDown' });
+    window.dispatchEvent(wheelEvent);
+    window.dispatchEvent(pageDownEvent);
+    expect(wheelEvent.defaultPrevented).toBe(true);
+    expect(pageDownEvent.defaultPrevented).toBe(true);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Close destination actions' }));
+    const wheelAfterClose = new WheelEvent('wheel', { cancelable: true, deltaY: 100 });
+    window.dispatchEvent(wheelAfterClose);
+    expect(wheelAfterClose.defaultPrevented).toBe(false);
+  });
+
+  it('disables probing when the destination type is unknown', async () => {
+    render(PathManagementView);
+    const pathEntry = screen.getByText(pathDestination).closest('li');
+    await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+
+    expect(screen.getByRole('menuitem', { name: 'Probe destination' })).toBeDisabled();
+  });
+
+  it('labels and probes a verified Reticulum probe destination', async () => {
+    const probeDestination = 'b'.repeat(32);
+    knownDestinations.set([{
+      destinationHash: probeDestination,
+      publicKey: 'c'.repeat(128),
+      fullDestinationName: 'rnstransport.probe',
+      lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
+    }]);
+    const probe = vi.spyOn(reticulumRuntime, 'probeDestination').mockResolvedValue({
+      ok: true,
+      destinationHash: probeDestination,
+      fullDestinationName: 'rnstransport.probe',
+      probeSizeBytes: 8,
+      roundTripTimeMs: 10,
+      hops: 1,
+    });
+    render(PathManagementView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
+    const destinationEntry = screen.getByText(probeDestination).closest('li');
+    expect(within(destinationEntry!).getByText('Probe')).toHaveClass('destination-type');
+    await fireEvent.contextMenu(destinationEntry!, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Probe destination' })).toBeEnabled();
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
+
+    expect(probe).toHaveBeenCalledWith(
+      probeDestination,
+      'rnstransport.probe',
+      20_000,
+      8,
+      expect.any(AbortSignal),
+    );
   });
 
   it('sorts by last announce, groups shared identities, and separates local destinations', async () => {
