@@ -51,6 +51,7 @@ import { BrowserNomadRepository } from '../database/nomad-repository';
 import { BrowserSettingsRepository } from '../database/settings-repository';
 import { BrowserNetworkStateRepository } from '../database/network-state-repository';
 import { BrowserProvisioningRepository } from '../database/provisioning-repository';
+import { runtimeInterfaceConfigurations } from '../platform/interface-capabilities';
 import { PlatformInterfaceHost } from '../platform/interface-host';
 import type {
   ChatMessageQueueResult,
@@ -261,7 +262,10 @@ class ReticulumRuntimeController {
           label: defaultDisplayName,
           displayName: defaultDisplayName,
         },
-        configuration: { preferences: settings.preferences, interfaces: settings.interfaces },
+        configuration: {
+          preferences: settings.preferences,
+          interfaces: runtimeInterfaceConfigurations(settings.interfaces),
+        },
       });
     } catch {
       if (this.messageRetentionTimer !== undefined) {
@@ -276,7 +280,7 @@ class ReticulumRuntimeController {
   async applyConfiguration(preferences: AppPreferences, interfaces: InterfaceConfig[]): Promise<void> {
     const configuration: RuntimeConfiguration = {
       preferences: structuredClone(preferences),
-      interfaces: structuredClone(interfaces),
+      interfaces: structuredClone(runtimeInterfaceConfigurations(interfaces)),
     };
     appPreferences.set(structuredClone(preferences));
     interfaceConfigurations.set(structuredClone(interfaces));

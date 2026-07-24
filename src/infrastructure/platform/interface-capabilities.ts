@@ -10,7 +10,7 @@ import { rememberBluetoothDevice } from './bluetooth-devices';
 import { selectNativeRNodeDevice } from './native-bluetooth-selection';
 
 export interface InterfaceCapabilities {
-  websocket: true;
+  websocket: boolean;
   rnodeConnections: RNodeConnectionType[];
   tcp: boolean;
   udp: boolean;
@@ -18,12 +18,14 @@ export interface InterfaceCapabilities {
 
 export function detectInterfaceCapabilities(
   environment: {
+    platform?: string;
     native: boolean;
     bluetooth: boolean;
     serial: boolean;
     socketBridge: boolean;
     datagramBridge: boolean;
   } = {
+    platform: Capacitor.getPlatform(),
     native: Capacitor.isNativePlatform(),
     bluetooth: typeof navigator !== 'undefined' && navigator.bluetooth !== undefined,
     serial: typeof navigator !== 'undefined' && navigator.serial !== undefined,
@@ -36,7 +38,7 @@ export function detectInterfaceCapabilities(
   if (environment.native || environment.bluetooth) rnodeConnections.push('ble');
   if (!environment.native && environment.serial) rnodeConnections.push('serial');
   return {
-    websocket: true,
+    websocket: environment.platform !== 'android',
     rnodeConnections,
     tcp: environment.native || environment.socketBridge,
     udp: environment.native || environment.datagramBridge,
@@ -45,7 +47,7 @@ export function detectInterfaceCapabilities(
 
 export function supportedInterfaceTypes(capabilities = detectInterfaceCapabilities()): InterfaceType[] {
   return [
-    'websocket',
+    ...(capabilities.websocket ? ['websocket' as const] : []),
     ...(capabilities.rnodeConnections.length > 0 ? ['rnode' as const] : []),
     ...(capabilities.tcp ? ['tcp' as const] : []),
     ...(capabilities.udp ? ['udp' as const] : []),
@@ -53,10 +55,17 @@ export function supportedInterfaceTypes(capabilities = detectInterfaceCapabiliti
 }
 
 export function interfaceIsSupported(config: InterfaceConfig, capabilities = detectInterfaceCapabilities()): boolean {
-  if (config.type === 'websocket') return true;
+  if (config.type === 'websocket') return capabilities.websocket;
   if (config.type === 'tcp') return capabilities.tcp;
   if (config.type === 'udp') return capabilities.udp;
   return capabilities.rnodeConnections.includes(config.connection.type);
+}
+
+export function runtimeInterfaceConfigurations(
+  interfaces: InterfaceConfig[],
+  capabilities = detectInterfaceCapabilities(),
+): InterfaceConfig[] {
+  return interfaces.filter((config) => config.type !== 'websocket' || capabilities.websocket);
 }
 
 export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
