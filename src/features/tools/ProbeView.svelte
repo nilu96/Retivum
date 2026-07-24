@@ -304,7 +304,7 @@
           class="button primary"
           type="submit"
           disabled={destinationProbePending || $runtimeStatus !== 'online'}
-        ><Icon name="probe" size={17} />{destinationProbePending ? $t('probe.action.probing') : $t('probe.action.start')}</button>
+        ><Icon name="probe" size={17} />{$t('probe.action.start')}</button>
         <button
           class="button secondary danger-text"
           type="button"

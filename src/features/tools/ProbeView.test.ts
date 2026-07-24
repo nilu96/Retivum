@@ -174,7 +174,7 @@ describe('ProbeView', () => {
     expect(within(history).getByText('Waiting for response…')).toBeInTheDocument();
     expect(within(history).getByRole('listitem').querySelector('time')).toBeNull();
     expect(screen.getByText(`Probe sent to <${'c'.repeat(8)}…${'c'.repeat(6)}>. Waiting for a response…`)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Waiting for response…' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send probe' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Drop path' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel probe' })).toBeInTheDocument();
     const contextTrigger = within(history).getByRole('listitem')
