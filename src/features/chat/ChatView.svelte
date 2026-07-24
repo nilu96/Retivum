@@ -39,7 +39,7 @@
     chatDirectoryReady,
     chatInboundTransfers,
     destinationPathStatuses,
-    interfaceConfigurations,
+    interfaceStatuses,
     propagationSyncActive,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
@@ -230,7 +230,7 @@
     ? 'chat.propagationSync.running'
     : 'chat.propagationSync.action');
   const interfaceRequiredHint = $derived(
-    $interfaceConfigurations.some((item) => item.enabled)
+    Object.values($interfaceStatuses).some((state) => state === 'online')
       ? undefined
       : $t('chat.empty.networkHint'),
   );

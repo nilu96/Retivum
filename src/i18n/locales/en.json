@@ -88,7 +88,7 @@
   "chat.empty.contacts.body": "Contacts you name are kept here, even before the first message.",
   "chat.empty.announces.title": "No chat announces heard",
   "chat.empty.announces.body": "Announcements from reachable LXMF destinations will appear here.",
-  "chat.empty.networkHint": "Add and enable an interface in Settings to begin listening.",
+  "chat.empty.networkHint": "A connected interface is required to receive announces.",
   "chat.announce.heardAt": "Heard {date}",
   "announce.hops.one": "1 hop",
   "announce.hops.other": "{count} hops",

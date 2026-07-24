@@ -3,7 +3,7 @@ import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startRouter } from '../../app/router';
-import { createWebSocketInterfaceDraft, defaultAppPreferences } from '../../domain/settings';
+import { defaultAppPreferences } from '../../domain/settings';
 import {
   chatAnnounces,
   blockedChatDestinations,
@@ -17,7 +17,7 @@ import {
   appPreferences,
   chatInboundTransfers,
   destinationPathStatuses,
-  interfaceConfigurations,
+  interfaceStatuses,
   propagationSyncActive,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
@@ -40,7 +40,7 @@ describe('ChatView', () => {
     chatDirectoryReady.set(true);
     blockedChatDestinations.set([]);
     destinationPathStatuses.set({});
-    interfaceConfigurations.set([]);
+    interfaceStatuses.set({});
     chatInboundTransfers.set([]);
     appPreferences.set(structuredClone(defaultAppPreferences));
     propagationSyncActive.set(false);
@@ -65,20 +65,20 @@ describe('ChatView', () => {
     expect(screen.getByPlaceholderText('Search contacts')).toBeInTheDocument();
   });
 
-  it('shows the interface hint only when no interface is enabled', async () => {
-    const disabledInterface = {
-      ...createWebSocketInterfaceDraft('websocket'),
-      enabled: false,
-    };
-    interfaceConfigurations.set([disabledInterface]);
+  it('shows the interface hint only while every interface is disconnected', async () => {
     render(ChatView);
 
-    expect(screen.getByText('Add and enable an interface in Settings to begin listening.')).toBeInTheDocument();
+    expect(screen.getByText('A connected interface is required to receive announces.')).toBeInTheDocument();
 
-    interfaceConfigurations.set([{ ...disabledInterface, enabled: true }]);
+    interfaceStatuses.set({ websocket: 'online' });
     await waitFor(() => {
-      expect(screen.queryByText('Add and enable an interface in Settings to begin listening.'))
+      expect(screen.queryByText('A connected interface is required to receive announces.'))
         .not.toBeInTheDocument();
+    });
+
+    interfaceStatuses.set({ websocket: 'reconnecting' });
+    await waitFor(() => {
+      expect(screen.getByText('A connected interface is required to receive announces.')).toBeInTheDocument();
     });
   });
 
