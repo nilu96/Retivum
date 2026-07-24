@@ -178,7 +178,7 @@
       ? 'calc(env(safe-area-inset-left, 0px) + 12px)'
       : 'calc(100vw - env(safe-area-inset-right, 0px) - 62px)';
     mobileDragTop = restsAtTop
-      ? 'calc(env(safe-area-inset-top, 0px) + 72px)'
+      ? 'calc(env(safe-area-inset-top, 0px) + 77px)'
       : 'calc(100dvh - var(--bottom-nav-height) - env(safe-area-inset-bottom, 0px) - 60px)';
     if (mobileSnapTimer !== undefined) window.clearTimeout(mobileSnapTimer);
     mobileSnapTimer = window.setTimeout(() => {

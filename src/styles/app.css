@@ -1254,7 +1254,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     to { opacity: 1; transform: translateX(0) scale(1); }
   }
   .app-shell:has(.chat-workspace.conversation-selected) .mobile-identity-actions:not(.dragging):not(.snapping) {
-    inset-block-start: calc(env(safe-area-inset-top, 0px) + 72px);
+    inset-block-start: calc(env(safe-area-inset-top, 0px) + 77px);
     inset-block-end: auto;
   }
   .page { min-height: auto; padding: 25px 17px 32px; }

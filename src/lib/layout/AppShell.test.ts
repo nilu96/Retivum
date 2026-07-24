@@ -280,7 +280,7 @@ describe('AppShell Chat unread indicator', () => {
     const tray = document.querySelector<HTMLElement>('.mobile-identity-actions');
     expect(tray).toHaveClass('side-left', 'snapping');
     expect(tray?.style.getPropertyValue('--mobile-actions-drag-top')).toBe(
-      'calc(env(safe-area-inset-top, 0px) + 72px)',
+      'calc(env(safe-area-inset-top, 0px) + 77px)',
     );
   });
 
