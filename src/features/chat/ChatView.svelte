@@ -39,6 +39,7 @@
     chatDirectoryReady,
     chatInboundTransfers,
     destinationPathStatuses,
+    interfaceConfigurations,
     propagationSyncActive,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
@@ -228,6 +229,11 @@
   const propagationSyncLabel = $derived<MessageKey>(propagationSyncing
     ? 'chat.propagationSync.running'
     : 'chat.propagationSync.action');
+  const interfaceRequiredHint = $derived(
+    $interfaceConfigurations.some((item) => item.enabled)
+      ? undefined
+      : $t('chat.empty.networkHint'),
+  );
   const dateFormatter = $derived(createDateFormatter($locale));
 
   $effect(() => {
@@ -1186,7 +1192,7 @@
           icon={scope === 'announces' ? 'network' : scope === 'contacts' ? 'identity' : 'chat'}
           title={$t(emptyCopy[scope].title)}
           body={$t(emptyCopy[scope].body)}
-          hint={$t('chat.empty.networkHint')}
+          hint={interfaceRequiredHint}
         />
       {/if}
     </div>

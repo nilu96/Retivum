@@ -94,6 +94,7 @@ export {
 
 export const runtimeStatus = writable<RuntimeState>('starting');
 export const appPreferences = writable<AppPreferences>(structuredClone(defaultAppPreferences));
+export const interfaceConfigurations = writable<InterfaceConfig[]>([]);
 export const chatInboundTransfers = writable<ChatInboundTransfer[]>([]);
 export const interfaceStatuses = writable<Record<string, InterfaceRuntimeState>>({});
 export const statusDetails = writable<RuntimeStatusDetails | undefined>();
@@ -207,6 +208,7 @@ class ReticulumRuntimeController {
       ]);
       identities.set(storedIdentities.map(identitySummary));
       appPreferences.set(structuredClone(settings.preferences));
+      interfaceConfigurations.set(structuredClone(settings.interfaces));
       this.scheduleMessageRetention();
       propagationNodeAnnounces.set([]);
       provisioningNodes.set(storedProvisioningNodes);
@@ -277,6 +279,7 @@ class ReticulumRuntimeController {
       interfaces: structuredClone(interfaces),
     };
     appPreferences.set(structuredClone(preferences));
+    interfaceConfigurations.set(structuredClone(interfaces));
     await this.pruneExpiredChatMessages();
     this.post({ type: 'applyConfiguration', configuration });
   }

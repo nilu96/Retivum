@@ -3,7 +3,7 @@ import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startRouter } from '../../app/router';
-import { defaultAppPreferences } from '../../domain/settings';
+import { createWebSocketInterfaceDraft, defaultAppPreferences } from '../../domain/settings';
 import {
   chatAnnounces,
   blockedChatDestinations,
@@ -17,6 +17,7 @@ import {
   appPreferences,
   chatInboundTransfers,
   destinationPathStatuses,
+  interfaceConfigurations,
   propagationSyncActive,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
@@ -39,6 +40,7 @@ describe('ChatView', () => {
     chatDirectoryReady.set(true);
     blockedChatDestinations.set([]);
     destinationPathStatuses.set({});
+    interfaceConfigurations.set([]);
     chatInboundTransfers.set([]);
     appPreferences.set(structuredClone(defaultAppPreferences));
     propagationSyncActive.set(false);
@@ -61,6 +63,23 @@ describe('ChatView', () => {
     await fireEvent.click(screen.getByRole('tab', { name: 'Contacts' }));
     expect(screen.getByRole('heading', { name: 'No contacts saved' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search contacts')).toBeInTheDocument();
+  });
+
+  it('shows the interface hint only when no interface is enabled', async () => {
+    const disabledInterface = {
+      ...createWebSocketInterfaceDraft('websocket'),
+      enabled: false,
+    };
+    interfaceConfigurations.set([disabledInterface]);
+    render(ChatView);
+
+    expect(screen.getByText('Add and enable an interface in Settings to begin listening.')).toBeInTheDocument();
+
+    interfaceConfigurations.set([{ ...disabledInterface, enabled: true }]);
+    await waitFor(() => {
+      expect(screen.queryByText('Add and enable an interface in Settings to begin listening.'))
+        .not.toBeInTheDocument();
+    });
   });
 
   it('defaults to contacts when there are contacts but no chats', () => {
