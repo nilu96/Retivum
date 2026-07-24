@@ -372,7 +372,7 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .icon-button.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
 
 .chat-workspace { display: grid; grid-template-columns: minmax(310px, 370px) minmax(0, 1fr); height: 100%; min-height: 600px; }
-.chat-overview { display: grid; grid-template-rows: auto auto auto 1fr auto; min-height: 0; border-inline-end: 1px solid var(--border); background: var(--surface-1); }
+.chat-overview { position: relative; display: grid; grid-template-rows: auto auto auto 1fr auto; min-height: 0; border-inline-end: 1px solid var(--border); background: var(--surface-1); }
 .chat-header { padding: 29px 24px 18px; }
 .chat-header h1 { margin: 0; font-size: 1.65rem; }
 .chat-header .header-actions { align-self: start; }
@@ -582,6 +582,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
   .nomad-page { height: 100%; min-height: 0; padding-block-end: 28px; overflow: hidden; }
   .nomad-workspace { height: auto; min-height: 0; }
   .nomad-directory { position: relative; }
+  .overview-content:not(.has-items) > .empty-state,
+  .conversation-empty > .empty-state,
   .nomad-directory-content > .empty-state,
   .nomad-canvas:not(.page-loaded)[aria-busy='false'] > .empty-state {
     position: absolute;
