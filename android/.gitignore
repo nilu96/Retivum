@@ -23,6 +23,9 @@ out/
 .gradle/
 build/
 
+# JetBrains IDEs auto-generated files
+.idea/
+
 # Local configuration file (sdk path, etc)
 local.properties
 
