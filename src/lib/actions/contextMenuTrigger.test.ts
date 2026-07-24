@@ -2,8 +2,14 @@ import { fireEvent } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { contextMenuTrigger } from './contextMenuTrigger';
 
+const originalVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+
 describe('contextMenuTrigger', () => {
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    if (originalVisualViewport) Object.defineProperty(window, 'visualViewport', originalVisualViewport);
+    else Reflect.deleteProperty(window, 'visualViewport');
+  });
 
   it('opens from pointer and keyboard context-menu gestures', async () => {
     const node = document.createElement('button');
@@ -80,6 +86,39 @@ describe('contextMenuTrigger', () => {
     expect(node).not.toHaveClass('touch-active');
     expect(generatedClick.defaultPrevented).toBe(true);
     expect(click).not.toHaveBeenCalled();
+    action.destroy();
+  });
+
+  it('converts an iOS keyboard long press into layout viewport coordinates', async () => {
+    vi.useFakeTimers();
+    const viewport = new EventTarget();
+    Object.assign(viewport, {
+      offsetLeft: 4,
+      offsetTop: 180,
+      width: 390,
+      height: 420,
+      pageLeft: 4,
+      pageTop: 180,
+      scale: 1,
+    });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: viewport as unknown as VisualViewport,
+    });
+    const node = document.createElement('button');
+    const onopen = vi.fn();
+    const action = contextMenuTrigger(node, { onopen });
+
+    await fireEvent.pointerDown(node, {
+      pointerType: 'touch',
+      pointerId: 8,
+      button: 0,
+      clientX: 40,
+      clientY: 120,
+    });
+    await vi.advanceTimersByTimeAsync(550);
+
+    expect(onopen).toHaveBeenCalledWith(44, 300, 'longpress');
     action.destroy();
   });
 

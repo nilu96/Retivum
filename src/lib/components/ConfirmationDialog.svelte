@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { t } from '../../i18n';
   import { lockBodyScroll } from '../actions/bodyScrollLock';
   import Icon, { type IconName } from './Icon.svelte';
@@ -26,7 +27,13 @@
   } = $props();
 
   let confirming = $state(false);
+  let cancelButton = $state<HTMLButtonElement>();
   const descriptionId = $derived(`${titleId}-description`);
+
+  onMount(() => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    cancelButton?.focus({ preventScroll: true });
+  });
 
   function cancel(): void {
     if (!confirming) oncancel();
@@ -43,7 +50,7 @@
   }
 </script>
 
-<div class="modal-layer" use:lockBodyScroll>
+<div class="modal-layer confirmation-layer" use:lockBodyScroll>
   <button type="button" class="modal-backdrop" aria-label={$t('common.close')} onclick={cancel}></button>
   <div
     class="identity-name-editor"
@@ -60,7 +67,13 @@
       </div>
     </header>
     <footer class="identity-confirmation-actions">
-      <button class="button secondary" type="button" disabled={confirming} onclick={cancel}>
+      <button
+        bind:this={cancelButton}
+        class="button secondary"
+        type="button"
+        disabled={confirming}
+        onclick={cancel}
+      >
         {cancelLabel ?? $t('common.cancel')}
       </button>
       <button

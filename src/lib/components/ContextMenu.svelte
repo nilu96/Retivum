@@ -25,13 +25,37 @@
   let left = $state(12);
   let top = $state(12);
   let dismissalArmed = false;
+  let viewportFrame: number | undefined;
   const viewportMargin = 12;
   const scrollKeys = new Set([' ', 'ArrowDown', 'ArrowUp', 'End', 'Home', 'PageDown', 'PageUp']);
 
   function placeMenu(): void {
     if (!menu) return;
-    left = Math.max(viewportMargin, Math.min(x, window.innerWidth - menu.offsetWidth - viewportMargin));
-    top = Math.max(viewportMargin, Math.min(y, window.innerHeight - menu.offsetHeight - viewportMargin));
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft ?? 0;
+    const viewportTop = viewport?.offsetTop ?? 0;
+    const viewportWidth = viewport?.width ?? window.innerWidth;
+    const viewportHeight = viewport?.height ?? window.innerHeight;
+    const minimumLeft = viewportLeft + viewportMargin;
+    const minimumTop = viewportTop + viewportMargin;
+    const maximumLeft = Math.max(
+      minimumLeft,
+      viewportLeft + viewportWidth - menu.offsetWidth - viewportMargin,
+    );
+    const maximumTop = Math.max(
+      minimumTop,
+      viewportTop + viewportHeight - menu.offsetHeight - viewportMargin,
+    );
+    left = Math.max(minimumLeft, Math.min(x, maximumLeft));
+    top = Math.max(minimumTop, Math.min(y, maximumTop));
+  }
+
+  function schedulePlacement(): void {
+    if (viewportFrame !== undefined) cancelAnimationFrame(viewportFrame);
+    viewportFrame = requestAnimationFrame(() => {
+      viewportFrame = undefined;
+      placeMenu();
+    });
   }
 
   function dismissFromClick(event: MouseEvent): void {
@@ -65,23 +89,25 @@
         && Boolean(target.closest('.context-menu'));
       if (scrollKeys.has(event.key) && !activatesMenuButton) event.preventDefault();
     };
-    const handleResize = () => placeMenu();
     const preventBackgroundScroll = (event: Event) => event.preventDefault();
     dismissalArmed = !guardOpeningRelease;
     window.addEventListener('keydown', handleKeydown);
-    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', schedulePlacement);
     window.addEventListener('wheel', preventBackgroundScroll, { passive: false });
     window.addEventListener('touchmove', preventBackgroundScroll, { passive: false });
-    window.visualViewport?.addEventListener('resize', handleResize);
+    window.visualViewport?.addEventListener('resize', schedulePlacement);
+    window.visualViewport?.addEventListener('scroll', schedulePlacement);
     if (autofocus) {
       void tick().then(() => menu?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus());
     }
     return () => {
       window.removeEventListener('keydown', handleKeydown);
-      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('resize', schedulePlacement);
       window.removeEventListener('wheel', preventBackgroundScroll);
       window.removeEventListener('touchmove', preventBackgroundScroll);
-      window.visualViewport?.removeEventListener('resize', handleResize);
+      window.visualViewport?.removeEventListener('resize', schedulePlacement);
+      window.visualViewport?.removeEventListener('scroll', schedulePlacement);
+      if (viewportFrame !== undefined) cancelAnimationFrame(viewportFrame);
     };
   });
 </script>

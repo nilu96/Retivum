@@ -74,7 +74,14 @@ export function contextMenuTrigger(
       suppressNativeContextMenuUntil = Date.now() + nativeContextMenuSuppressionMs;
       window.addEventListener('pointerup', resetClickSuppressionAfterPointerEnd, true);
       window.addEventListener('pointercancel', resetClickSuppressionAfterPointerEnd, true);
-      options.onopen(event.clientX, event.clientY, 'longpress');
+      // iOS reports the touch relative to the keyboard-shifted visual viewport,
+      // while the fixed menu is positioned in layout viewport coordinates.
+      const viewport = window.visualViewport;
+      options.onopen(
+        event.clientX + (viewport?.offsetLeft ?? 0),
+        event.clientY + (viewport?.offsetTop ?? 0),
+        'longpress',
+      );
     }, longPressDelayMs);
   }
 

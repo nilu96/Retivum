@@ -630,6 +630,59 @@ describe('ChatView', () => {
     expect(retry).toHaveBeenCalledWith('failed-message');
   });
 
+  it('keeps the composer focused when dismissing or choosing a message action', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:focused-menu-message',
+      identityId: 'identity',
+      messageId: 'focused-menu-message',
+      sourceHash: '3'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Keep the keyboard open',
+      direction: 'outgoing',
+      status: 'sending',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    const abort = vi.spyOn(reticulumRuntime, 'abortChatMessage').mockResolvedValue(true);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Keep the keyboard open/ }));
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    const bubble = screen.getByLabelText('Open actions for message: Keep the keyboard open');
+    composer.focus();
+
+    await fireEvent.contextMenu(bubble, { clientX: 100, clientY: 100 });
+    const dismiss = screen.getByRole('button', { name: 'Close message actions' });
+    const dismissPointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+    dismiss.dispatchEvent(dismissPointerDown);
+    expect(dismissPointerDown).toHaveProperty('defaultPrevented', true);
+    await fireEvent.click(dismiss);
+    expect(screen.queryByRole('menu', { name: 'Message actions' })).not.toBeInTheDocument();
+    expect(composer).toHaveFocus();
+
+    await fireEvent.contextMenu(bubble, { clientX: 100, clientY: 100 });
+    const abortAction = screen.getByRole('menuitem', { name: 'Abort sending' });
+    const actionPointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+    abortAction.dispatchEvent(actionPointerDown);
+    expect(actionPointerDown).toHaveProperty('defaultPrevented', true);
+    await fireEvent.click(abortAction);
+
+    expect(abort).toHaveBeenCalledWith('focused-menu-message');
+    expect(composer).toHaveFocus();
+
+    await fireEvent.contextMenu(bubble, { clientX: 100, clientY: 100 });
+    const deleteAction = screen.getByRole('menuitem', { name: 'Delete message' });
+    const deletePointerDown = new Event('pointerdown', { bubbles: true, cancelable: true });
+    deleteAction.dispatchEvent(deletePointerDown);
+    expect(deletePointerDown).toHaveProperty('defaultPrevented', true);
+    await fireEvent.click(deleteAction);
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Delete message?');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus());
+    expect(composer).not.toHaveFocus();
+  });
+
   it('copies a message title and body from its context menu', async () => {
     const destinationHash = '5'.repeat(32);
     chatMessages.set([{
