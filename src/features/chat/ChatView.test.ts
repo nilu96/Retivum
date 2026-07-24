@@ -647,6 +647,37 @@ describe('ChatView', () => {
     }
   });
 
+  it('shows but disables copying for an attachment-only message', async () => {
+    const destinationHash = '5'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:attachment-only-copy',
+      identityId: 'identity',
+      messageId: 'attachment-only-copy',
+      sourceHash: destinationHash,
+      destinationHash: '6'.repeat(32),
+      title: '',
+      content: '',
+      attachments: [{
+        kind: 'file',
+        name: 'payload.bin',
+        mimeType: 'application/octet-stream',
+        data: new Uint8Array([1, 2, 3]),
+      }],
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /payload.bin/ }));
+    await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: payload.bin'), {
+      clientX: 100,
+      clientY: 100,
+    });
+
+    expect(screen.getByRole('menuitem', { name: 'Copy message text' })).toBeDisabled();
+  });
+
   it('aborts a sending message without deleting it and then offers retry', async () => {
     const destinationHash = '6'.repeat(32);
     chatMessages.set([{

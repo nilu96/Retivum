@@ -619,7 +619,9 @@
   }
 
   function messageText(message: ChatMessage): string {
-    return [message.title, message.content].filter(Boolean).join('\n\n');
+    return [message.title, message.content]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .join('\n\n');
   }
 
   async function copyMessageText(message: ChatMessage): Promise<void> {
@@ -1462,14 +1464,13 @@
     closeLabel={$t('chat.message.actions.close')}
     onclose={() => { messageActions = undefined; }}
   >
-    {#if messageText(messageActions.message)}
-      <button
-        role="menuitem"
-        onclick={() => { void copyMessageText(messageActions!.message); }}
-      >
-        <Icon name="copy" size={17} />{$t('chat.message.actions.copyText')}
-      </button>
-    {/if}
+    <button
+      role="menuitem"
+      disabled={!messageText(messageActions.message)}
+      onclick={() => { void copyMessageText(messageActions!.message); }}
+    >
+      <Icon name="copy" size={17} />{$t('chat.message.actions.copyText')}
+    </button>
     {#if chatMessageDirection(messageActions.message) === 'outgoing'
       && (chatMessageDisplayStatus(messageActions.message) === 'queued'
         || chatMessageDisplayStatus(messageActions.message) === 'sending')}
