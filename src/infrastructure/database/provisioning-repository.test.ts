@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { ProvisioningSchema } from '../../domain/provisioning';
+import { BrowserKnownDestinationRepository } from './known-destination-repository';
 import { BrowserProvisioningRepository } from './provisioning-repository';
 
 function deleteDatabase(): Promise<void> {
@@ -19,48 +20,79 @@ function schema(id: number): ProvisioningSchema {
 describe('BrowserProvisioningRepository', () => {
   beforeEach(deleteDatabase);
 
-  it('persists management destinations globally in newest-first order', async () => {
+  it('persists management destination bookmarks separately from destination data', async () => {
     const repository = new BrowserProvisioningRepository();
-    await repository.saveNode({
+    await repository.saveBookmark({
       id: 'older',
       destinationHash: '0123456789abcdef0123456789abcdef',
-      publicKey: '01'.repeat(64),
-      heardAt: '2026-07-19T10:00:00.000Z',
+      label: 'Older',
+      createdAt: '2026-07-19T10:00:00.000Z',
+      updatedAt: '2026-07-19T10:00:00.000Z',
     });
-    await repository.saveNode({
+    await repository.saveBookmark({
       id: 'newer',
       destinationHash: 'fedcba9876543210fedcba9876543210',
-      publicKey: '02'.repeat(64),
-      heardAt: '2026-07-20T10:00:00.000Z',
+      createdAt: '2026-07-20T10:00:00.000Z',
+      updatedAt: '2026-07-20T10:00:00.000Z',
     });
 
-    expect((await repository.loadNodes()).map((node) => node.id)).toEqual(['newer', 'older']);
+    expect((await repository.loadBookmarks()).map((bookmark) => bookmark.id)).toEqual(['older', 'newer']);
   });
 
-  it('persists a management destination bookmark without changing its announce data', async () => {
+  it('deletes an existing bookmark and reports missing bookmarks', async () => {
     const repository = new BrowserProvisioningRepository();
-    await repository.saveNode({
+    await repository.saveBookmark({
       id: 'node',
       destinationHash: '0123456789abcdef0123456789abcdef',
-      publicKey: '01'.repeat(64),
-      heardAt: '2026-07-20T10:00:00.000Z',
-    });
-
-    expect(await repository.setNodeBookmarked('node', true, '  Workshop router  ')).toMatchObject({
-      id: 'node',
-      bookmarked: true,
       label: 'Workshop router',
-      heardAt: '2026-07-20T10:00:00.000Z',
+      createdAt: '2026-07-20T10:00:00.000Z',
+      updatedAt: '2026-07-20T10:00:00.000Z',
     });
-    expect(await repository.loadNodes()).toEqual([
-      expect.objectContaining({ id: 'node', bookmarked: true, label: 'Workshop router' }),
-    ]);
 
-    expect(await repository.setNodeBookmarked('node', false)).toMatchObject({
-      id: 'node',
-      bookmarked: false,
-      label: undefined,
+    expect(await repository.deleteBookmark('node')).toBe(true);
+    expect(await repository.deleteBookmark('node')).toBe(false);
+    expect(await repository.loadBookmarks()).toEqual([]);
+  });
+
+  it('migrates legacy management nodes into directory records and bookmarks', async () => {
+    const request = indexedDB.open('retivum', 10);
+    await new Promise<void>((resolve, reject) => {
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore('provisioningNodes', { keyPath: 'id' });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('provisioningNodes', 'readwrite');
+        transaction.objectStore('provisioningNodes').put({
+          id: 'd'.repeat(32),
+          destinationHash: 'd'.repeat(32),
+          publicKey: 'e'.repeat(128),
+          heardAt: '2026-07-20T10:00:00.000Z',
+          bookmarked: true,
+          label: 'Workshop router',
+        });
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
     });
+
+    expect(await new BrowserKnownDestinationRepository().loadAll()).toEqual([{
+      destinationHash: 'd'.repeat(32),
+      fullDestinationName: 'rnstransport.remote.management',
+      lastAnnouncedAt: '2026-07-20T10:00:00.000Z',
+      metadata: {},
+    }]);
+    expect(await new BrowserProvisioningRepository().loadBookmarks()).toEqual([{
+      id: 'd'.repeat(32),
+      destinationHash: 'd'.repeat(32),
+      label: 'Workshop router',
+      createdAt: '2026-07-20T10:00:00.000Z',
+      updatedAt: '2026-07-20T10:00:00.000Z',
+    }]);
   });
 
   it('caches schemas by version and hash and retains only the five newest entries', async () => {

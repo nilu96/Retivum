@@ -1,16 +1,4 @@
-export interface ChatAnnounce {
-  id: string;
-  identityId: string;
-  destinationHash: string;
-  identityHash: string;
-  publicKey: string;
-  displayName?: string;
-  stampCost?: number;
-  compressionSupported?: boolean;
-  interfaceId?: string;
-  hops?: number;
-  heardAt: string;
-}
+import type { KnownDestinationRecord } from './known-destination';
 
 export interface ChatContact {
   id: string;
@@ -85,10 +73,13 @@ export interface ChatConversationSummary {
 
 export function chatConversationSummaries(
   messages: ChatMessage[],
-  announces: ChatAnnounce[],
+  destinations: readonly KnownDestinationRecord[],
   contacts: ChatContact[] = [],
 ): ChatConversationSummary[] {
-  const announceNames = new Map(announces.map((announce) => [announce.destinationHash, announce.displayName]));
+  const announceNames = new Map(destinations.map((destination) => [
+    destination.destinationHash,
+    destination.displayName,
+  ]));
   const contactNames = new Map(contacts.map((contact) => [contact.destinationHash, contact.name]));
   const conversations = new Map<string, ChatConversationSummary>();
   for (const message of messages) {
@@ -180,11 +171,6 @@ export function chatMessageDisplayStatus(message: ChatMessage): ChatMessageStatu
 export function messageTime(message: ChatMessage): number {
   if (typeof message.timestamp === 'number' && Number.isFinite(message.timestamp)) return message.timestamp * 1_000;
   return Date.parse(message.receivedAt);
-}
-
-export function upsertChatAnnounce(items: ChatAnnounce[], announce: ChatAnnounce): ChatAnnounce[] {
-  return [announce, ...items.filter((item) => item.id !== announce.id)]
-    .sort((left, right) => Date.parse(right.heardAt) - Date.parse(left.heardAt));
 }
 
 export function upsertChatMessage(items: ChatMessage[], message: ChatMessage): ChatMessage[] {

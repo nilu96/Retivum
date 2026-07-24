@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { ChatAnnounce, ChatContact, ChatMessage } from './chat';
+import type { KnownDestinationRecord } from './known-destination';
+import type { ChatContact, ChatMessage } from './chat';
 import {
   chatConversationSummaries,
   chatMessageDisplayStatus,
   chatMessageProgressStatus,
   chatMessageStatusForState,
   shouldUsePropagationFallback,
-  upsertChatAnnounce,
   upsertChatMessage,
 } from './chat';
 
@@ -27,20 +27,17 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
 describe('chatConversationSummaries', () => {
   it('groups received messages by sender and uses the newest message first', () => {
     const aliceHash = 'a'.repeat(32);
-    const announces: ChatAnnounce[] = [{
-      id: `identity:${aliceHash}`,
-      identityId: 'identity',
+    const destinations: KnownDestinationRecord[] = [{
       destinationHash: aliceHash,
-      identityHash: 'c'.repeat(32),
-      publicKey: 'd'.repeat(128),
+      fullDestinationName: 'lxmf.delivery',
       displayName: 'Alice',
-      heardAt: '2026-07-16T09:00:00.000Z',
+      lastAnnouncedAt: '2026-07-16T09:00:00.000Z',
     }];
     const summaries = chatConversationSummaries([
       message({ id: 'identity:older', messageId: 'older', timestamp: 1_752_659_000, content: 'Older' }),
       message({ id: 'identity:newer', messageId: 'newer', timestamp: 1_752_660_000, content: 'Newer' }),
       message({ id: 'identity:bob', messageId: 'bob', sourceHash: 'e'.repeat(32), timestamp: 1_752_658_000 }),
-    ], announces);
+    ], destinations);
 
     expect(summaries).toHaveLength(2);
     expect(summaries[0]).toMatchObject({
@@ -51,20 +48,7 @@ describe('chatConversationSummaries', () => {
     expect(summaries[0].latestMessage.content).toBe('Newer');
   });
 
-  it('keeps live announce and message updates when merging persisted directory data', () => {
-    const destinationHash = 'a'.repeat(32);
-    const persistedAnnounce: ChatAnnounce = {
-      id: `identity:${destinationHash}`,
-      identityId: 'identity',
-      destinationHash,
-      identityHash: 'b'.repeat(32),
-      publicKey: 'c'.repeat(128),
-      displayName: 'Old name',
-      heardAt: '2026-07-16T10:00:00.000Z',
-    };
-    const liveAnnounce = { ...persistedAnnounce, displayName: 'Live name', heardAt: '2026-07-16T10:01:00.000Z' };
-    expect(upsertChatAnnounce([persistedAnnounce], liveAnnounce)).toEqual([liveAnnounce]);
-
+  it('keeps live message updates when merging persisted chat data', () => {
     const persistedMessage = message({ content: 'Persisted' });
     const liveMessage = message({ content: 'Live', receivedAt: '2026-07-16T10:01:00.000Z' });
     expect(upsertChatMessage([persistedMessage], liveMessage)).toEqual([liveMessage]);

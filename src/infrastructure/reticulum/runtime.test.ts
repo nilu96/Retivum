@@ -4,11 +4,11 @@ import { blockedChatDestinations, chatMessages } from './chat-state';
 import {
   activeIdentity,
   chatInboundTransfers,
-  knownDestinationHashes,
   knownDestinations,
-  nomadAnnounces,
+  localDestinationInventory,
   pathTableEntries,
-  provisioningNodes,
+  provisioningBookmarks,
+  remoteDestinationInventory,
   reticulumLogs,
   reticulumRuntime,
 } from './runtime';
@@ -17,14 +17,21 @@ type RuntimeInternals = {
   cancelChatMessageDelivery(messageId: string): Promise<boolean>;
   handleEvent(event: unknown): Promise<void>;
   queuePropagationFallback(message: unknown): void;
+  destinationDirectoryReconciled: boolean;
   worker?: { postMessage(command: unknown): void };
+  provisioningRepository: {
+    saveBookmark(bookmark: unknown): Promise<void>;
+  };
+  knownDestinationRepository: {
+    save(record: unknown): Promise<void>;
+    replaceAll(records: unknown[]): Promise<void>;
+    delete(destinationHash: string): Promise<void>;
+    clear(): Promise<void>;
+  };
   chatRepository: {
     deleteMessages(ids: string[]): Promise<void>;
     replaceMessage(id: string, message: unknown): Promise<void>;
     saveMessage(message: unknown): Promise<void>;
-  };
-  provisioningRepository: {
-    saveNode(node: unknown): Promise<void>;
   };
 };
 
@@ -40,13 +47,100 @@ describe('ReticulumRuntimeController chat deletion', () => {
     chatMessages.set([]);
     chatInboundTransfers.set([]);
     blockedChatDestinations.set([]);
-    nomadAnnounces.set([]);
-    provisioningNodes.set([]);
+    provisioningBookmarks.set([]);
     reticulumLogs.set([]);
-    knownDestinationHashes.set([]);
+    remoteDestinationInventory.set([]);
+    localDestinationInventory.set([]);
     knownDestinations.set([]);
     pathTableEntries.set([]);
-    (reticulumRuntime as unknown as RuntimeInternals).worker = undefined;
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    internals.worker = undefined;
+    internals.destinationDirectoryReconciled = false;
+  });
+
+  it('stores unified observations from every recognized application in the global directory', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    vi.spyOn(internals.knownDestinationRepository, 'save').mockResolvedValue(undefined);
+    const nomadHash = '1'.repeat(32);
+    const chatHash = '2'.repeat(32);
+
+    await internals.handleEvent({
+      type: 'knownDestinationObserved',
+      destinationHash: nomadHash,
+      fullDestinationName: 'nomadnetwork.node',
+      displayName: 'Forest node',
+      lastAnnouncedAt: '2026-07-24T10:00:00.000Z',
+      metadata: {},
+    });
+    await internals.handleEvent({
+      type: 'knownDestinationObserved',
+      destinationHash: chatHash,
+      fullDestinationName: 'lxmf.delivery',
+      displayName: 'Shared peer',
+      lastAnnouncedAt: '2026-07-24T10:01:00.000Z',
+      metadata: { stampCost: 8 },
+    });
+    await internals.handleEvent({
+      type: 'knownDestinationObserved',
+      destinationHash: nomadHash,
+      fullDestinationName: 'nomadnetwork.node',
+      displayName: 'Stale name',
+      lastAnnouncedAt: '2026-07-24T09:00:00.000Z',
+      metadata: {},
+    });
+
+    expect(get(knownDestinations)).toEqual([
+      expect.objectContaining({ destinationHash: chatHash, displayName: 'Shared peer' }),
+      expect.objectContaining({ destinationHash: nomadHash, displayName: 'Forest node' }),
+    ]);
+    expect(internals.knownDestinationRepository.save).toHaveBeenCalledTimes(3);
+  });
+
+  it('reconciles the persistent directory only against the remote worker inventory', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const replaceAll = vi.spyOn(internals.knownDestinationRepository, 'replaceAll')
+      .mockResolvedValue(undefined);
+    const retainedHash = '3'.repeat(32);
+    knownDestinations.set([
+      { destinationHash: retainedHash, displayName: 'Retained peer' },
+      { destinationHash: '4'.repeat(32), displayName: 'Removed peer' },
+    ]);
+
+    await internals.handleEvent({
+      type: 'pathManagementSnapshot',
+      paths: [],
+      remoteDestinations: [
+        { destinationHash: retainedHash, fullDestinationName: 'lxmf.delivery' },
+      ],
+      localDestinations: [{
+        destinationHash: '5'.repeat(32),
+        fullDestinationName: 'lxmf.delivery',
+      }],
+      reconcileDirectory: true,
+    });
+    expect(get(knownDestinations)).toEqual([{
+      destinationHash: retainedHash,
+      fullDestinationName: 'lxmf.delivery',
+      displayName: 'Retained peer',
+    }]);
+    expect(get(remoteDestinationInventory)).toEqual([
+      { destinationHash: retainedHash, fullDestinationName: 'lxmf.delivery' },
+    ]);
+    expect(get(localDestinationInventory)).toEqual([{
+      destinationHash: '5'.repeat(32),
+      fullDestinationName: 'lxmf.delivery',
+    }]);
+    expect(replaceAll).toHaveBeenCalledOnce();
+
+    await internals.handleEvent({
+      type: 'pathManagementSnapshot',
+      paths: [],
+      remoteDestinations: [],
+      localDestinations: [],
+      reconcileDirectory: true,
+    });
+    expect(get(knownDestinations)).toHaveLength(1);
+    expect(replaceAll).toHaveBeenCalledOnce();
   });
 
   it('returns the destination only after the worker verifies and imports an LXMA peer', async () => {
@@ -154,14 +248,19 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(postMessage).not.toHaveBeenCalled();
   });
 
-  it('drops a destination path through the worker and tracks known destination snapshots', async () => {
+  it('drops a destination path through the worker and tracks the worker inventory', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();
     internals.worker = { postMessage };
     const destinationHash = '3'.repeat(32);
 
-    await internals.handleEvent({ type: 'knownDestinationSnapshot', destinationHashes: [destinationHash] });
-    expect(get(knownDestinationHashes)).toEqual([destinationHash]);
+    await internals.handleEvent({
+      type: 'pathManagementSnapshot',
+      paths: [],
+      remoteDestinations: [{ destinationHash }],
+      localDestinations: [],
+    });
+    expect(get(remoteDestinationInventory)).toEqual([{ destinationHash }]);
 
     const pending = reticulumRuntime.dropDestinationPath(destinationHash);
     const command = postMessage.mock.calls[0][0] as { requestId: string };
@@ -178,6 +277,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();
     internals.worker = { postMessage };
+    vi.spyOn(internals.knownDestinationRepository, 'delete').mockResolvedValue(undefined);
+    vi.spyOn(internals.knownDestinationRepository, 'clear').mockResolvedValue(undefined);
     const destinationHash = '4'.repeat(32);
 
     await internals.handleEvent({
@@ -190,18 +291,19 @@ describe('ReticulumRuntimeController chat deletion', () => {
         expiresAt: '2026-07-24T10:00:00.000Z',
         lastAnnouncedAt: '2026-07-17T10:00:00.000Z',
       }],
-      knownDestinations: [{
+      remoteDestinations: [{
         destinationHash,
         publicKey: '6'.repeat(128),
         lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
       }],
+      localDestinations: [],
     });
     expect(get(pathTableEntries)).toEqual([expect.objectContaining({
       destinationHash,
       hops: 3,
       lastAnnouncedAt: '2026-07-17T10:00:00.000Z',
     })]);
-    expect(get(knownDestinations)).toEqual([expect.objectContaining({
+    expect(get(remoteDestinationInventory)).toEqual([expect.objectContaining({
       destinationHash,
       publicKey: '6'.repeat(128),
     })]);
@@ -324,17 +426,15 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(onUpdate).toHaveBeenCalledWith({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
   });
 
-  it('uses a globally known NomadNet public key after the active identity changes', async () => {
+  it('leaves NomadNet identity lookup to the worker after the active identity changes', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();
     internals.worker = { postMessage };
     const destinationHash = '2'.repeat(32);
-    const publicKey = '3'.repeat(128);
-    nomadAnnounces.set([{
-      id: destinationHash,
+    knownDestinations.set([{
       destinationHash,
-      publicKey,
-      heardAt: '2026-07-22T10:00:00.000Z',
+      fullDestinationName: 'nomadnetwork.node',
+      lastAnnouncedAt: '2026-07-22T10:00:00.000Z',
     }]);
     activeIdentity.set({
       id: 'identity-2',
@@ -349,8 +449,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: 'requestNomadPage',
       destinationHash,
-      publicKey,
     }));
+    expect(postMessage.mock.calls[0][0]).not.toHaveProperty('publicKey');
     await internals.handleEvent({
       type: 'nomadPageFailed',
       requestId: command.requestId,
@@ -368,8 +468,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     const pending = reticulumRuntime.requestProvisioning({
       id: destinationHash,
       destinationHash,
-      publicKey: '',
-      heardAt: '2026-07-21T10:00:00.000Z',
+      lastAnnouncedAt: '2026-07-21T10:00:00.000Z',
     }, Uint8Array.of(1), true);
     const command = postMessage.mock.calls[0][0] as { requestId: string; publicKey?: string };
 
@@ -389,34 +488,30 @@ describe('ReticulumRuntimeController chat deletion', () => {
 
   it('persists a bookmark for an unannounced provisioning destination', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
-    const saveNode = vi.spyOn(internals.provisioningRepository, 'saveNode').mockResolvedValue();
+    const saveBookmark = vi.spyOn(internals.provisioningRepository, 'saveBookmark').mockResolvedValue();
     const destinationHash = '4'.repeat(32);
 
     await expect(reticulumRuntime.saveProvisioningNodeBookmark({
       id: destinationHash,
       destinationHash,
-      publicKey: '',
-      heardAt: '2026-07-21T10:00:00.000Z',
+      lastAnnouncedAt: '2026-07-21T10:00:00.000Z',
     }, '  Custom router  ')).resolves.toBe(true);
 
-    expect(saveNode).toHaveBeenCalledWith(expect.objectContaining({
+    expect(saveBookmark).toHaveBeenCalledWith(expect.objectContaining({
       id: destinationHash,
       destinationHash,
-      publicKey: '',
-      bookmarked: true,
       label: 'Custom router',
     }));
-    expect(get(provisioningNodes)).toEqual([
-      expect.objectContaining({ destinationHash, bookmarked: true, label: 'Custom router' }),
+    expect(get(provisioningBookmarks)).toEqual([
+      expect.objectContaining({ destinationHash, label: 'Custom router' }),
     ]);
 
     await expect(reticulumRuntime.saveProvisioningNodeBookmark({
       id: destinationHash,
       destinationHash,
-      publicKey: '',
-      heardAt: '2026-07-21T10:00:00.000Z',
+      lastAnnouncedAt: '2026-07-21T10:00:00.000Z',
     }, '   ')).resolves.toBe(true);
-    expect(saveNode).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }));
+    expect(saveBookmark).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }));
   });
 
   it('asks the worker to close every provisioning link', () => {

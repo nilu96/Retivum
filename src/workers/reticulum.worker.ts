@@ -19,6 +19,7 @@ import type { ReticulumLogEntry, ReticulumLogLevel } from '../domain/logging';
 import { parseLxmaAddress } from '../domain/lxmf';
 import { normalizeInDestinationHashes } from '../infrastructure/reticulum/in-destination-hashes';
 import {
+  decodeNomadNodeAppData,
   encodeNomadRequestData,
   nomadPageLoadDeadlineMs,
   nomadRequestPath,
@@ -209,8 +210,16 @@ const probeJobs = new Map<string, ProbeJob>();
 const probeJobsByPacketHash = new Map<string, ProbeJob>();
 const destinationPathRequestJobs = new Map<string, DestinationPathRequestJob>();
 const knownDestinationPublicKeys = new Map<string, Uint8Array>();
+const registeredFullDestinationNames = [
+  'lxmf.delivery',
+  'lxmf.propagation',
+  'nomadnetwork.node',
+  'rnstransport.probe',
+  'rnstransport.remote.management',
+] as const;
+type RegisteredFullDestinationName = typeof registeredFullDestinationNames[number];
+const knownDestinationFullNames = new Map<string, RegisteredFullDestinationName | null>();
 const interfaceOnlineSuppressedAnnounceDestinations = new Set<string>();
-let knownDestinationSnapshotSignature = '';
 let pathManagementSnapshotSignature = '';
 const lxmfOutboundStatusCache = new Map<string, string>();
 const lxmfDeliveryLinks = new Set<string>();
@@ -685,34 +694,13 @@ function emitKnownDestinationSnapshot(): void {
       // A malformed runtime result must not prevent remote destination updates.
     }
   }
-  const hashes = new Set<string>([
-    ...knownDestinationPublicKeys.keys(),
-    ...inDestinationHashes,
-    ...observedDestinationPaths,
-  ]);
-  if (snapshot) {
-    for (const collectionName of ['knownIdentities', 'knownDestinations', 'paths']) {
-      const collection = snapshot[collectionName];
-      if (!Array.isArray(collection)) continue;
-      for (const value of collection) {
-        if (!value || typeof value !== 'object') continue;
-        const destinationHash = eventBytes(value as Record<string, unknown>, 'destinationHash');
-        if (destinationHash?.byteLength === 16) hashes.add(bytesToHex(destinationHash));
-      }
-    }
-  }
-  const destinationHashes = Array.from(hashes).sort();
-  const signature = destinationHashes.join(':');
-  if (signature !== knownDestinationSnapshotSignature) {
-    knownDestinationSnapshotSignature = signature;
-    emit({ type: 'knownDestinationSnapshot', destinationHashes });
-  }
-  emitPathManagementSnapshot(snapshot, inDestinationHashes);
+  emitPathManagementSnapshot(snapshot, inDestinationHashes, true);
 }
 
 function emitPathManagementSnapshot(
   snapshot: Record<string, unknown> | undefined,
   inDestinationHashes: string[],
+  reconcileDirectory = false,
 ): void {
   const persistentState = snapshot ?? {};
   const lastAnnouncedAtByHash = new Map<string, string>();
@@ -750,22 +738,20 @@ function emitPathManagementSnapshot(
     destinationHash: string;
     publicKey?: string;
     lastAnnouncedAt?: string;
-    isLocal?: boolean;
-    fullDestinationName?: string;
+    fullDestinationName?: RegisteredFullDestinationName;
   }>();
   for (const entry of arrayRecords(persistentState.knownIdentities)) {
     const destinationHash = eventBytes(entry, 'destinationHash');
     const publicKey = eventBytes(entry, 'publicKey');
     if (destinationHash?.byteLength !== 16) continue;
     const hash = bytesToHex(destinationHash);
+    const fullDestinationName = publicKey?.byteLength === 64
+      ? recognizedFullDestinationName(hash, publicKey)
+      : undefined;
     knownByHash.set(hash, {
       destinationHash: hash,
       ...(publicKey?.byteLength === 64 ? { publicKey: bytesToHex(publicKey) } : {}),
-      ...(publicKey?.byteLength === 64 && destinationMatchesFullName(
-        hash,
-        publicKey,
-        'rnstransport.probe',
-      ) ? { fullDestinationName: 'rnstransport.probe' } : {}),
+      ...(fullDestinationName ? { fullDestinationName } : {}),
     });
   }
   for (const entry of arrayRecords(persistentState.knownDestinations)) {
@@ -781,46 +767,60 @@ function emitPathManagementSnapshot(
   }
   for (const [destinationHash, publicKey] of knownDestinationPublicKeys) {
     const current = knownByHash.get(destinationHash);
+    const fullDestinationName = recognizedFullDestinationName(destinationHash, publicKey);
     knownByHash.set(destinationHash, {
       ...current,
       destinationHash,
       publicKey: bytesToHex(publicKey),
-      ...(destinationMatchesFullName(destinationHash, publicKey, 'rnstransport.probe')
-        ? { fullDestinationName: 'rnstransport.probe' }
-        : {}),
-    });
-  }
-  for (const destinationHash of inDestinationHashes) {
-    const current = knownByHash.get(destinationHash);
-    const fullDestinationName = destinationHash === localLxmfDeliveryDestinationHash
-      ? 'lxmf.delivery'
-      : identity && destinationMatchesFullName(
-        destinationHash,
-        identity.publicKey,
-        'rnstransport.probe',
-      )
-        ? 'rnstransport.probe'
-        : undefined;
-    knownByHash.set(destinationHash, {
-      destinationHash,
-      ...(current?.lastAnnouncedAt
-        ? { lastAnnouncedAt: current.lastAnnouncedAt }
-        : identity?.lastAnnouncedAt
-          ? { lastAnnouncedAt: identity.lastAnnouncedAt }
-          : {}),
-      isLocal: true,
       ...(fullDestinationName ? { fullDestinationName } : {}),
     });
   }
-  const knownDestinations = Array.from(knownByHash.values()).sort((left, right) => (
-    Number(Boolean(left.isLocal)) - Number(Boolean(right.isLocal))
-    || (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
+  const localDestinationHashes = new Set(inDestinationHashes);
+  for (const destinationHash of localDestinationHashes) {
+    knownByHash.delete(destinationHash);
+  }
+  const localDestinations = Array.from(localDestinationHashes, (destinationHash) => {
+    const fullDestinationName = destinationHash === localLxmfDeliveryDestinationHash
+      ? 'lxmf.delivery'
+      : identity
+        ? recognizedFullDestinationName(destinationHash, identity.publicKey)
+        : undefined;
+    return {
+      destinationHash,
+      ...(identity?.lastAnnouncedAt ? { lastAnnouncedAt: identity.lastAnnouncedAt } : {}),
+      ...(fullDestinationName ? { fullDestinationName } : {}),
+    };
+  }).sort((left, right) => (
+    (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
     || left.destinationHash.localeCompare(right.destinationHash)
   ));
-  const nextSignature = JSON.stringify([paths, knownDestinations]);
+  const remoteDestinations = Array.from(knownByHash.values()).sort((left, right) => (
+    (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
+    || left.destinationHash.localeCompare(right.destinationHash)
+  ));
+  const nextSignature = JSON.stringify([paths, remoteDestinations, localDestinations]);
   if (nextSignature === pathManagementSnapshotSignature) return;
   pathManagementSnapshotSignature = nextSignature;
-  emit({ type: 'pathManagementSnapshot', paths, knownDestinations });
+  emit({
+    type: 'pathManagementSnapshot',
+    paths,
+    remoteDestinations,
+    localDestinations,
+    ...(reconcileDirectory ? { reconcileDirectory: true } : {}),
+  });
+}
+
+function recognizedFullDestinationName(
+  destinationHash: string,
+  publicKey: Uint8Array,
+): RegisteredFullDestinationName | undefined {
+  const cached = knownDestinationFullNames.get(destinationHash);
+  if (cached !== undefined) return cached ?? undefined;
+  const recognized = registeredFullDestinationNames.find((fullDestinationName) => (
+    destinationMatchesFullName(destinationHash, publicKey, fullDestinationName)
+  ));
+  knownDestinationFullNames.set(destinationHash, recognized ?? null);
+  return recognized;
 }
 
 function destinationMatchesFullName(
@@ -918,26 +918,28 @@ function emitPropagationNodeSnapshot(): void {
     log('warning', 'wasm', 'LXMF_PROPAGATION_SNAPSHOT_FAILED');
     return;
   }
-  const nodes = values.flatMap((value) => {
+  for (const value of values) {
     const destinationHash = value.destinationHash
       ? new Uint8Array(value.destinationHash)
       : undefined;
-    if (!destinationHash || destinationHash.byteLength !== 16) return [];
+    if (!destinationHash || destinationHash.byteLength !== 16) continue;
     const heardAtMs = typeof value.heardAtMs === 'number' && Number.isFinite(value.heardAtMs)
       ? value.heardAtMs
       : 0;
-    return [{
+    emit({
+      type: 'knownDestinationObserved',
       destinationHash: bytesToHex(destinationHash),
-      enabled: value.enabled === true,
-      transferLimitKb: typeof value.transferLimitKb === 'number' ? value.transferLimitKb : 0,
-      syncLimitKb: typeof value.syncLimitKb === 'number' ? value.syncLimitKb : 0,
-      stampCost: typeof value.stampCost === 'number' ? value.stampCost : 0,
-      peeringCost: typeof value.peeringCost === 'number' ? value.peeringCost : 0,
-      hops: typeof value.hops === 'number' ? value.hops : undefined,
-      heardAt: new Date(heardAtMs > 0 ? heardAtMs : Date.now()).toISOString(),
-    }];
-  }).sort((left, right) => Date.parse(right.heardAt) - Date.parse(left.heardAt));
-  emit({ type: 'propagationNodeSnapshot', nodes });
+      fullDestinationName: 'lxmf.propagation',
+      ...(heardAtMs > 0 ? { lastAnnouncedAt: new Date(heardAtMs).toISOString() } : {}),
+      metadata: {
+        enabled: value.enabled === true,
+        transferLimitKb: typeof value.transferLimitKb === 'number' ? value.transferLimitKb : 0,
+        syncLimitKb: typeof value.syncLimitKb === 'number' ? value.syncLimitKb : 0,
+        stampCost: typeof value.stampCost === 'number' ? value.stampCost : 0,
+        peeringCost: typeof value.peeringCost === 'number' ? value.peeringCost : 0,
+      },
+    });
+  }
 }
 
 function cleanupRuntime(): void {
@@ -956,12 +958,16 @@ function cleanupRuntime(): void {
   clearProbeState('PROBE_RUNTIME_RESET');
   clearDestinationPathRequests('PATH_REQUEST_RUNTIME_RESET');
   knownDestinationPublicKeys.clear();
+  knownDestinationFullNames.clear();
   localLxmfDeliveryDestinationHash = undefined;
   interfaceOnlineSuppressedAnnounceDestinations.clear();
-  knownDestinationSnapshotSignature = '';
   pathManagementSnapshotSignature = '';
-  emit({ type: 'knownDestinationSnapshot', destinationHashes: [] });
-  emit({ type: 'pathManagementSnapshot', paths: [], knownDestinations: [] });
+  emit({
+    type: 'pathManagementSnapshot',
+    paths: [],
+    remoteDestinations: [],
+    localDestinations: [],
+  });
   lxmfOutboundStatusCache.clear();
   lxmfDeliveryLinks.clear();
   lxmfLinkDestinations.clear();
@@ -1245,6 +1251,11 @@ function importLxmaPeer(command: Extract<RuntimeCommand, { type: 'importLxmaPeer
     }
     node.rememberIdentity(destinationBytes, publicKey);
     knownDestinationPublicKeys.set(destinationHash, new Uint8Array(publicKey));
+    emit({
+      type: 'knownDestinationObserved',
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+    });
     emitKnownDestinationSnapshot();
     queueSnapshotPersistence();
     log('debug', 'wasm', 'LXMF_PEER_IMPORTED', { destinationHash });
@@ -1766,11 +1777,11 @@ function clearProbeState(code: string): void {
 
 function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomadPage' }>): void {
   const destinationHash = normalizeDestinationHash(command.destinationHash);
-  const publicKey = command.publicKey?.trim().toLowerCase();
-  if (!node || !identity || !destinationHash || (publicKey !== undefined && !/^[0-9a-f]{128}$/.test(publicKey))) {
+  if (!node || !identity || !destinationHash) {
     emit({ type: 'nomadPageFailed', requestId: command.requestId, code: 'NOMAD_DESTINATION_UNKNOWN' });
     return;
   }
+  const knownPublicKey = knownDestinationPublicKeys.get(destinationHash);
   // A browser reload is a hard navigation boundary: discard every request and
   // transfer associated with the previous session, close that Link in the
   // Reticulum core, and only then create the replacement job. Keeping this in
@@ -1784,7 +1795,7 @@ function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomad
     destinationHash,
     path: nomadRequestPath(command.path),
     requestData: { ...(command.requestData ?? {}) },
-    publicKey,
+    publicKey: knownPublicKey ? bytesToHex(knownPublicKey) : undefined,
     identifyBeforeLoad: command.identifyBeforeLoad === true,
     recoveryAttempts: 0,
     startedAt: Date.now(),
@@ -2167,16 +2178,16 @@ function clearNomadState(code: string): void {
 
 function requestProvisioning(command: Extract<RuntimeCommand, { type: 'requestProvisioning' }>): void {
   const destinationHash = normalizeDestinationHash(command.destinationHash);
-  const publicKey = command.publicKey?.trim().toLowerCase();
-  if (!node || !identity || !destinationHash || (publicKey !== undefined && !/^[0-9a-f]{128}$/.test(publicKey)) || command.payload.byteLength === 0) {
+  if (!node || !identity || !destinationHash || command.payload.byteLength === 0) {
     emit({ type: 'provisioningFailed', requestId: command.requestId, code: 'PROVISIONING_DESTINATION_UNKNOWN' });
     return;
   }
+  const knownPublicKey = knownDestinationPublicKeys.get(destinationHash);
   closeOtherProvisioningDestinations(destinationHash);
   const job: ProvisioningJob = {
     requestId: command.requestId,
     destinationHash,
-    publicKey,
+    publicKey: knownPublicKey ? bytesToHex(knownPublicKey) : undefined,
     payload: new Uint8Array(command.payload),
     safeToRetry: command.safeToRetry,
     responseTimeoutMs: command.responseTimeoutMs,
@@ -3202,7 +3213,6 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
   const nameHash = eventBytes(announce, 'nameHash');
   const destinationHash = eventBytes(announce, 'destinationHash');
   const appData = eventBytes(announce, 'appData');
-  const identityHash = eventBytes(announce, 'identityHash');
   const publicKey = eventBytes(announce, 'publicKey');
   if (!nameHash || !destinationHash) {
     log('warning', 'wasm', 'RETICULUM_ANNOUNCE_PROJECTION_INVALID');
@@ -3212,26 +3222,23 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
     knownDestinationPublicKeys.set(bytesToHex(destinationHash), new Uint8Array(publicKey));
     emitKnownDestinationSnapshot();
   }
-  const interfaceId = stableInterfaceId(eventNumber(event, 'interfaceIndex'));
   const pathHops = node?.hopsTo(destinationHash);
   const hops = typeof pathHops === 'number' && Number.isSafeInteger(pathHops) && pathHops >= 0
     ? pathHops
     : undefined;
   const heardAt = new Date().toISOString();
+  const destinationHashHex = bytesToHex(destinationHash);
   emitDestinationPathStatus(destinationHash, hops !== undefined, hops);
 
   if (managementNodeNameHash && equalBytes(nameHash, managementNodeNameHash)
     && publicKey?.byteLength === 64) {
-    const destinationHashHex = bytesToHex(destinationHash);
     const publicKeyHex = bytesToHex(publicKey);
     emit({
-      type: 'managementAnnounce',
-      id: destinationHashHex,
+      type: 'knownDestinationObserved',
       destinationHash: destinationHashHex,
-      publicKey: publicKeyHex,
-      interfaceId,
-      hops,
-      heardAt,
+      fullDestinationName: 'rnstransport.remote.management',
+      lastAnnouncedAt: heardAt,
+      metadata: {},
     });
     log('debug', 'wasm', 'PROVISIONING_MANAGEMENT_ANNOUNCE_PROJECTED', {
       destinationHash: destinationHashHex,
@@ -3245,22 +3252,24 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
   }
 
   if (nomadNodeNameHash && equalBytes(nameHash, nomadNodeNameHash)) {
-    const destinationHashHex = bytesToHex(destinationHash);
     const publicKeyHex = publicKey?.byteLength === 64 ? bytesToHex(publicKey) : undefined;
+    const decodedAppData = decodeNomadNodeAppData(appData);
     emit({
-      type: 'nomadAnnounce',
+      type: 'knownDestinationObserved',
       destinationHash: destinationHashHex,
-      displayName: decodeNomadNodeName(appData),
-      publicKey: publicKeyHex,
-      interfaceId,
-      hops,
-      heardAt,
+      fullDestinationName: 'nomadnetwork.node',
+      // The NomadNet node name is both this destination's display name and
+      // the identity-level shared-name source used by the directory manager.
+      displayName: decodedAppData.sharedDisplayName,
+      lastAnnouncedAt: heardAt,
+      metadata: {},
     });
     const pending = nomadPendingJobs.get(destinationHashHex) ?? [];
     if (publicKeyHex && pending.length) {
       for (const job of pending) job.publicKey = publicKeyHex;
       if (node?.hasPath(destinationHash)) beginNomadLink(pending[0]);
     }
+    return;
   }
 
   if (appData) {
@@ -3274,16 +3283,17 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
       } | undefined;
       if (propagation) {
         emit({
-          type: 'propagationNodeAnnounce',
-          destinationHash: bytesToHex(destinationHash),
-          enabled: propagation.enabled === true,
-          transferLimitKb: typeof propagation.transferLimitKb === 'number' ? propagation.transferLimitKb : 0,
-          syncLimitKb: typeof propagation.syncLimitKb === 'number' ? propagation.syncLimitKb : 0,
-          stampCost: typeof propagation.stampCost === 'number' ? propagation.stampCost : 0,
-          peeringCost: typeof propagation.peeringCost === 'number' ? propagation.peeringCost : 0,
-          interfaceId,
-          hops,
-          heardAt,
+          type: 'knownDestinationObserved',
+          destinationHash: destinationHashHex,
+          fullDestinationName: 'lxmf.propagation',
+          lastAnnouncedAt: heardAt,
+          metadata: {
+            enabled: propagation.enabled === true,
+            transferLimitKb: typeof propagation.transferLimitKb === 'number' ? propagation.transferLimitKb : 0,
+            syncLimitKb: typeof propagation.syncLimitKb === 'number' ? propagation.syncLimitKb : 0,
+            stampCost: typeof propagation.stampCost === 'number' ? propagation.stampCost : 0,
+            peeringCost: typeof propagation.peeringCost === 'number' ? propagation.peeringCost : 0,
+          },
         });
         log('debug', 'wasm', 'LXMF_PROPAGATION_ANNOUNCE_PROJECTED', {
           destinationHash: bytesToHex(destinationHash),
@@ -3291,6 +3301,12 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
         return;
       }
     } catch {
+      emit({
+        type: 'knownDestinationObserved',
+        destinationHash: destinationHashHex,
+        fullDestinationName: 'lxmf.propagation',
+        lastAnnouncedAt: heardAt,
+      });
       log('warning', 'wasm', 'LXMF_PROPAGATION_ANNOUNCE_PARSE_FAILED', {
         destinationHash: bytesToHex(destinationHash),
       });
@@ -3298,9 +3314,14 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
     }
   }
 
-  if (!appData || !identityHash || !publicKey || publicKey.byteLength !== 64) {
+  if (!appData || !publicKey || publicKey.byteLength !== 64) {
+    emit({
+      type: 'knownDestinationObserved',
+      destinationHash: destinationHashHex,
+      lastAnnouncedAt: heardAt,
+    });
     log('debug', 'wasm', 'RETICULUM_ANNOUNCE_IGNORED_INCOMPLETE', {
-      destinationHash: bytesToHex(destinationHash),
+      destinationHash: destinationHashHex,
       appDataBytes: appData?.byteLength ?? 0,
       publicKeyBytes: publicKey?.byteLength ?? 0,
     });
@@ -3313,8 +3334,13 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
       compressionSupported?: unknown;
     } | undefined;
     if (!decoded) {
+      emit({
+        type: 'knownDestinationObserved',
+        destinationHash: destinationHashHex,
+        lastAnnouncedAt: heardAt,
+      });
       log('debug', 'wasm', 'RETICULUM_ANNOUNCE_IGNORED_NOT_LXMF', {
-        destinationHash: bytesToHex(destinationHash),
+        destinationHash: destinationHashHex,
         nameHash: bytesToHex(nameHash),
       });
       return;
@@ -3323,23 +3349,27 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
       destinationHash: bytesToHex(destinationHash),
     });
     emit({
-      type: 'chatAnnounce',
-      identityId: identity.id,
-      destinationHash: bytesToHex(destinationHash),
-      identityHash: bytesToHex(identityHash),
-      publicKey: bytesToHex(publicKey),
+      type: 'knownDestinationObserved',
+      destinationHash: destinationHashHex,
+      fullDestinationName: 'lxmf.delivery',
       displayName: typeof decoded.displayName === 'string' && decoded.displayName.trim()
         ? decoded.displayName.trim().slice(0, 256)
         : undefined,
-      stampCost: typeof decoded.stampCost === 'number' ? decoded.stampCost : undefined,
-      compressionSupported: typeof decoded.compressionSupported === 'boolean'
-        ? decoded.compressionSupported
-        : undefined,
-      interfaceId,
-      hops,
-      heardAt,
+      lastAnnouncedAt: heardAt,
+      metadata: {
+        ...(typeof decoded.stampCost === 'number' ? { stampCost: decoded.stampCost } : {}),
+        ...(typeof decoded.compressionSupported === 'boolean'
+          ? { compressionSupported: decoded.compressionSupported }
+          : {}),
+      },
     });
   } catch {
+    emit({
+      type: 'knownDestinationObserved',
+      destinationHash: destinationHashHex,
+      fullDestinationName: 'lxmf.delivery',
+      lastAnnouncedAt: heardAt,
+    });
     log('warning', 'wasm', 'LXMF_ANNOUNCE_PARSE_FAILED', { destinationHash: bytesToHex(destinationHash) });
   }
 }
@@ -3392,22 +3422,6 @@ function emitDestinationPathStatuses(destinations: string[], force = true): void
 
 function pathStatusSignature(hasPath: boolean, hops?: number): string {
   return hasPath ? `known:${hops ?? 'unknown'}` : 'unknown';
-}
-
-function decodeNomadNodeName(appData: Uint8Array | undefined): string | undefined {
-  if (!appData?.byteLength) return undefined;
-  try {
-    const name = new TextDecoder('utf-8', { fatal: true })
-      .decode(appData)
-      .normalize('NFKC')
-      .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-      .slice(0, 128);
-    return name || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function handleReceivedLxmfMessage(event: Record<string, unknown>): void {

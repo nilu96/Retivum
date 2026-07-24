@@ -1,15 +1,17 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history';
+import type {
+  KnownDestinationEntry,
+  LocalDestinationEntry,
+} from '../../infrastructure/reticulum/protocol';
 import {
-  chatAnnounces,
   chatContacts,
   destinationPathStatuses,
-  knownDestinations,
-  nomadAnnounces,
+  knownDestinations as directoryDestinations,
+  localDestinationInventory,
   pathTableEntries,
-  propagationNodeAnnounces,
-  provisioningNodes,
+  remoteDestinationInventory,
   reticulumRuntime,
   runtimeStatus,
   statusDetails,
@@ -17,6 +19,98 @@ import {
 import { clearToasts } from '../../lib/notifications/toasts';
 import ToastViewport from '../../lib/components/ToastViewport.svelte';
 import PathManagementView from './PathManagementView.svelte';
+
+function setInventories(
+  remote: KnownDestinationEntry[],
+  local: LocalDestinationEntry[] = [],
+): void {
+  remoteDestinationInventory.set(remote);
+  localDestinationInventory.set(local);
+}
+
+function setChatDestinations(records: Array<{
+  [key: string]: unknown;
+  destinationHash: string;
+  displayName?: string;
+  heardAt?: string;
+  stampCost?: number;
+  compressionSupported?: boolean;
+}>): void {
+  replaceDirectoryType('lxmf.delivery', records.map((record) => ({
+    destinationHash: record.destinationHash,
+    fullDestinationName: 'lxmf.delivery',
+    displayName: record.displayName,
+    lastAnnouncedAt: record.heardAt,
+    metadata: {
+      ...(record.stampCost !== undefined ? { stampCost: record.stampCost } : {}),
+      ...(record.compressionSupported !== undefined
+        ? { compressionSupported: record.compressionSupported }
+        : {}),
+    },
+  })));
+}
+
+function setNomadDestinations(records: Array<{
+  [key: string]: unknown;
+  destinationHash: string;
+  displayName?: string;
+  heardAt?: string;
+}>): void {
+  replaceDirectoryType('nomadnetwork.node', records.map((record) => ({
+    destinationHash: record.destinationHash,
+    fullDestinationName: 'nomadnetwork.node',
+    displayName: record.displayName,
+    lastAnnouncedAt: record.heardAt,
+    metadata: {},
+  })));
+}
+
+function setPropagationDestinations(records: Array<{
+  destinationHash: string;
+  heardAt?: string;
+  enabled: boolean;
+  transferLimitKb: number;
+  syncLimitKb: number;
+  stampCost: number;
+  peeringCost: number;
+}>): void {
+  replaceDirectoryType('lxmf.propagation', records.map((record) => ({
+    destinationHash: record.destinationHash,
+    fullDestinationName: 'lxmf.propagation',
+    lastAnnouncedAt: record.heardAt,
+    metadata: {
+      enabled: record.enabled,
+      transferLimitKb: record.transferLimitKb,
+      syncLimitKb: record.syncLimitKb,
+      stampCost: record.stampCost,
+      peeringCost: record.peeringCost,
+    },
+  })));
+}
+
+function setManagementDestinations(records: Array<{
+  [key: string]: unknown;
+  destinationHash: string;
+  heardAt?: string;
+}>): void {
+  replaceDirectoryType('rnstransport.remote.management', records.map((record) => ({
+    destinationHash: record.destinationHash,
+    fullDestinationName: 'rnstransport.remote.management',
+    lastAnnouncedAt: record.heardAt,
+    metadata: {},
+  })));
+}
+
+function replaceDirectoryType(
+  fullDestinationName: 'lxmf.delivery' | 'lxmf.propagation'
+    | 'nomadnetwork.node' | 'rnstransport.remote.management',
+  replacements: Parameters<typeof directoryDestinations.set>[0],
+): void {
+  directoryDestinations.update((records) => [
+    ...records.filter((record) => record.fullDestinationName !== fullDestinationName),
+    ...replacements,
+  ]);
+}
 
 describe('PathManagementView', () => {
   const pathDestination = '1'.repeat(32);
@@ -28,11 +122,11 @@ describe('PathManagementView', () => {
     clearProbeHistory();
     runtimeStatus.set('online');
     destinationPathStatuses.set({});
-    chatAnnounces.set([]);
+    setChatDestinations([]);
     chatContacts.set([]);
-    nomadAnnounces.set([]);
-    propagationNodeAnnounces.set([]);
-    provisioningNodes.set([]);
+    setNomadDestinations([]);
+    setPropagationDestinations([]);
+    setManagementDestinations([]);
     pathTableEntries.set([{
       destinationHash: pathDestination,
       hops: 2,
@@ -41,7 +135,7 @@ describe('PathManagementView', () => {
       expiresAt: '2026-07-24T10:00:00.000Z',
       lastAnnouncedAt: '2026-07-17T10:00:00.000Z',
     }]);
-    knownDestinations.set([{
+    setInventories([{
       destinationHash: knownDestination,
       publicKey: '4'.repeat(128),
       lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
@@ -117,7 +211,9 @@ describe('PathManagementView', () => {
     expect(filterToggle).toHaveAccessibleName('Hide filters');
     expect(document.getElementById('path-management-filters')).toHaveClass('expanded');
 
-    const destinationSearch = screen.getByLabelText('Filter by destination hash');
+    const destinationSearch = screen.getByLabelText(
+      'Filter by destination hash, display name, or contact name',
+    );
     expect(destinationSearch.closest('.path-management-search')?.querySelector('svg')).toBeInTheDocument();
     await fireEvent.input(destinationSearch, { target: { value: 'aaaa' } });
     expect(screen.queryByText(pathDestination)).not.toBeInTheDocument();
@@ -183,7 +279,9 @@ describe('PathManagementView', () => {
     expect(screen.queryByLabelText('Filter by interface')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Filter by hop count')).not.toBeInTheDocument();
 
-    const destinationSearch = screen.getByLabelText('Filter by destination hash');
+    const destinationSearch = screen.getByLabelText(
+      'Filter by destination hash, display name, or contact name',
+    );
     await fireEvent.input(destinationSearch, { target: { value: '2222' } });
     expect(screen.getByText(knownDestination)).toBeInTheDocument();
 
@@ -192,14 +290,61 @@ describe('PathManagementView', () => {
     expect(screen.getByRole('heading', { name: 'No matching destinations' })).toBeInTheDocument();
   });
 
+  it('filters paths and known destinations by display and contact names', async () => {
+    setInventories([{
+      destinationHash: knownDestination,
+      publicKey: '4'.repeat(128),
+    }, {
+      destinationHash: pathDestination,
+      publicKey: '5'.repeat(128),
+    }]);
+    setChatDestinations([{
+      destinationHash: pathDestination,
+      displayName: 'Path Display',
+    }, {
+      destinationHash: knownDestination,
+      displayName: 'Known Display',
+    }]);
+    chatContacts.set([{
+      id: `identity-1:${pathDestination}`,
+      identityId: 'identity-1',
+      destinationHash: pathDestination,
+      name: 'Path Contact',
+      createdAt: '2026-07-23T10:00:00.000Z',
+      updatedAt: '2026-07-23T10:00:00.000Z',
+    }, {
+      id: `identity-1:${knownDestination}`,
+      identityId: 'identity-1',
+      destinationHash: knownDestination,
+      name: 'Known Contact',
+      createdAt: '2026-07-23T10:00:00.000Z',
+      updatedAt: '2026-07-23T10:00:00.000Z',
+    }]);
+    render(PathManagementView);
+
+    const destinationSearch = screen.getByLabelText(
+      'Filter by destination hash, display name, or contact name',
+    );
+    await fireEvent.input(destinationSearch, { target: { value: 'path display' } });
+    expect(screen.getByText(pathDestination)).toBeInTheDocument();
+    await fireEvent.input(destinationSearch, { target: { value: 'path contact' } });
+    expect(screen.getByText(pathDestination)).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
+    await fireEvent.input(destinationSearch, { target: { value: 'known display' } });
+    expect(screen.getByText(knownDestination)).toBeInTheDocument();
+    expect(screen.queryByText(pathDestination)).not.toBeInTheDocument();
+    await fireEvent.input(destinationSearch, { target: { value: 'known contact' } });
+    expect(screen.getByText(knownDestination)).toBeInTheDocument();
+    expect(screen.queryByText(pathDestination)).not.toBeInTheDocument();
+  });
+
   it('excludes local destinations from the known-destination tab count', async () => {
-    knownDestinations.set([{
+    setInventories([], [{
       destinationHash: 'a'.repeat(32),
-      isLocal: true,
       fullDestinationName: 'lxmf.delivery',
     }, {
       destinationHash: 'b'.repeat(32),
-      isLocal: true,
     }]);
     render(PathManagementView);
 
@@ -211,9 +356,28 @@ describe('PathManagementView', () => {
     expect(screen.getByText('b'.repeat(32))).toBeInTheDocument();
   });
 
+  it('keeps the path and known-destination views distinct when switching tabs', async () => {
+    render(PathManagementView);
+
+    expect(screen.getByRole('tabpanel', { name: /Paths/ })).toBeInTheDocument();
+    expect(screen.getByText(pathDestination)).toBeInTheDocument();
+    expect(screen.queryByText(knownDestination)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by interface')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Filter by destination type')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
+
+    expect(screen.getByRole('tabpanel', { name: /Known destinations/ })).toBeInTheDocument();
+    expect(screen.queryByText(pathDestination)).not.toBeInTheDocument();
+    expect(screen.getByText(knownDestination)).toBeInTheDocument();
+    expect(screen.queryByLabelText('Filter by interface')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Filter by destination type')).toBeInTheDocument();
+    expect(screen.getByLabelText('Group by identity')).toBeInTheDocument();
+  });
+
   it('filters known destinations by destination type and clears the filter', async () => {
     const lxmfDestination = 'a'.repeat(32);
-    knownDestinations.set([
+    setInventories([
       {
         destinationHash: knownDestination,
         publicKey: '4'.repeat(128),
@@ -225,7 +389,7 @@ describe('PathManagementView', () => {
         lastAnnouncedAt: '2026-07-22T10:00:00.000Z',
       },
     ]);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity-1:${lxmfDestination}`,
       identityId: 'identity-1',
       destinationHash: lxmfDestination,
@@ -252,6 +416,21 @@ describe('PathManagementView', () => {
     expect(typeFilter).toHaveValue('');
     expect(screen.getByText(knownDestination)).toBeInTheDocument();
     expect(screen.getByText(lxmfDestination)).toBeInTheDocument();
+  });
+
+  it('shows the interface for a direct path without a next hop', () => {
+    pathTableEntries.set([{
+      destinationHash: pathDestination,
+      hops: 1,
+      interfaceId: 'interface-1',
+      expiresAt: '2026-07-24T10:00:00.000Z',
+      lastAnnouncedAt: '2026-07-17T10:00:00.000Z',
+    }]);
+
+    render(PathManagementView);
+
+    expect(screen.getByText('on Community Hub (WebSocket)')).toBeInTheDocument();
+    expect(screen.queryByText(/^via /)).not.toBeInTheDocument();
   });
 
   it('requests a manually entered destination and can request a listed path again', async () => {
@@ -441,7 +620,7 @@ describe('PathManagementView', () => {
     const managementDestination = '7'.repeat(32);
     const unknownDestination = '8'.repeat(32);
     const unmatchedPathDestination = 'a'.repeat(32);
-    knownDestinations.set([
+    setInventories([
       knownDestination,
       propagationDestination,
       nomadDestination,
@@ -467,7 +646,7 @@ describe('PathManagementView', () => {
         lastAnnouncedAt: '2026-07-22T10:00:00.000Z',
       },
     ]);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity-1:${knownDestination}`,
       identityId: 'identity-1',
       destinationHash: knownDestination,
@@ -486,7 +665,7 @@ describe('PathManagementView', () => {
       createdAt: '2026-07-23T10:00:00.000Z',
       updatedAt: '2026-07-23T10:00:00.000Z',
     }]);
-    propagationNodeAnnounces.set([{
+    setPropagationDestinations([{
       destinationHash: propagationDestination,
       enabled: true,
       transferLimitKb: 1_000,
@@ -495,13 +674,13 @@ describe('PathManagementView', () => {
       peeringCost: 4,
       heardAt: '2026-07-23T10:00:00.000Z',
     }]);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: nomadDestination,
       destinationHash: nomadDestination,
       displayName: 'Forest Node',
       heardAt: '2026-07-23T10:00:00.000Z',
     }]);
-    provisioningNodes.set([{
+    setManagementDestinations([{
       id: managementDestination,
       destinationHash: managementDestination,
       publicKey: '7'.repeat(128),
@@ -510,9 +689,8 @@ describe('PathManagementView', () => {
     render(PathManagementView);
 
     await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
-    expect(screen.getByText('Local Alice')).toBeInTheDocument();
-    expect(screen.getByText('Local contact')).toBeInTheDocument();
-    expect(screen.getByText('Announced as Shared Alice')).toBeInTheDocument();
+    expect(screen.queryByText('Local Alice')).not.toBeInTheDocument();
+    expect(screen.getByText('Shared Alice')).toBeInTheDocument();
     expect(screen.getByText('Forest Node')).toBeInTheDocument();
     expect(Array.from(document.querySelectorAll('.path-management-entry-badge.destination-type'))
       .map((badge) => badge.textContent?.trim())).toEqual(expect.arrayContaining([
@@ -538,11 +716,13 @@ describe('PathManagementView', () => {
     await fireEvent.contextMenu(knownDestinationEntry!, { clientX: 100, clientY: 100 });
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Show path' }));
     expect(screen.getByRole('tab', { name: /Paths/ })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByLabelText('Filter by destination hash')).toHaveValue('');
+    expect(screen.getByLabelText(
+      'Filter by destination hash, display name, or contact name',
+    )).toHaveValue('');
     const pathCounterpart = screen.getByText(knownDestination).closest('li');
     expect(pathCounterpart).toHaveClass('counterpart-highlight');
-    expect(within(pathCounterpart!).getByText('Local Alice')).toBeInTheDocument();
-    expect(within(pathCounterpart!).getByText('Announced as Shared Alice')).toBeInTheDocument();
+    expect(within(pathCounterpart!).queryByText('Local Alice')).not.toBeInTheDocument();
+    expect(within(pathCounterpart!).getByText('Shared Alice')).toBeInTheDocument();
     expect(within(pathCounterpart!).getByText('LXMF delivery')).toHaveClass('destination-type');
     expect(pathCounterpart!.querySelector('.hop-count')).toHaveTextContent('2 hops');
     const otherPathEntry = screen.getByText(unmatchedPathDestination).closest('li');
@@ -657,12 +837,12 @@ describe('PathManagementView', () => {
   });
 
   it('probes from the ordered destination actions and reports live progress', async () => {
-    knownDestinations.set([{
+    setInventories([{
       destinationHash: pathDestination,
       publicKey: '4'.repeat(128),
       lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
     }]);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity-1:${pathDestination}`,
       identityId: 'identity-1',
       destinationHash: pathDestination,
@@ -752,7 +932,7 @@ describe('PathManagementView', () => {
 
   it('labels and probes a verified Reticulum probe destination', async () => {
     const probeDestination = 'b'.repeat(32);
-    knownDestinations.set([{
+    setInventories([{
       destinationHash: probeDestination,
       publicKey: 'c'.repeat(128),
       fullDestinationName: 'rnstransport.probe',
@@ -790,7 +970,7 @@ describe('PathManagementView', () => {
     const groupedDestination = '6'.repeat(32);
     const localPropagationDestination = 'e'.repeat(32);
     const localDestination = 'f'.repeat(32);
-    knownDestinations.set([
+    setInventories([
       {
         destinationHash: knownDestination,
         publicKey: sharedPublicKey,
@@ -806,14 +986,13 @@ describe('PathManagementView', () => {
         publicKey: sharedPublicKey,
         lastAnnouncedAt: '2026-07-22T10:00:00.000Z',
       },
+    ], [
       {
         destinationHash: localPropagationDestination,
-        isLocal: true,
         lastAnnouncedAt: '2026-07-23T12:00:00.000Z',
       },
       {
         destinationHash: localDestination,
-        isLocal: true,
         fullDestinationName: 'lxmf.delivery',
         lastAnnouncedAt: '2026-07-24T10:00:00.000Z',
       },

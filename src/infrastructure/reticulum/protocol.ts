@@ -4,7 +4,10 @@ import type { ReticulumLogEntry } from '../../domain/logging';
 import type { NomadPageLoadStage, NomadRequestData } from '../../domain/nomadnet';
 import type { AppPreferences, InterfaceConfig, InterfaceType, RNodeConnectionType } from '../../domain/settings';
 import type { ChatAttachment } from '../../domain/chat';
-import type { ProvisioningNode } from '../../domain/provisioning';
+import type {
+  KnownDestinationRecord,
+  KnownFullDestinationName,
+} from '../../domain/known-destination';
 
 // Python Reticulum's Packet.ENCRYPTED_MDU: the largest plaintext that can be
 // encrypted into one 500-byte Single-destination packet.
@@ -124,20 +127,13 @@ export interface KnownDestinationEntry {
   destinationHash: string;
   publicKey?: string;
   lastAnnouncedAt?: string;
-  isLocal?: boolean;
-  fullDestinationName?: string;
+  fullDestinationName?: KnownFullDestinationName;
 }
 
-export interface AnnouncedPropagationNode {
+export interface LocalDestinationEntry {
   destinationHash: string;
-  enabled: boolean;
-  transferLimitKb: number;
-  syncLimitKb: number;
-  stampCost: number;
-  peeringCost: number;
-  interfaceId?: string;
-  hops?: number;
-  heardAt: string;
+  lastAnnouncedAt?: string;
+  fullDestinationName?: KnownFullDestinationName;
 }
 
 export type ProvisioningRequestStage = 'findingPath' | 'establishingLink' | 'identifying' | 'requesting' | 'receiving';
@@ -184,7 +180,6 @@ export type RuntimeCommand =
       destinationHash: string;
       path: string;
       requestData: NomadRequestData;
-      publicKey?: string;
       freshLink?: boolean;
       identifyBeforeLoad?: boolean;
     }
@@ -198,7 +193,6 @@ export type RuntimeCommand =
       type: 'requestProvisioning';
       requestId: string;
       destinationHash: string;
-      publicKey?: string;
       payload: Uint8Array;
       safeToRetry: boolean;
       responseTimeoutMs?: number;
@@ -321,17 +315,7 @@ export type RuntimeEvent =
   | { type: 'platformInterfaceOpen'; config: InterfaceConfig }
   | { type: 'platformInterfaceClose'; id: string }
   | { type: 'platformInterfaceWrite'; id: string; data: Uint8Array; highPriority?: boolean }
-  | {
-      type: 'nomadAnnounce';
-      destinationHash: string;
-      displayName?: string;
-      publicKey?: string;
-      interfaceId?: string;
-      hops?: number;
-      heardAt: string;
-    }
-  | ({ type: 'propagationNodeAnnounce' } & AnnouncedPropagationNode)
-  | { type: 'propagationNodeSnapshot'; nodes: AnnouncedPropagationNode[] }
+  | ({ type: 'knownDestinationObserved' } & KnownDestinationRecord)
   | {
       type: 'nomadPageLoaded';
       requestId: string;
@@ -350,7 +334,6 @@ export type RuntimeEvent =
     }
   | { type: 'nomadIdentityResult'; requestId: string; ok: boolean; code?: string }
   | { type: 'nomadPageFailed'; requestId: string; code: string }
-  | ({ type: 'managementAnnounce' } & ProvisioningNode)
   | {
       type: 'provisioningProgress';
       requestId: string;
@@ -361,11 +344,12 @@ export type RuntimeEvent =
   | { type: 'provisioningResponse'; requestId: string; data: Uint8Array }
   | { type: 'provisioningFailed'; requestId: string; code: string }
   | { type: 'destinationPathStatuses'; statuses: DestinationPathStatus[] }
-  | { type: 'knownDestinationSnapshot'; destinationHashes: string[] }
   | {
       type: 'pathManagementSnapshot';
       paths: PathTableEntry[];
-      knownDestinations: KnownDestinationEntry[];
+      remoteDestinations: KnownDestinationEntry[];
+      localDestinations: LocalDestinationEntry[];
+      reconcileDirectory?: boolean;
     }
   | {
       type: 'pathManagementOperationResult';
@@ -377,19 +361,6 @@ export type RuntimeEvent =
   | ({ type: 'destinationPathRequestResult'; requestId: string } & DestinationPathRequestResult)
   | { type: 'destinationPathDropResult'; requestId: string; ok: boolean; code?: string }
   | ({ type: 'probeResult'; requestId: string } & ProbeResult)
-  | {
-      type: 'chatAnnounce';
-      identityId: string;
-      destinationHash: string;
-      identityHash: string;
-      publicKey: string;
-      displayName?: string;
-      stampCost?: number;
-      compressionSupported?: boolean;
-      interfaceId?: string;
-      hops?: number;
-      heardAt: string;
-    }
   | {
       type: 'chatMessageReceived';
       identityId: string;

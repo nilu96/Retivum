@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { BrowserKnownDestinationRepository } from './known-destination-repository';
 import { BrowserNomadRepository } from './nomad-repository';
 
 function deleteDatabase(): Promise<void> {
@@ -22,19 +23,19 @@ function createLegacyNomadDatabase(): Promise<void> {
     request.onsuccess = () => {
       const database = request.result;
       const transaction = database.transaction(['nomadAnnounces', 'nomadBookmarks'], 'readwrite');
-      const announces = transaction.objectStore('nomadAnnounces');
-      announces.put({
+      transaction.objectStore('nomadAnnounces').put({
         id: `identity-1:${'a'.repeat(32)}`,
         identityId: 'identity-1',
         destinationHash: 'a'.repeat(32),
         displayName: 'Older name',
         heardAt: '2026-07-16T10:00:00.000Z',
       });
-      announces.put({
+      transaction.objectStore('nomadAnnounces').put({
         id: `identity-2:${'a'.repeat(32)}`,
         identityId: 'identity-2',
         destinationHash: 'a'.repeat(32),
         displayName: 'Newest name',
+        publicKey: 'b'.repeat(128),
         heardAt: '2026-07-16T11:00:00.000Z',
       });
       transaction.objectStore('nomadBookmarks').put({
@@ -57,14 +58,8 @@ function createLegacyNomadDatabase(): Promise<void> {
 describe('BrowserNomadRepository', () => {
   beforeEach(deleteDatabase);
 
-  it('shares announces globally while keeping bookmarks scoped to the active identity', async () => {
+  it('keeps bookmarks scoped to the active identity', async () => {
     const repository = new BrowserNomadRepository();
-    await repository.saveAnnounce({
-      id: '0123456789abcdef0123456789abcdef',
-      destinationHash: '0123456789abcdef0123456789abcdef',
-      displayName: 'Forest Node',
-      heardAt: '2026-07-16T10:00:00.000Z',
-    });
     await repository.saveBookmark({
       id: 'identity-1:destination-1:/start',
       identityId: 'identity-1',
@@ -74,31 +69,26 @@ describe('BrowserNomadRepository', () => {
       createdAt: '2026-07-16T10:01:00.000Z',
     });
 
-    const matching = await repository.load('identity-1');
-    expect(matching.announces).toHaveLength(1);
-    expect(matching.announces[0].displayName).toBe('Forest Node');
-    expect(matching.bookmarks).toHaveLength(1);
-    expect(matching.bookmarks[0].label).toBe('Community node');
-    expect(await repository.load('identity-2')).toEqual({
-      announces: [expect.objectContaining({ displayName: 'Forest Node' })],
-      bookmarks: [],
-    });
+    const matching = await repository.loadBookmarks('identity-1');
+    expect(matching).toHaveLength(1);
+    expect(matching[0].label).toBe('Community node');
+    expect(await repository.loadBookmarks('identity-2')).toEqual([]);
 
-    await repository.deleteBookmark(matching.bookmarks[0].id);
-    expect((await repository.load('identity-1')).bookmarks).toEqual([]);
+    await repository.deleteBookmark(matching[0].id);
+    expect(await repository.loadBookmarks('identity-1')).toEqual([]);
   });
 
-  it('migrates legacy per-identity announces into one newest global destination record', async () => {
+  it('migrates legacy announces into the shared destination directory', async () => {
     await createLegacyNomadDatabase();
-    const directory = await new BrowserNomadRepository().load('identity-2');
 
-    expect(directory.announces).toEqual([{
-      id: 'a'.repeat(32),
+    expect(await new BrowserKnownDestinationRepository().loadAll()).toEqual([{
       destinationHash: 'a'.repeat(32),
+      fullDestinationName: 'nomadnetwork.node',
       displayName: 'Newest name',
-      heardAt: '2026-07-16T11:00:00.000Z',
+      lastAnnouncedAt: '2026-07-16T11:00:00.000Z',
+      metadata: {},
     }]);
-    expect(directory.bookmarks).toEqual([
+    expect(await new BrowserNomadRepository().loadBookmarks('identity-2')).toEqual([
       expect.objectContaining({ id: 'identity-2:bookmark', identityId: 'identity-2' }),
     ]);
   });

@@ -3,6 +3,7 @@
   import { get } from 'svelte/store';
   import { requestedSettingsSection } from '../../app/router';
   import { parseIdentityFile, type IdentitySummary } from '../../domain/identity';
+  import { destinationsByFullName } from '../../domain/known-destination';
   import {
     defaultAppPreferences,
     AUTHORIZED_SERIAL_PORT_ID,
@@ -28,11 +29,11 @@
   import {
     activeIdentity,
     blockedChatDestinations,
-    chatAnnounces,
     chatContacts,
+    destinationPathStatuses,
     identities,
     interfaceStatuses,
-    propagationNodeAnnounces,
+    knownDestinations,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
@@ -72,8 +73,14 @@
   const blockedDestinationEntries = $derived($blockedChatDestinations.map((blocked) => ({
     ...blocked,
     name: $chatContacts.find((contact) => contact.destinationHash === blocked.destinationHash)?.name
-      ?? $chatAnnounces.find((announce) => announce.destinationHash === blocked.destinationHash)?.displayName,
+      ?? $knownDestinations.find((destination) => (
+        destination.destinationHash === blocked.destinationHash
+      ))?.displayName,
   })));
+  const propagationDestinations = $derived(destinationsByFullName(
+    $knownDestinations,
+    'lxmf.propagation',
+  ).filter((destination) => destination.metadata !== undefined));
   const visibleBlockedDestinationEntries = $derived(
     blockedDestinationsExpanded ? blockedDestinationEntries : blockedDestinationEntries.slice(0, 2),
   );
@@ -566,30 +573,34 @@
               ><Icon name="chevron-down" size={17} /></button>
               {#if propagationNodeMenuOpen}
                 <div id="propagation-node-options" class="propagation-node-menu" role="listbox" aria-label={$t('settings.lxmf.propagationNode.list')}>
-                  {#if $propagationNodeAnnounces.length === 0}
+                  {#if propagationDestinations.length === 0}
                     <p>{$t('settings.lxmf.propagationNode.empty')}</p>
                   {:else}
-                    {#each $propagationNodeAnnounces as announced (announced.destinationHash)}
+                    {#each propagationDestinations as announced (announced.destinationHash)}
+                      {@const metadata = announced.metadata!}
+                      {@const hops = $destinationPathStatuses[announced.destinationHash]?.hops}
                       <button
                         type="button"
                         role="option"
                         aria-selected={propagationNodeDraft === announced.destinationHash}
-                        disabled={!announced.enabled}
+                        disabled={!metadata.enabled}
                         onclick={() => selectPropagationNode(announced.destinationHash)}
                       >
                         <code>{announced.destinationHash}</code>
                         <small>
-                          {#if announced.hops === undefined}
+                          {#if hops === undefined}
                             {$t('settings.lxmf.propagationNode.hopsUnknown')}
                           {:else}
-                            {$t(announced.hops === 1 ? 'announce.hops.one' : 'announce.hops.other', { count: announced.hops })}
+                            {$t(hops === 1 ? 'announce.hops.one' : 'announce.hops.other', { count: hops })}
                           {/if}
-                          · {$t('settings.lxmf.propagationNode.stampCost', { cost: announced.stampCost })}
-                          {#if !announced.enabled} · {$t('settings.lxmf.propagationNode.unavailable')}{/if}
+                          · {$t('settings.lxmf.propagationNode.stampCost', { cost: metadata.stampCost })}
+                          {#if !metadata.enabled} · {$t('settings.lxmf.propagationNode.unavailable')}{/if}
                         </small>
-                        <small>{$t('settings.lxmf.propagationNode.lastHeard', {
-                          date: propagationHeardAtFormatter.format(new Date(announced.heardAt)),
-                        })}</small>
+                        {#if announced.lastAnnouncedAt}
+                          <small>{$t('settings.lxmf.propagationNode.lastHeard', {
+                            date: propagationHeardAtFormatter.format(new Date(announced.lastAnnouncedAt)),
+                          })}</small>
+                        {/if}
                       </button>
                     {/each}
                   {/if}

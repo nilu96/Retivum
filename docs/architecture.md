@@ -821,16 +821,16 @@ Use Svelte context for app-scoped service injection and small rune/store modules
 | `interfaces` | Stable UUID plus discriminated type configuration and persisted enabled state; shared across managed identities and empty on first run |
 | `contacts` | `(identityId, destinationHash)` unique key, user-assigned local name, optional separately stored announce label, created/updated times, trust/verification notes |
 | `conversations` | `identityId`, peer/group reference, unread/read cursor, latest message/draft activity, sort metadata; may exist before the first message |
-| `announceObservations` | `identityId`, stable observation ID, destination hash, heard time, receiving interface, normalized chat/delivery metadata, safe label, exact-packet deduplication key |
+| `announceObservations` | `identityId`, stable observation ID, destination hash, heard time, receiving interface, normalized chat/delivery metadata, and exact-packet deduplication key; display names use the shared known-destination directory |
 | `messages` | `identityId`, local ID, optional LXMF ID, normalized content, direction, state, timestamps, and selected delivery method |
 | `attempts` | `identityId`, resolved direct/opportunistic method, resolved propagation-attempt flag/node reference, delivery attempt history, and redacted failure details |
 | `outbox` | `identityId`, durable commands awaiting reconciliation only by that identity's runtime |
 | `drafts` | `identityId`, per-conversation composer content |
-| `nomadAnnounces` | Global latest verified NomadNet node announce per destination, including safe label, public key, receiving interface/hops, and last-heard time |
+| `knownDestinations` | Global remote destination hash, recognized full destination name, last announce time, aspect-local display name, and validated aspect-specific metadata. Public keys and paths remain worker-owned Leviculum state |
 | `nomadBookmarks` | `identityId`, destination/path and an optional editable local user label used for display and search |
 | `nomadHistory` | `identityId`, bounded navigation history |
 | `nomadCache` | `identityId`, bounded raw response, parsed version, validation metadata |
-| `provisioningNodes` | Global management-destination hash/public key, last receiving interface/hops, and last-heard time; independent of the active identity |
+| `provisioningBookmarks` | Global management-destination bookmark label and timestamps; announce facts come from `knownDestinations` |
 | `provisioningSchemas` | Global bounded cache of parsed provisioning schemas keyed by the advertised schema version/hash |
 | `networkRuntimeState` | One encrypted global WASM checkpoint containing known identities, known ratchets, paths, verified raw known-destination announces and their last-heard/use/retain metadata |
 | `identityRuntimeSnapshots` | One encrypted, serialized, versioned WASM/LXMF snapshot envelope plus previous-known-good envelope per identity |
@@ -839,6 +839,42 @@ Use Svelte context for app-scoped service injection and small rune/store modules
 These are logical repositories, not a requirement that every adapter expose identical physical tables. The browser adapter uses a thin IndexedDB library with explicit migrations and transactions. Capacitor mobile uses a maintained SQLite/file-backed plugin. Electron exposes SQLite/file operations through narrow platform-plugin methods and stores data below Electron's per-user application-data location; the renderer never receives a raw database handle or path. If built-in `node:sqlite` is selected, pin Electron 33 or newer and prefer a utility process for non-trivial synchronous `DatabaseSync` work. Main-process database work must be strictly bounded, measured, and unable to stall window/tray lifecycle. A proven compatible plugin is an alternative. Large future blobs may live in app data files referenced transactionally from SQLite.
 
 All adapters implement the same repository behavior, migrations, and failure semantics. Browser tests use an actual IndexedDB implementation; mobile tests use the real plugin; Electron tests exercise packaged database creation and upgrades. Any third-party native Node addon additionally requires Electron ABI rebuild, per-supported-OS/architecture packaging, and ASAR unpack/loading tests; built-in `node:sqlite` does not.
+
+The known-destination directory is the application-wide projection shared by
+Chat, NomadNet, provisioning, Settings, and network tools. Its registered full
+destination names are `lxmf.delivery`, `lxmf.propagation`,
+`nomadnetwork.node`, `rnstransport.probe`, and
+`rnstransport.remote.management`; each registration defines the metadata shape
+that may be persisted for that aspect. Unknown remote destinations use the
+same record with the full name and metadata absent. Display names are scoped to
+the exact destination hash/aspect and are not copied between destinations
+derived from the same identity by default. A non-empty display name from a
+newer observation replaces the previous name, while an omitted or invalid name
+preserves it. Valid supplied metadata is an authoritative complete snapshot and
+replaces the previous aspect metadata, including when the normalized snapshot
+is empty. Observations that omit metadata, and supplied metadata rejected by
+the registered validator, preserve the last valid snapshot. Reclassifying a
+known destination to a different registered aspect discards its previous
+aspect-specific display name and metadata. A verified `nomadnetwork.node`
+name additionally acts as the protocol-provided identity-level
+`sharedDisplayName`. The read-only directory projection joins that name to
+other destinations with the same worker-owned public key. Provisioning may use
+it because `rnstransport.remote.management` does not announce a display name;
+other features continue using their exact destination's display name. The
+shared value is derived rather than persisted twice, and no identity metadata
+entry is created for public keys without a NomadNet name.
+
+At runtime, Leviculum remains authoritative for known identities, public keys,
+raw announces, and paths. Retivum loads its directory and reconciles it once
+against Leviculum's complete remote destination inventory after worker
+startup. Later valid announces update both the worker state and the matching
+directory record. Explicit forget and clear operations update Leviculum first
+and then remove the corresponding Retivum records. Ordinary path loss does not
+remove a directory record. Local inbound destinations are not persisted in
+this directory. Worker snapshots expose remote and local destination
+inventories as separate arrays: reconciliation and remote operations consume
+only the remote array, while tools that need local destinations join the
+worker's local array only into their final presentation.
 
 ### 12.3 Persistence protocol
 

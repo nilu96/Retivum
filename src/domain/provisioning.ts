@@ -96,12 +96,17 @@ export interface ProvisioningInfo {
 export interface ProvisioningNode {
   id: string;
   destinationHash: string;
-  publicKey: string;
-  interfaceId?: string;
-  hops?: number;
-  heardAt: string;
+  lastAnnouncedAt?: string;
   bookmarked?: boolean;
   label?: string;
+}
+
+export interface ProvisioningBookmark {
+  id: string;
+  destinationHash: string;
+  label?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface CachedProvisioningSchema {

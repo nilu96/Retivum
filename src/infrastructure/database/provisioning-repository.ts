@@ -1,50 +1,47 @@
-import type { CachedProvisioningSchema, ProvisioningNode, ProvisioningSchema } from '../../domain/provisioning';
+import type {
+  CachedProvisioningSchema,
+  ProvisioningBookmark,
+  ProvisioningSchema,
+} from '../../domain/provisioning';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
 const maximumCachedSchemas = 5;
 
 export class BrowserProvisioningRepository {
-  async loadNodes(): Promise<ProvisioningNode[]> {
+  async loadBookmarks(): Promise<ProvisioningBookmark[]> {
     const database = await openRetivumDatabase();
     try {
-      const transaction = database.transaction('provisioningNodes', 'readonly');
-      const nodes = await requestResult<ProvisioningNode[]>(transaction.objectStore('provisioningNodes').getAll());
+      const transaction = database.transaction('provisioningBookmarks', 'readonly');
+      const bookmarks = await requestResult<ProvisioningBookmark[]>(
+        transaction.objectStore('provisioningBookmarks').getAll(),
+      );
       await transactionDone(transaction);
-      return nodes.sort((left, right) => right.heardAt.localeCompare(left.heardAt));
+      return bookmarks.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
     } finally {
       database.close();
     }
   }
 
-  async saveNode(node: ProvisioningNode): Promise<void> {
+  async saveBookmark(bookmark: ProvisioningBookmark): Promise<void> {
     const database = await openRetivumDatabase();
     try {
-      const transaction = database.transaction('provisioningNodes', 'readwrite');
-      transaction.objectStore('provisioningNodes').put(node);
+      const transaction = database.transaction('provisioningBookmarks', 'readwrite');
+      transaction.objectStore('provisioningBookmarks').put(bookmark);
       await transactionDone(transaction);
     } finally {
       database.close();
     }
   }
 
-  async setNodeBookmarked(id: string, bookmarked: boolean, label?: string): Promise<ProvisioningNode | undefined> {
+  async deleteBookmark(id: string): Promise<boolean> {
     const database = await openRetivumDatabase();
     try {
-      const transaction = database.transaction('provisioningNodes', 'readwrite');
-      const store = transaction.objectStore('provisioningNodes');
-      const node = await requestResult<ProvisioningNode | undefined>(store.get(id));
-      if (!node) {
-        await transactionDone(transaction);
-        return undefined;
-      }
-      const updated = {
-        ...node,
-        bookmarked,
-        label: bookmarked ? label?.trim() || undefined : undefined,
-      };
-      store.put(updated);
+      const transaction = database.transaction('provisioningBookmarks', 'readwrite');
+      const store = transaction.objectStore('provisioningBookmarks');
+      const existing = await requestResult<ProvisioningBookmark | undefined>(store.get(id));
+      if (existing) store.delete(id);
       await transactionDone(transaction);
-      return updated;
+      return existing !== undefined;
     } finally {
       database.close();
     }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   NOMAD_DEFAULT_PAGE_PATH,
+  decodeNomadNodeAppData,
   encodeNomadRequestData,
   formatNomadAddress,
   nomadLinkFragment,
@@ -9,43 +10,19 @@ import {
   parseNomadAddress,
   resolveNomadLink,
   unpackNomadPageResponse,
-  upsertNomadAnnounce,
 } from './nomadnet';
 
-describe('upsertNomadAnnounce', () => {
-  it('preserves the last known name and public key when a later projection omits them', () => {
-    const previous = {
-      id: 'a'.repeat(32),
-      destinationHash: 'a'.repeat(32),
-      displayName: 'Forest Node',
-      publicKey: 'b'.repeat(128),
-      hops: 2,
-      heardAt: '2026-07-19T08:00:00.000Z',
-    };
-    expect(upsertNomadAnnounce([previous], {
-      id: previous.id,
-      destinationHash: previous.destinationHash,
-      hops: undefined,
-      heardAt: '2026-07-19T09:00:00.000Z',
-    })).toEqual([{
-      ...previous,
-      hops: undefined,
-      heardAt: '2026-07-19T09:00:00.000Z',
-    }]);
+describe('decodeNomadNodeAppData', () => {
+  it('exposes a valid NomadNet node name as exact and identity-shared display name', () => {
+    expect(decodeNomadNodeAppData(new TextEncoder().encode('  Forest\u0000  Node  '))).toEqual({
+      sharedDisplayName: 'Forest Node',
+    });
   });
 
-  it('uses a newly announced name when one is present', () => {
-    const previous = {
-      id: 'a'.repeat(32),
-      destinationHash: 'a'.repeat(32),
-      displayName: 'Old name',
-      heardAt: '2026-07-19T08:00:00.000Z',
-    };
-    expect(upsertNomadAnnounce([previous], {
-      ...previous,
-      displayName: 'New name',
-      heardAt: '2026-07-19T09:00:00.000Z',
-    })[0].displayName).toBe('New name');
+  it('rejects malformed UTF-8 and empty names', () => {
+    expect(decodeNomadNodeAppData(Uint8Array.of(0xff))).toEqual({});
+    expect(decodeNomadNodeAppData(new TextEncoder().encode(' \n\t '))).toEqual({});
+    expect(decodeNomadNodeAppData(undefined)).toEqual({});
   });
 });
 

@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startRouter } from '../../app/router';
 import { defaultAppPreferences } from '../../domain/settings';
 import {
-  chatAnnounces,
   blockedChatDestinations,
   chatContacts,
   chatDirectoryReady,
@@ -18,6 +17,7 @@ import {
   chatInboundTransfers,
   destinationPathStatuses,
   interfaceStatuses,
+  knownDestinations,
   propagationSyncActive,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
@@ -25,6 +25,28 @@ import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/
 import ToastViewport from '../../lib/components/ToastViewport.svelte';
 import { clearToasts } from '../../lib/notifications/toasts';
 import ChatView from './ChatView.svelte';
+
+function setChatDestinations(records: Array<{
+  [key: string]: unknown;
+  destinationHash: string;
+  displayName?: string;
+  heardAt?: string;
+  stampCost?: number;
+  compressionSupported?: boolean;
+}>): void {
+  knownDestinations.set(records.map((record) => ({
+    destinationHash: record.destinationHash,
+    fullDestinationName: 'lxmf.delivery',
+    displayName: record.displayName,
+    lastAnnouncedAt: record.heardAt,
+    metadata: {
+      ...(record.stampCost !== undefined ? { stampCost: record.stampCost } : {}),
+      ...(record.compressionSupported !== undefined
+        ? { compressionSupported: record.compressionSupported }
+        : {}),
+    },
+  })));
+}
 
 describe('ChatView', () => {
   let stopRouter: (() => void) | undefined;
@@ -34,7 +56,7 @@ describe('ChatView', () => {
     delete document.documentElement.dataset.nativeShell;
     window.history.replaceState(null, '', '#/chat');
     stopRouter = startRouter();
-    chatAnnounces.set([]);
+    setChatDestinations([]);
     chatContacts.set([]);
     chatMessages.set([]);
     chatDirectoryReady.set(true);
@@ -216,7 +238,7 @@ describe('ChatView', () => {
 
   it('provides propagation sync beside the contact action in an open mobile conversation', async () => {
     const destinationHash = '7'.repeat(32);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,
@@ -240,7 +262,7 @@ describe('ChatView', () => {
 
   it('shows heard LXMF destinations and received messages', async () => {
     const sourceHash = 'a'.repeat(32);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${sourceHash}`,
       identityId: 'identity',
       destinationHash: sourceHash,
@@ -943,7 +965,7 @@ describe('ChatView', () => {
       createdAt: '2026-07-16T10:00:00.000Z',
       updatedAt: '2026-07-16T10:00:00.000Z',
     }]);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,
@@ -1118,7 +1140,7 @@ describe('ChatView', () => {
       createdAt: '2026-07-16T10:00:00.000Z',
       updatedAt: '2026-07-16T10:00:00.000Z',
     }]);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${announceDestination}`,
       identityId: 'identity',
       destinationHash: announceDestination,
@@ -1330,7 +1352,7 @@ describe('ChatView', () => {
 
     expect(screen.getByRole('heading', { name: 'No chat announces heard' })).toBeInTheDocument();
 
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${sourceHash}`,
       identityId: 'identity',
       destinationHash: sourceHash,
@@ -1360,7 +1382,7 @@ describe('ChatView', () => {
 
   it('prefills a contact name from the selected announce and saves a custom name', async () => {
     const destinationHash = '1'.repeat(32);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,
@@ -1411,7 +1433,7 @@ describe('ChatView', () => {
     const destinationHash = '4'.repeat(32);
     let feedHeight = 400;
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,
@@ -1447,7 +1469,7 @@ describe('ChatView', () => {
 
   it('dismisses the attachment menu outside and exposes one shared file chooser', async () => {
     const destinationHash = '4'.repeat(32);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,
@@ -1470,7 +1492,7 @@ describe('ChatView', () => {
 
   it('allows an attachment-only message to be selected and sent', async () => {
     const destinationHash = '4'.repeat(32);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,
@@ -1515,7 +1537,7 @@ describe('ChatView', () => {
 
   it('uses the image icon for every image in the draft', async () => {
     const destinationHash = '4'.repeat(32);
-    chatAnnounces.set([{
+    setChatDestinations([{
       id: `identity:${destinationHash}`,
       identityId: 'identity',
       destinationHash,

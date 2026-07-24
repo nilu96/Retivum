@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 import { BrowserChatRepository } from './chat-repository';
+import { BrowserKnownDestinationRepository } from './known-destination-repository';
 
 function deleteDatabase(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -15,18 +16,9 @@ function deleteDatabase(): Promise<void> {
 describe('BrowserChatRepository', () => {
   beforeEach(deleteDatabase);
 
-  it('persists announces and messages for only the selected identity', async () => {
+  it('persists contacts and messages for only the selected identity', async () => {
     const repository = new BrowserChatRepository();
     const destinationHash = 'a'.repeat(32);
-    await repository.saveAnnounce({
-      id: `identity-1:${destinationHash}`,
-      identityId: 'identity-1',
-      destinationHash,
-      identityHash: 'b'.repeat(32),
-      publicKey: 'c'.repeat(128),
-      displayName: 'Alice',
-      heardAt: '2026-07-16T10:00:00.000Z',
-    });
     await repository.saveMessage({
       id: 'identity-1:message-1',
       identityId: 'identity-1',
@@ -57,13 +49,11 @@ describe('BrowserChatRepository', () => {
     });
 
     const matching = await repository.load('identity-1');
-    expect(matching.announces).toHaveLength(1);
     expect(matching.contacts).toHaveLength(1);
     expect(matching.contacts[0].name).toBe('Local Alice');
     expect(matching.messages).toHaveLength(1);
     expect(matching.messages[0].content).toBe('Stored once');
     expect(await repository.load('identity-2')).toEqual({
-      announces: [],
       contacts: [],
       messages: [],
       blockedDestinations: [],
@@ -73,6 +63,44 @@ describe('BrowserChatRepository', () => {
     expect((await repository.load('identity-1')).contacts).toEqual([]);
     await repository.deleteMessage('identity-1:message-1');
     expect((await repository.load('identity-1')).messages).toEqual([]);
+  });
+
+  it('migrates announce names into the global destination directory', async () => {
+    const request = indexedDB.open('retivum', 10);
+    await new Promise<void>((resolve, reject) => {
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore('chatAnnounces', { keyPath: 'id' });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('chatAnnounces', 'readwrite');
+        transaction.objectStore('chatAnnounces').put({
+          id: `identity-1:${'e'.repeat(32)}`,
+          identityId: 'identity-1',
+          destinationHash: 'e'.repeat(32),
+          identityHash: 'f'.repeat(32),
+          publicKey: 'a'.repeat(128),
+          displayName: 'Shared peer',
+          heardAt: '2026-07-16T10:00:00.000Z',
+        });
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+
+    const directory = await new BrowserChatRepository().load('identity-1');
+    expect(directory.messages).toEqual([]);
+    expect(await new BrowserKnownDestinationRepository().loadAll()).toEqual([{
+      destinationHash: 'e'.repeat(32),
+      fullDestinationName: 'lxmf.delivery',
+      displayName: 'Shared peer',
+      lastAnnouncedAt: '2026-07-16T10:00:00.000Z',
+      metadata: {},
+    }]);
   });
 
   it('persists blocked destinations per identity', async () => {

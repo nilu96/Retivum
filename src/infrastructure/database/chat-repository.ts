@@ -1,9 +1,8 @@
-import type { ChatAnnounce, ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
+import type { ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
 import { messageTime } from '../../domain/chat';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
 export interface ChatDirectory {
-  announces: ChatAnnounce[];
   contacts: ChatContact[];
   messages: ChatMessage[];
   blockedDestinations: ChatBlockedDestination[];
@@ -14,20 +13,16 @@ export class BrowserChatRepository {
     const database = await openRetivumDatabase();
     try {
       const transaction = database.transaction(
-        ['chatAnnounces', 'chatContacts', 'chatMessages', 'chatBlockedDestinations'],
+        ['chatContacts', 'chatMessages', 'chatBlockedDestinations'],
         'readonly',
       );
-      const [announces, contacts, messages, blockedDestinations] = await Promise.all([
-        requestResult<ChatAnnounce[]>(transaction.objectStore('chatAnnounces').getAll()),
+      const [contacts, messages, blockedDestinations] = await Promise.all([
         requestResult<ChatContact[]>(transaction.objectStore('chatContacts').getAll()),
         requestResult<ChatMessage[]>(transaction.objectStore('chatMessages').getAll()),
         requestResult<ChatBlockedDestination[]>(transaction.objectStore('chatBlockedDestinations').getAll()),
         transactionDone(transaction),
       ]);
       return {
-        announces: announces
-          .filter((item) => item.identityId === identityId)
-          .sort((left, right) => Date.parse(right.heardAt) - Date.parse(left.heardAt)),
         contacts: contacts
           .filter((item) => item.identityId === identityId)
           .sort((left, right) => left.name.localeCompare(right.name)),
@@ -41,10 +36,6 @@ export class BrowserChatRepository {
     } finally {
       database.close();
     }
-  }
-
-  async saveAnnounce(announce: ChatAnnounce): Promise<void> {
-    await this.put('chatAnnounces', announce);
   }
 
   async saveMessage(message: ChatMessage): Promise<void> {
@@ -138,8 +129,8 @@ export class BrowserChatRepository {
   }
 
   private async put(
-    storeName: 'chatAnnounces' | 'chatContacts' | 'chatMessages',
-    value: ChatAnnounce | ChatContact | ChatMessage,
+    storeName: 'chatContacts' | 'chatMessages',
+    value: ChatContact | ChatMessage,
   ): Promise<void> {
     const database = await openRetivumDatabase();
     try {

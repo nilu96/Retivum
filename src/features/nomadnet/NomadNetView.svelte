@@ -12,11 +12,12 @@
     type NomadPageLoadUpdate,
     type NomadRequestData,
   } from '../../domain/nomadnet';
+  import { destinationsByFullName } from '../../domain/known-destination';
   import {
     activeIdentity,
     destinationPathStatuses,
     interfaceStatuses,
-    nomadAnnounces,
+    knownDestinations,
     nomadBookmarks,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
@@ -101,8 +102,17 @@
     )
     : undefined);
   const normalizedQuery = $derived(query.trim().toLowerCase());
+  const nomadDestinations = $derived(destinationsByFullName(
+    $knownDestinations,
+    'nomadnetwork.node',
+  ));
   const filteredAnnounces = $derived(
-    $nomadAnnounces.filter((item) => item.destinationHash.includes(normalizedQuery)),
+    nomadDestinations.filter((item) => (
+      item.lastAnnouncedAt
+      && [item.displayName, item.destinationHash].some(
+        (value) => value?.toLowerCase().includes(normalizedQuery),
+      )
+    )),
   );
   const filteredBookmarks = $derived(
     $nomadBookmarks.filter((item) =>
@@ -575,16 +585,15 @@
 
   function bookmarkCurrent(): void {
     if (!parsedAddress || currentBookmark) return;
-    const announcedName = $nomadAnnounces.find((item) => (
-      item.destinationHash === parsedAddress.destinationHash
-    ))?.displayName;
     bookmarkEditor = {
       address: formatNomadAddress(
         parsedAddress.destinationHash,
         parsedAddress.path,
         parsedAddress.requestData,
       ),
-      currentName: announcedName ?? '',
+      currentName: $knownDestinations.find((destination) => (
+        destination.destinationHash === parsedAddress.destinationHash
+      ))?.displayName ?? '',
       currentIdentifyBeforeLoad: false,
     };
   }
@@ -717,7 +726,7 @@
       <div id="nomad-destination-results" class="nomad-directory-content" role="tabpanel">
         {#if scope === 'announces' && filteredAnnounces.length}
           <div class="nomad-destination-list">
-            {#each filteredAnnounces as announce (announce.id)}
+            {#each filteredAnnounces as announce (announce.destinationHash)}
               {@const current = isCurrentDestination(announce.destinationHash)}
               {@const actionTarget = destinationActionTarget(
                 announce.destinationHash,
@@ -740,7 +749,9 @@
                 <span>
                   {#if announce.displayName}<strong>{announce.displayName}</strong>{/if}
                   <code>{announce.destinationHash}</code>
-                  <small>{$t('nomadnet.announce.heardAt', { date: heardAtFormatter.format(new Date(announce.heardAt)) })}</small>
+                  <small>{$t('nomadnet.announce.heardAt', {
+                    date: heardAtFormatter.format(new Date(announce.lastAnnouncedAt!)),
+                  })}</small>
                 </span>
                 <span class="directory-row-route">
                   <PathStatus status={$destinationPathStatuses[announce.destinationHash]} />

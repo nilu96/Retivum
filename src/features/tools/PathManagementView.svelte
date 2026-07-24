@@ -3,16 +3,17 @@
   import { navigateBack } from '../../app/router';
   import { normalizeDestinationHash } from '../../domain/settings';
   import { createDateFormatter, locale, t } from '../../i18n';
-  import type { KnownDestinationEntry } from '../../infrastructure/reticulum/protocol';
+  import type {
+    KnownDestinationEntry,
+    LocalDestinationEntry,
+  } from '../../infrastructure/reticulum/protocol';
   import {
-    chatAnnounces,
     chatContacts,
     destinationPathStatuses,
     knownDestinations,
-    nomadAnnounces,
+    localDestinationInventory,
     pathTableEntries,
-    propagationNodeAnnounces,
-    provisioningNodes,
+    remoteDestinationInventory,
     reticulumRuntime,
     runtimeStatus,
     statusDetails,
@@ -61,7 +62,8 @@
     guardOpeningRelease: boolean;
   }
   interface DisplayedKnownDestination {
-    entry: KnownDestinationEntry;
+    entry: KnownDestinationEntry | LocalDestinationEntry;
+    local: boolean;
     identityGroupStart: boolean;
     identityGroupCount: number;
     identityPublicKey?: string;
@@ -92,39 +94,44 @@
   const numberFormatter = $derived(new Intl.NumberFormat($locale, { maximumFractionDigits: 1 }));
   const normalizedDestination = $derived(normalizeDestinationHash(destinationHash));
   const normalizedDestinationFilter = $derived(destinationFilter.trim().toLowerCase());
+  const inventoryDestinationHashes = $derived(new Set([
+    ...$remoteDestinationInventory.map((entry) => entry.destinationHash),
+    ...$localDestinationInventory.map((entry) => entry.destinationHash),
+  ]));
+  const presentationDestinations = $derived<KnownDestinationEntry[]>([
+    ...$remoteDestinationInventory,
+    ...$localDestinationInventory,
+    ...$pathTableEntries
+      .filter((path) => !inventoryDestinationHashes.has(path.destinationHash))
+      .map((path) => ({ destinationHash: path.destinationHash })),
+  ]);
+  const destinationPresentations = $derived(knownDestinationPresentations(
+    presentationDestinations,
+    $knownDestinations,
+    $pathTableEntries,
+    $chatContacts,
+  ));
   const filteredPathEntries = $derived([...$pathTableEntries].filter((entry) => (
-    (!normalizedDestinationFilter || entry.destinationHash.includes(normalizedDestinationFilter))
+    destinationMatchesFilter(entry.destinationHash)
     && (!interfaceFilter || entry.interfaceId === interfaceFilter)
     && (hopFilter === undefined || entry.hops === hopFilter)
   )).sort((left, right) => (
     (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
     || left.destinationHash.localeCompare(right.destinationHash)
   )));
-  const presentationDestinations = $derived<KnownDestinationEntry[]>([
-    ...$knownDestinations,
-    ...$pathTableEntries
-      .filter((path) => !$knownDestinations.some((entry) => entry.destinationHash === path.destinationHash))
-      .map((path) => ({ destinationHash: path.destinationHash })),
-  ]);
-  const destinationPresentations = $derived(knownDestinationPresentations(
-    presentationDestinations,
-    $pathTableEntries,
-    $chatAnnounces,
-    $chatContacts,
-    $nomadAnnounces,
-    $propagationNodeAnnounces,
-    $provisioningNodes,
-  ));
-  const filteredKnownDestinations = $derived($knownDestinations.filter((entry) => (
-    (!normalizedDestinationFilter || entry.destinationHash.includes(normalizedDestinationFilter))
+  const filteredRemoteDestinations = $derived(sortKnownDestinationsByLastAnnounce(
+    $remoteDestinationInventory.filter((entry) => (
+    destinationMatchesFilter(entry.destinationHash)
     && (!destinationTypeFilter
       || destinationPresentations.get(entry.destinationHash)?.application === destinationTypeFilter)
-  )));
-  const filteredRemoteDestinations = $derived(sortKnownDestinationsByLastAnnounce(
-    filteredKnownDestinations.filter((entry) => !entry.isLocal),
+    )),
   ));
   const filteredLocalDestinations = $derived(sortKnownDestinationsByLastAnnounce(
-    filteredKnownDestinations.filter((entry) => entry.isLocal),
+    $localDestinationInventory.filter((entry) => (
+      destinationMatchesFilter(entry.destinationHash)
+      && (!destinationTypeFilter
+        || destinationPresentations.get(entry.destinationHash)?.application === destinationTypeFilter)
+    )),
   ));
   const groupedRemoteDestinations = $derived(groupKnownDestinationsByIdentity(
     filteredRemoteDestinations,
@@ -135,6 +142,7 @@
       const grouped = groupDestinationsByIdentity && group.entries.length > 1;
       return group.entries.map((entry, index) => ({
         entry,
+        local: false,
         identityGroupStart: grouped && index === 0,
         identityGroupCount: group.entries.length,
         identityPublicKey: group.publicKey,
@@ -150,6 +158,7 @@
     }),
     ...filteredLocalDestinations.map((entry, index) => ({
       entry,
+      local: true,
       identityGroupStart: false,
       identityGroupCount: 1,
       identityPublicKey: undefined,
@@ -157,7 +166,7 @@
       localSectionStart: index === 0,
     })),
   ]);
-  const forgettableDestinationCount = $derived($knownDestinations.filter((entry) => !entry.isLocal).length);
+  const forgettableDestinationCount = $derived($remoteDestinationInventory.length);
   const filtersActive = $derived(Boolean(
     normalizedDestinationFilter
     || (activeTab === 'paths' && (interfaceFilter || hopFilter !== undefined))
@@ -318,6 +327,14 @@
     return $statusDetails?.interfaces.find((item) => item.id === interfaceId)?.name ?? interfaceId;
   }
 
+  function destinationMatchesFilter(destinationHash: string): boolean {
+    if (!normalizedDestinationFilter) return true;
+    const presentation = destinationPresentations.get(destinationHash);
+    return destinationHash.includes(normalizedDestinationFilter)
+      || presentation?.displayName?.toLowerCase().includes(normalizedDestinationFilter) === true
+      || presentation?.localContactName?.toLowerCase().includes(normalizedDestinationFilter) === true;
+  }
+
   function interfaceType(interfaceId: string | undefined): string {
     const type = $statusDetails?.interfaces.find((item) => item.id === interfaceId)?.type;
     return type ? $t(`status.interface.type.${type}`) : $t('pathManagement.entry.unknown');
@@ -364,7 +381,7 @@
     entryActions = undefined;
     showDestinationProbeActivity({
       destinationHash: destination,
-      displayName: presentation?.localContactName ?? presentation?.announcedName,
+      displayName: presentation.displayName,
       fullDestinationName: presentation.fullDestinationName,
       timeoutMs: probeTimeoutMsForPath($destinationPathStatuses[destination]),
     });
@@ -380,7 +397,8 @@
   function hasCounterpart(destination: string, targetTab: ManagementTab): boolean {
     return targetTab === 'paths'
       ? $pathTableEntries.some((entry) => entry.destinationHash === destination)
-      : $knownDestinations.some((entry) => entry.destinationHash === destination);
+      : $remoteDestinationInventory.some((entry) => entry.destinationHash === destination)
+        || $localDestinationInventory.some((entry) => entry.destinationHash === destination);
   }
 
   async function navigateToCounterpart(destination: string, targetTab: ManagementTab): Promise<void> {
@@ -470,6 +488,7 @@
     <div class="path-management-toolbar">
       <div class="scope-tabs path-management-tabs" role="tablist" aria-label={$t('pathManagement.tabs.label')}>
         <button
+          id="path-management-paths-tab"
           type="button"
           role="tab"
           aria-selected={activeTab === 'paths'}
@@ -481,6 +500,7 @@
           <span>{$pathTableEntries.length}</span>
         </button>
         <button
+          id="path-management-destinations-tab"
           type="button"
           role="tab"
           aria-selected={activeTab === 'destinations'}
@@ -599,7 +619,11 @@
     </div>
 
     {#if activeTab === 'paths'}
-      <div id="path-management-paths" role="tabpanel">
+      <div
+        id="path-management-paths"
+        role="tabpanel"
+        aria-labelledby="path-management-paths-tab"
+      >
         {#if $pathTableEntries.length === 0}
           <EmptyState
             icon="route-off"
@@ -619,8 +643,7 @@
               <PathManagementEntry
                 destinationHash={entry.destinationHash}
                 highlighted={highlightedDestination === entry.destinationHash}
-                localContactName={presentation?.localContactName}
-                announcedName={presentation?.announcedName}
+                displayName={presentation?.displayName}
                 onopen={(x, y, method) => openEntryActions(
                   entry.destinationHash,
                   'destinations',
@@ -638,15 +661,20 @@
                   </span>
                 {/snippet}
                 {#snippet details()}
-                  {#if entry.nextHop}
-                    <p class="probe-result-route path-management-route">
+                  <p class="probe-result-route path-management-route">
+                    {#if entry.nextHop}
                       {$t('probe.history.route', {
                         via: entry.nextHop,
                         name: interfaceName(entry.interfaceId),
                         type: interfaceType(entry.interfaceId),
                       })}
-                    </p>
-                  {/if}
+                    {:else}
+                      {$t('pathManagement.entry.directRoute', {
+                        name: interfaceName(entry.interfaceId),
+                        type: interfaceType(entry.interfaceId),
+                      })}
+                    {/if}
+                  </p>
                   <dl>
                     <div>
                       <dt>{$t('pathManagement.entry.lastAnnounce')}</dt>
@@ -690,8 +718,12 @@
         {/if}
       </div>
     {:else}
-      <div id="path-management-destinations" role="tabpanel">
-        {#if $knownDestinations.length === 0}
+      <div
+        id="path-management-destinations"
+        role="tabpanel"
+        aria-labelledby="path-management-destinations-tab"
+      >
+        {#if $remoteDestinationInventory.length === 0 && $localDestinationInventory.length === 0}
           <EmptyState
             icon="announce"
             title={$t('pathManagement.destinations.empty.title')}
@@ -723,10 +755,9 @@
                 destinationHash={entry.destinationHash}
                 highlighted={highlightedDestination === entry.destinationHash}
                 identityGroupPosition={row.identityGroupPosition}
-                local={entry.isLocal}
-                localContactName={presentation?.localContactName}
-                announcedName={presentation?.announcedName}
-                showActions={!entry.isLocal}
+                local={row.local}
+                displayName={presentation?.displayName}
+                showActions={!row.local}
                 onopen={(x, y, method) => openEntryActions(
                   entry.destinationHash,
                   'paths',
@@ -739,7 +770,7 @@
                   <span class="path-management-entry-badge destination-type">
                     {applicationLabel(presentation?.application ?? 'unknown')}
                   </span>
-                  {#if !entry.isLocal}
+                  {#if !row.local}
                     {#if presentation?.path}
                       <span class="path-management-entry-badge hop-count">
                         {$t(presentation.path.hops === 1 ? 'announce.hops.one' : 'announce.hops.other', {
@@ -754,11 +785,13 @@
                   {/if}
                 {/snippet}
                 {#snippet details()}
-                  {#if !entry.isLocal}
+                  {#if !row.local}
                     <dl class="known-destination-public-key">
                       <div class="path-management-public-key">
                         <dt>{$t('pathManagement.entry.publicKey')}</dt>
-                        <dd><code>{entry.publicKey ?? $t('pathManagement.entry.unknown')}</code></dd>
+                        <dd><code>{'publicKey' in entry
+                          ? entry.publicKey ?? $t('pathManagement.entry.unknown')
+                          : $t('pathManagement.entry.unknown')}</code></dd>
                       </div>
                     </dl>
                   {/if}
@@ -826,7 +859,7 @@
                   </dl>
                 {/snippet}
                 {#snippet actions()}
-                  {#if !entry.isLocal}
+                  {#if !row.local}
                     <button
                       class="button secondary compact"
                       type="button"
@@ -860,39 +893,40 @@
 </div>
 
 {#if entryActions}
+  {@const actions = entryActions}
   <ContextMenu
-    x={entryActions.x}
-    y={entryActions.y}
-    autofocus={entryActions.autofocus}
-    guardOpeningRelease={entryActions.guardOpeningRelease}
+    x={actions.x}
+    y={actions.y}
+    autofocus={actions.autofocus}
+    guardOpeningRelease={actions.guardOpeningRelease}
     label={$t('pathManagement.contextMenu.label')}
     closeLabel={$t('pathManagement.contextMenu.close')}
     onclose={() => { entryActions = undefined; }}
   >
     <button
       role="menuitem"
-      onclick={() => { void copyDestinationHash(entryActions!.destinationHash); }}
+      onclick={() => { void copyDestinationHash(actions.destinationHash); }}
     >
       <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
     </button>
     <button
       role="menuitem"
-      disabled={!hasCounterpart(entryActions.destinationHash, entryActions.counterpartTab)}
+      disabled={!hasCounterpart(actions.destinationHash, actions.counterpartTab)}
       onclick={showEntryCounterpart}
     >
       <Icon
-        name={entryActions.counterpartTab === 'paths' ? 'route' : 'announce'}
+        name={actions.counterpartTab === 'paths' ? 'route' : 'announce'}
         size={17}
       />
-      {$t(entryActions.counterpartTab === 'paths'
+      {$t(actions.counterpartTab === 'paths'
         ? 'pathManagement.contextMenu.showPath'
         : 'pathManagement.contextMenu.showDestination')}
     </button>
     <button
       role="menuitem"
-      disabled={!destinationPresentations.get(entryActions.destinationHash)?.fullDestinationName
-        || $pendingProbeDestinationHashes.has(entryActions.destinationHash)}
-      onclick={() => { probeDestination(entryActions!.destinationHash); }}
+      disabled={!destinationPresentations.get(actions.destinationHash)?.fullDestinationName
+        || $pendingProbeDestinationHashes.has(actions.destinationHash)}
+      onclick={() => { probeDestination(actions.destinationHash); }}
     >
       <Icon name="probe" size={17} />{$t('chat.destination.actions.probe')}
     </button>

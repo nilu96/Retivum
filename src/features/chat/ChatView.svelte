@@ -17,6 +17,7 @@
     type ChatMessage,
     type ChatMessageStatus,
   } from '../../domain/chat';
+  import { destinationsByFullName } from '../../domain/known-destination';
   import {
     chatAttachmentBytes,
     formatChatByteSize,
@@ -26,7 +27,6 @@
   } from '../../domain/chat-attachments';
   import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
-    chatAnnounces,
     blockedChatDestinations,
     chatContacts,
     chatMessages,
@@ -40,6 +40,7 @@
     chatInboundTransfers,
     destinationPathStatuses,
     interfaceStatuses,
+    knownDestinations,
     propagationSyncActive,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
@@ -82,7 +83,11 @@
   };
 
   function preferredChatScope(): ChatScope {
-    if (chatConversationSummaries($chatMessages, $chatAnnounces, $chatContacts).length) return 'chats';
+    if (chatConversationSummaries(
+      $chatMessages,
+      destinationsByFullName($knownDestinations, 'lxmf.delivery'),
+      $chatContacts,
+    ).length) return 'chats';
     return $chatContacts.length ? 'contacts' : 'announces';
   }
 
@@ -182,7 +187,8 @@
     unverified: 'chat.message.verification.unverified',
   };
 
-  const conversations = $derived(chatConversationSummaries($chatMessages, $chatAnnounces, $chatContacts));
+  const lxmfDestinations = $derived(destinationsByFullName($knownDestinations, 'lxmf.delivery'));
+  const conversations = $derived(chatConversationSummaries($chatMessages, lxmfDestinations, $chatContacts));
   const scope = $derived<ChatScope>(selectedScope ?? 'announces');
   const blockedDestinationHashes = $derived(new Set($blockedChatDestinations.map((item) => item.destinationHash)));
   const normalizedQuery = $derived(query.trim().toLowerCase());
@@ -193,18 +199,23 @@
     conversation.latestMessage.content,
     ...(conversation.latestMessage.attachments?.map((attachment) => attachment.name) ?? []),
   ].some((value) => value?.toLowerCase().includes(normalizedQuery))));
-  const visibleAnnounces = $derived($chatAnnounces.filter((announce) => [
-    announce.displayName,
-    announce.destinationHash,
-  ].some((value) => value?.toLowerCase().includes(normalizedQuery))));
+  const visibleAnnounces = $derived(lxmfDestinations.filter((destination) => (
+    destination.lastAnnouncedAt
+    && [
+      destination.displayName,
+      destination.destinationHash,
+    ].some((value) => value?.toLowerCase().includes(normalizedQuery))
+  )));
   const visibleContacts = $derived($chatContacts.filter((contact) => [
     contact.name,
     contact.destinationHash,
   ].some((value) => value.toLowerCase().includes(normalizedQuery))));
-  const selectedAnnounce = $derived($chatAnnounces.find((announce) => announce.destinationHash === selectedDestination));
+  const selectedAnnounce = $derived(lxmfDestinations.find(
+    (destination) => destination.destinationHash === selectedDestination,
+  ));
   const selectedContact = $derived($chatContacts.find((contact) => contact.destinationHash === selectedDestination));
-  const contactEditorAnnounce = $derived($chatAnnounces.find(
-    (announce) => announce.destinationHash === contactEditorDestination,
+  const contactEditorAnnounce = $derived(lxmfDestinations.find(
+    (destination) => destination.destinationHash === contactEditorDestination,
   ));
   const contactEditorContact = $derived($chatContacts.find(
     (contact) => contact.destinationHash === contactEditorDestination,
@@ -1159,7 +1170,7 @@
         </div>
       {:else if scope === 'announces' && visibleAnnounces.length > 0}
         <div class="chat-directory-list">
-          {#each visibleAnnounces as announce (announce.id)}
+          {#each visibleAnnounces as announce (announce.destinationHash)}
             {@const actionTarget = destinationActionTarget(
               announce.destinationHash,
               announce.displayName ?? shortHash(announce.destinationHash),
@@ -1176,7 +1187,7 @@
               <span class="chat-peer-avatar announce">{(announce.displayName ?? announce.destinationHash).slice(0, 1).toUpperCase()}</span>
               <span class="chat-row-copy">
                 <strong>{announce.displayName ?? shortHash(announce.destinationHash)}</strong>
-                <span>{$t('chat.announce.heardAt', { date: displayDate(announce.heardAt) })}</span>
+                <span>{$t('chat.announce.heardAt', { date: displayDate(announce.lastAnnouncedAt!) })}</span>
                 <code>{announce.destinationHash}</code>
               </span>
               <span class="directory-row-route">

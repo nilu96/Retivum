@@ -1,10 +1,9 @@
 import { derived, writable } from 'svelte/store';
-import type { ChatAnnounce, ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
+import type { ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
 
 // Keep the UI-facing directory state independent from the runtime controller.
 // This prevents Vite/Svelte hot replacement of runtime.ts from leaving a
 // preserved ChatView subscribed to obsolete store instances.
-export const chatAnnounces = writable<ChatAnnounce[]>([]);
 export const chatContacts = writable<ChatContact[]>([]);
 export const chatMessages = writable<ChatMessage[]>([]);
 export const chatDirectoryReady = writable(false);

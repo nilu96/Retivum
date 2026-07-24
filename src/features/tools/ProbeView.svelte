@@ -5,7 +5,7 @@
   import { createDateFormatter, locale, t } from '../../i18n';
   import { maximumProbePayloadBytes } from '../../infrastructure/reticulum/protocol';
   import {
-    knownDestinationHashes,
+    remoteDestinationInventory,
     reticulumRuntime,
     runtimeStatus,
   } from '../../infrastructure/reticulum/runtime';
@@ -64,9 +64,10 @@
   const hasCompletedHistory = $derived($probeHistory.some((entry) => entry.status === 'completed'));
   const visibleDestinations = $derived.by(() => {
     const query = destinationHash.trim().toLowerCase();
+    const hashes = $remoteDestinationInventory.map((entry) => entry.destinationHash);
     return query
-      ? $knownDestinationHashes.filter((hash) => hash.includes(query))
-      : $knownDestinationHashes;
+      ? hashes.filter((hash) => hash.includes(query))
+      : hashes;
   });
 
   onMount(() => {

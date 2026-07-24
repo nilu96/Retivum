@@ -7,8 +7,9 @@ import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/
 import type { ProbeResult } from '../../infrastructure/reticulum/protocol';
 import {
   destinationPathStatuses,
-  nomadAnnounces,
-  provisioningNodes,
+  knownDestinations,
+  provisioningBookmarks,
+  remoteDestinationInventory,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import ToastViewport from '../../lib/components/ToastViewport.svelte';
@@ -18,15 +19,30 @@ import ProvisioningView from './ProvisioningView.svelte';
 const announcedNode: ProvisioningNode = {
   id: '1'.repeat(32),
   destinationHash: '1'.repeat(32),
-  publicKey: '2'.repeat(128),
-  heardAt: '2026-07-20T10:00:00.000Z',
+  lastAnnouncedAt: '2026-07-20T10:00:00.000Z',
 };
+
+function setProvisioningNodes(nodes: ProvisioningNode[]): void {
+  knownDestinations.set(nodes.map((node) => ({
+    destinationHash: node.destinationHash,
+    fullDestinationName: 'rnstransport.remote.management',
+    lastAnnouncedAt: node.lastAnnouncedAt,
+    metadata: {},
+  })));
+  provisioningBookmarks.set(nodes.filter((node) => node.bookmarked).map((node) => ({
+    id: node.id,
+    destinationHash: node.destinationHash,
+    label: node.label,
+    createdAt: node.lastAnnouncedAt ?? '2026-07-20T10:00:00.000Z',
+    updatedAt: node.lastAnnouncedAt ?? '2026-07-20T10:00:00.000Z',
+  })));
+}
 
 describe('ProvisioningView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    provisioningNodes.set([]);
-    nomadAnnounces.set([]);
+    setProvisioningNodes([]);
+    remoteDestinationInventory.set([]);
     destinationPathStatuses.set({});
     clearProbeHistory();
     clearToasts();
@@ -49,7 +65,6 @@ describe('ProvisioningView', () => {
     expect(requestedNode).toMatchObject({
       id: 'a'.repeat(32),
       destinationHash: 'a'.repeat(32),
-      publicKey: '',
     });
     expect(screen.queryByRole('heading', { name: 'No management destinations heard' })).not.toBeInTheDocument();
     expect(screen.getByText('Finding a path to the device…')).toBeInTheDocument();
@@ -70,7 +85,7 @@ describe('ProvisioningView', () => {
   });
 
   it('soft reloads through the existing client without closing its link', async () => {
-    provisioningNodes.set([announcedNode]);
+    setProvisioningNodes([announcedNode]);
     const load = vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
       info: { needsReboot: false },
       schema: { namespaces: [] },
@@ -93,10 +108,9 @@ describe('ProvisioningView', () => {
     const otherNode: ProvisioningNode = {
       id: '3'.repeat(32),
       destinationHash: '3'.repeat(32),
-      publicKey: '4'.repeat(128),
-      heardAt: '2026-07-20T10:01:00.000Z',
+      lastAnnouncedAt: '2026-07-20T10:01:00.000Z',
     };
-    provisioningNodes.set([announcedNode, otherNode]);
+    setProvisioningNodes([announcedNode, otherNode]);
     const load = vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(() => new Promise(() => {}));
     const close = vi.spyOn(reticulumRuntime, 'cancelProvisioning').mockImplementation(() => undefined);
     render(ProvisioningView);
@@ -114,12 +128,12 @@ describe('ProvisioningView', () => {
   });
 
   it('keeps the active session open if its announcement leaves the directory', async () => {
-    provisioningNodes.set([announcedNode]);
+    setProvisioningNodes([announcedNode]);
     vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(() => new Promise(() => {}));
     render(ProvisioningView);
 
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
-    provisioningNodes.set([]);
+    setProvisioningNodes([]);
 
     await waitFor(() => expect(screen.getByText('Finding a path to the device…')).toBeInTheDocument());
     expect(screen.getByPlaceholderText('Management destination hash')).toBeDisabled();
@@ -127,7 +141,7 @@ describe('ProvisioningView', () => {
   });
 
   it('disconnects a loaded destination and restores the unlocked overview', async () => {
-    provisioningNodes.set([announcedNode]);
+    setProvisioningNodes([announcedNode]);
     vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
       info: { needsReboot: false },
       schema: { namespaces: [] },
@@ -156,14 +170,13 @@ describe('ProvisioningView', () => {
   });
 
   it('uses the shared naming editor from a destination context menu', async () => {
-    provisioningNodes.set([announcedNode]);
-    nomadAnnounces.set([{
-      id: announcedNode.destinationHash,
-      destinationHash: announcedNode.destinationHash,
-      publicKey: announcedNode.publicKey,
-      displayName: 'Management node',
-      heardAt: announcedNode.heardAt,
-    }]);
+    setProvisioningNodes([announcedNode]);
+    knownDestinations.update((records) => records.map((record) => ({
+      ...record,
+      displayName: record.destinationHash === announcedNode.destinationHash
+        ? 'Management node'
+        : record.displayName,
+    })));
     const bookmark = vi.spyOn(reticulumRuntime, 'saveProvisioningNodeBookmark').mockResolvedValue(true);
     render(ProvisioningView);
 
@@ -186,15 +199,86 @@ describe('ProvisioningView', () => {
     ));
   });
 
-  it('probes a management destination with its name and provisioning aspect', async () => {
-    provisioningNodes.set([announcedNode]);
-    nomadAnnounces.set([{
-      id: announcedNode.destinationHash,
-      destinationHash: announcedNode.destinationHash,
-      publicKey: announcedNode.publicKey,
-      displayName: 'Workshop router',
-      heardAt: announcedNode.heardAt,
+  it('uses a NomadNet name shared by the management destination identity', () => {
+    const nomadDestinationHash = '9'.repeat(32);
+    const publicKey = '8'.repeat(128);
+    setProvisioningNodes([announcedNode]);
+    knownDestinations.update((records) => [...records, {
+      destinationHash: nomadDestinationHash,
+      fullDestinationName: 'nomadnetwork.node',
+      displayName: 'Forest Node',
+      lastAnnouncedAt: '2026-07-20T10:01:00.000Z',
+      metadata: {},
     }]);
+    remoteDestinationInventory.set([{
+      destinationHash: announcedNode.destinationHash,
+      publicKey,
+      fullDestinationName: 'rnstransport.remote.management',
+    }, {
+      destinationHash: nomadDestinationHash,
+      publicKey,
+      fullDestinationName: 'nomadnetwork.node',
+    }]);
+
+    render(ProvisioningView);
+
+    expect(screen.getByRole('button', { name: /Forest Node/ })).toBeInTheDocument();
+  });
+
+  it('prefers bookmark name, then exact display name, then shared identity name', async () => {
+    const nomadDestinationHash = '7'.repeat(32);
+    const publicKey = '6'.repeat(128);
+    setProvisioningNodes([announcedNode]);
+    knownDestinations.update((records) => [
+      ...records.map((record) => (
+        record.destinationHash === announcedNode.destinationHash
+          ? { ...record, displayName: 'Management Name' }
+          : record
+      )),
+      {
+        destinationHash: nomadDestinationHash,
+        fullDestinationName: 'nomadnetwork.node',
+        displayName: 'Shared Name',
+        metadata: {},
+      },
+    ]);
+    remoteDestinationInventory.set([{
+      destinationHash: announcedNode.destinationHash,
+      publicKey,
+      fullDestinationName: 'rnstransport.remote.management',
+    }, {
+      destinationHash: nomadDestinationHash,
+      publicKey,
+      fullDestinationName: 'nomadnetwork.node',
+    }]);
+    render(ProvisioningView);
+
+    expect(screen.getByRole('button', { name: /Management Name/ })).toBeInTheDocument();
+    expect(screen.queryByText('Shared Name')).not.toBeInTheDocument();
+
+    provisioningBookmarks.set([{
+      id: announcedNode.id,
+      destinationHash: announcedNode.destinationHash,
+      label: 'Bookmark Name',
+      createdAt: '2026-07-20T10:00:00.000Z',
+      updatedAt: '2026-07-20T10:00:00.000Z',
+    }]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Bookmark Name/ })).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Management Name')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shared Name')).not.toBeInTheDocument();
+  });
+
+  it('probes a management destination with its name and provisioning aspect', async () => {
+    setProvisioningNodes([announcedNode]);
+    knownDestinations.update((records) => records.map((record) => ({
+      ...record,
+      displayName: record.destinationHash === announcedNode.destinationHash
+        ? 'Workshop router'
+        : record.displayName,
+    })));
     destinationPathStatuses.set({
       [announcedNode.destinationHash]: {
         destinationHash: announcedNode.destinationHash,
@@ -248,7 +332,7 @@ describe('ProvisioningView', () => {
 
   it('replaces the bookmarked destination overview with the loaded configuration', async () => {
     const bookmarkedNode = { ...announcedNode, bookmarked: true, label: 'Workshop router' };
-    provisioningNodes.set([bookmarkedNode]);
+    setProvisioningNodes([bookmarkedNode]);
     vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
       info: { needsReboot: false },
       schema: { namespaces: [] },
@@ -271,7 +355,7 @@ describe('ProvisioningView', () => {
   });
 
   it('leaves the title empty for an unnamed management bookmark', () => {
-    provisioningNodes.set([{ ...announcedNode, bookmarked: true }]);
+    setProvisioningNodes([{ ...announcedNode, bookmarked: true }]);
     render(ProvisioningView);
 
     const row = screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) });
@@ -280,7 +364,7 @@ describe('ProvisioningView', () => {
   });
 
   it('leaves the title empty for an unnamed management announce', () => {
-    provisioningNodes.set([announcedNode]);
+    setProvisioningNodes([announcedNode]);
     render(ProvisioningView);
 
     const row = screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) });

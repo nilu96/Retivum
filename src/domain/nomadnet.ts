@@ -1,35 +1,3 @@
-export interface NomadAnnounce {
-  id: string;
-  destinationHash: string;
-  displayName?: string;
-  publicKey?: string;
-  interfaceId?: string;
-  hops?: number;
-  heardAt: string;
-}
-
-/**
- * Updates an announced NomadNet destination without discarding metadata that
- * was omitted from a later announce projection. Path responses and other
- * rebroadcasts can carry enough information to refresh reachability while not
- * yielding a decodable node name in the UI projection.
- */
-export function upsertNomadAnnounce(
-  items: NomadAnnounce[],
-  announce: NomadAnnounce,
-): NomadAnnounce[] {
-  const existing = items.find((item) => item.id === announce.id);
-  const merged = existing
-    ? {
-        ...announce,
-        displayName: announce.displayName ?? existing.displayName,
-        publicKey: announce.publicKey ?? existing.publicKey,
-      }
-    : announce;
-  return [merged, ...items.filter((item) => item.id !== announce.id)]
-    .sort((left, right) => Date.parse(right.heardAt) - Date.parse(left.heardAt));
-}
-
 export const NOMAD_DEFAULT_PAGE_PATH = '/page/index.mu';
 
 const NOMAD_PAGE_LOAD_BASE_DEADLINE_MS = 90_000;
@@ -87,6 +55,33 @@ export interface NomadBookmark {
   identifyBeforeLoad?: boolean;
   label?: string;
   createdAt: string;
+}
+
+export interface NomadNodeAnnounceData {
+  /**
+   * NomadNet's node name describes the announcing identity, so it is also the
+   * protocol-provided candidate for identity-level presentation in features
+   * whose own destination aspect does not announce a name.
+   */
+  sharedDisplayName?: string;
+}
+
+export function decodeNomadNodeAppData(
+  appData: Uint8Array | undefined,
+): NomadNodeAnnounceData {
+  if (!appData?.byteLength) return {};
+  try {
+    const name = new TextDecoder('utf-8', { fatal: true })
+      .decode(appData)
+      .normalize('NFKC')
+      .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 128);
+    return name ? { sharedDisplayName: name } : {};
+  } catch {
+    return {};
+  }
 }
 
 export function formatNomadAddress(

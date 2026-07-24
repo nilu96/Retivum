@@ -1,8 +1,12 @@
-import type { ChatAnnounce, ChatContact } from '../../domain/chat';
-import type { NomadAnnounce } from '../../domain/nomadnet';
-import type { ProvisioningNode } from '../../domain/provisioning';
+import type { ChatContact } from '../../domain/chat';
+import {
+  isKnownFullDestinationName,
+  knownDestinationDirectory,
+  type KnownDestinationRecord,
+  type LxmfDeliveryDestinationMetadata,
+  type LxmfPropagationDestinationMetadata,
+} from '../../domain/known-destination';
 import type {
-  AnnouncedPropagationNode,
   KnownDestinationEntry,
   PathTableEntry,
 } from '../../infrastructure/reticulum/protocol';
@@ -25,14 +29,11 @@ export type ProbeableDestinationName =
 export interface KnownDestinationPresentation {
   application: KnownDestinationApplication;
   fullDestinationName?: ProbeableDestinationName;
-  announcedName?: string;
+  displayName?: string;
   localContactName?: string;
   path?: PathTableEntry;
-  lxmf?: Pick<ChatAnnounce, 'stampCost' | 'compressionSupported'>;
-  propagation?: Pick<
-    AnnouncedPropagationNode,
-    'enabled' | 'transferLimitKb' | 'syncLimitKb' | 'stampCost' | 'peeringCost'
-  >;
+  lxmf?: LxmfDeliveryDestinationMetadata;
+  propagation?: LxmfPropagationDestinationMetadata;
 }
 
 export interface KnownDestinationGroup {
@@ -72,41 +73,24 @@ export function groupKnownDestinationsByIdentity(
 
 export function knownDestinationPresentations(
   entries: KnownDestinationEntry[],
+  records: readonly KnownDestinationRecord[],
   paths: PathTableEntry[],
-  chatAnnounces: ChatAnnounce[],
   chatContacts: ChatContact[],
-  nomadAnnounces: NomadAnnounce[],
-  propagationNodes: AnnouncedPropagationNode[],
-  managementNodes: ProvisioningNode[],
 ): Map<string, KnownDestinationPresentation> {
+  const recordsByHash = new Map(records.map((record) => [record.destinationHash, record]));
   const pathsByHash = new Map(paths.map((entry) => [entry.destinationHash, entry]));
-  const chatByHash = new Map(chatAnnounces.map((entry) => [entry.destinationHash, entry]));
   const contactsByHash = new Map(chatContacts.map((entry) => [entry.destinationHash, entry]));
-  const nomadByHash = new Map(nomadAnnounces.map((entry) => [entry.destinationHash, entry]));
-  const propagationByHash = new Map(propagationNodes.map((entry) => [entry.destinationHash, entry]));
-  const managementHashes = new Set(managementNodes.map((entry) => entry.destinationHash));
+  const directoryByHash = new Map(knownDestinationDirectory(records, entries)
+    .map((entry) => [entry.destinationHash, entry]));
 
   return new Map(entries.map((entry) => {
     const destinationHash = entry.destinationHash;
-    const chat = chatByHash.get(destinationHash);
-    const nomad = nomadByHash.get(destinationHash);
-    const propagation = propagationByHash.get(destinationHash);
-    const fullDestinationName: ProbeableDestinationName | undefined =
-      entry.fullDestinationName === 'lxmf.delivery'
-      || entry.fullDestinationName === 'lxmf.propagation'
-      || entry.fullDestinationName === 'nomadnetwork.node'
-      || entry.fullDestinationName === 'rnstransport.remote.management'
-      || entry.fullDestinationName === 'rnstransport.probe'
+    const record = recordsByHash.get(destinationHash);
+    const fullDestinationName = isKnownFullDestinationName(record?.fullDestinationName)
+      ? record.fullDestinationName
+      : isKnownFullDestinationName(entry.fullDestinationName)
         ? entry.fullDestinationName
-        : chat
-          ? 'lxmf.delivery'
-          : propagation
-            ? 'lxmf.propagation'
-            : nomad
-              ? 'nomadnetwork.node'
-              : managementHashes.has(destinationHash)
-                ? 'rnstransport.remote.management'
-                : undefined;
+        : undefined;
     const application: KnownDestinationApplication = fullDestinationName === 'lxmf.delivery'
       ? 'lxmfDelivery'
       : fullDestinationName === 'lxmf.propagation'
@@ -122,23 +106,14 @@ export function knownDestinationPresentations(
       application,
       ...(fullDestinationName ? { fullDestinationName } : {}),
       localContactName: contactsByHash.get(destinationHash)?.name,
-      announcedName: chat?.displayName ?? nomad?.displayName,
+      displayName: record?.displayName ?? directoryByHash.get(destinationHash)?.sharedDisplayName,
       path: pathsByHash.get(destinationHash),
-      ...(chat ? {
-        lxmf: {
-          stampCost: chat.stampCost,
-          compressionSupported: chat.compressionSupported,
-        },
-      } : {}),
-      ...(propagation ? {
-        propagation: {
-          enabled: propagation.enabled,
-          transferLimitKb: propagation.transferLimitKb,
-          syncLimitKb: propagation.syncLimitKb,
-          stampCost: propagation.stampCost,
-          peeringCost: propagation.peeringCost,
-        },
-      } : {}),
+      ...(fullDestinationName === 'lxmf.delivery' && record?.metadata
+        ? { lxmf: record.metadata as LxmfDeliveryDestinationMetadata }
+        : {}),
+      ...(fullDestinationName === 'lxmf.propagation' && record?.metadata
+        ? { propagation: record.metadata as LxmfPropagationDestinationMetadata }
+        : {}),
     }];
   }));
 }

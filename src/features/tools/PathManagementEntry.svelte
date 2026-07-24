@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
-  import { t } from '../../i18n';
   import {
     contextMenuTrigger,
     type ContextMenuOpenMethod,
@@ -11,8 +10,7 @@
     highlighted,
     identityGroupPosition,
     local = false,
-    localContactName,
-    announcedName,
+    displayName,
     showActions = true,
     onopen,
     badges,
@@ -23,8 +21,7 @@
     highlighted: boolean;
     identityGroupPosition?: 'first' | 'middle' | 'last';
     local?: boolean;
-    localContactName?: string;
-    announcedName?: string;
+    displayName?: string;
     showActions?: boolean;
     onopen: (x: number, y: number, method: ContextMenuOpenMethod) => void;
     badges: Snippet;
@@ -42,7 +39,7 @@
   class:identity-group-entry-first={identityGroupPosition === 'first'}
   class:identity-group-entry-last={identityGroupPosition === 'last'}
   class:local-destination-entry={local}
-  class:has-entry-name={Boolean(localContactName || announcedName)}
+  class:has-entry-name={Boolean(displayName)}
   class:has-actions={actions !== undefined && showActions}
 >
   <div
@@ -53,19 +50,9 @@
   >
     <header class="path-management-entry-header">
       <div class="path-management-entry-identity">
-        {#if localContactName}
+        {#if displayName}
           <div class="path-management-entry-name">
-            <strong>{localContactName}</strong>
-            <span class="known-destination-local-badge">
-              {$t('pathManagement.destination.localContact')}
-            </span>
-          </div>
-          {#if announcedName}
-            <small>{$t('pathManagement.destination.announcedAs', { name: announcedName })}</small>
-          {/if}
-        {:else if announcedName}
-          <div class="path-management-entry-name">
-            <strong>{announcedName}</strong>
+            <strong>{displayName}</strong>
           </div>
         {/if}
         <code class="path-management-hash">{destinationHash}</code>

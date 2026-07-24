@@ -384,7 +384,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .scope-tabs button.active { background: var(--surface-3); color: var(--text); box-shadow: 0 1px 5px rgba(0,0,0,.12); }
 .search-field { display: flex; align-items: center; gap: 9px; margin: 13px 18px 0; padding-inline: 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-subtle); background: var(--surface-2); }
 .search-field:focus-within { border-color: var(--accent); }
-.search-field input { width: 100%; min-height: 40px; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
+.search-field > svg { flex: none; }
+.search-field input { width: 100%; min-width: 0; min-height: 40px; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
 .search-field input::placeholder { color: var(--text-subtle); }
 .overview-content { display: grid; min-height: 0; place-items: center; padding: 28px 20px; overflow: auto; }
 .overview-content.has-items { align-content: start; place-items: stretch; padding: 13px 12px; }
@@ -957,12 +958,10 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .path-management-entry-list > li.has-actions .path-management-entry-identity { padding-inline-end: 0; }
 .path-management-entry-name { display: flex; min-width: 0; min-height: 24px; flex-wrap: wrap; align-items: center; gap: 7px; }
 .path-management-entry-name strong { min-width: 0; color: var(--text); font-size: .86rem; overflow-wrap: anywhere; }
-.path-management-entry-identity small { color: var(--text-subtle); font-size: .67rem; overflow-wrap: anywhere; }
 .path-management-entry-badges { position: absolute; inset-block-start: 10px; inset-inline-end: 17px; display: flex; max-width: calc(100% - 34px); flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .path-management-entry-list > li.has-entry-name .path-management-entry-badges { inset-block-start: 15px; }
-.path-management-entry-badge, .known-destination-local-badge { display: inline-flex; min-height: 24px; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border: 0; border-radius: 999px; color: var(--text-muted); background: var(--surface-3); font-size: .65rem; font-weight: 720; line-height: 1; white-space: nowrap; }
+.path-management-entry-badge { display: inline-flex; min-height: 24px; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border: 0; border-radius: 999px; color: var(--text-muted); background: var(--surface-3); font-size: .65rem; font-weight: 720; line-height: 1; white-space: nowrap; }
 .path-management-entry-badge.hop-count { color: var(--accent-strong); background: var(--accent-soft); }
-.known-destination-local-badge { color: var(--accent-strong); background: var(--accent-soft); }
 .path-management-hash { min-width: 0; color: var(--text); font-size: .76rem; font-weight: 700; overflow-wrap: normal; white-space: nowrap; }
 .path-management-entry-details { container: path-entry-details / inline-size; display: grid; min-width: 0; gap: 11px; }
 .probe-result-route.path-management-route { margin: 0; }
@@ -1086,6 +1085,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .path-management-filters-toggle svg { flex: none; transition: rotate .15s ease; }
   .path-management-filters-toggle[aria-expanded='true'] svg { rotate: 180deg; }
   .path-management-filters { display: none; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .path-management-filters.destination-only { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .path-management-filters.expanded { display: grid; }
   .path-management-search { grid-column: 1 / -1; }
   .path-management-filters.destination-only .path-management-filter-control { grid-column: 1 / -1; }

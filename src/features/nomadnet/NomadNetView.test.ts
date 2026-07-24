@@ -5,17 +5,32 @@ import {
   activeIdentity,
   destinationPathStatuses,
   interfaceStatuses,
-  nomadAnnounces,
+  knownDestinations,
   nomadBookmarks,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import NomadNetView from './NomadNetView.svelte';
 
+function setNomadDestinations(records: Array<{
+  [key: string]: unknown;
+  destinationHash: string;
+  displayName?: string;
+  heardAt?: string;
+}>): void {
+  knownDestinations.set(records.map((record) => ({
+    destinationHash: record.destinationHash,
+    fullDestinationName: 'nomadnetwork.node',
+    displayName: record.displayName,
+    lastAnnouncedAt: record.heardAt,
+    metadata: {},
+  })));
+}
+
 describe('NomadNetView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     activeIdentity.set(undefined);
-    nomadAnnounces.set([]);
+    setNomadDestinations([]);
     nomadBookmarks.set([]);
     destinationPathStatuses.set({});
     interfaceStatuses.set({});
@@ -75,7 +90,7 @@ describe('NomadNetView', () => {
   it('collapses the mobile directory immediately after choosing an announce or bookmark', async () => {
     const announcedHash = '1'.repeat(32);
     const bookmarkedHash = '2'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: announcedHash,
       destinationHash: announcedHash,
       displayName: 'Announced node',
@@ -136,7 +151,7 @@ describe('NomadNetView', () => {
 
   it('uses the exact bookmark identification policy when opening an announced page', async () => {
     const destinationHash = '3'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       displayName: 'Identified node',
@@ -169,7 +184,7 @@ describe('NomadNetView', () => {
 
   it('keeps an announced destination active on its subpages while bookmarks remain path-specific', async () => {
     const destinationHash = '4'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       displayName: 'Subpage node',
@@ -212,12 +227,15 @@ describe('NomadNetView', () => {
       identityHashHex: 'b'.repeat(32),
       publicKeyHex: 'c'.repeat(128),
     });
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       displayName: 'Forest Node',
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
+    knownDestinations.update((records) => records.map((record) => (
+      record.destinationHash === destinationHash ? { ...record, displayName: 'Forest Node' } : record
+    )));
     destinationPathStatuses.set({
       [destinationHash]: { destinationHash, hasPath: true, hops: 1 },
     });
@@ -253,7 +271,7 @@ describe('NomadNetView', () => {
       identityHashHex: 'c'.repeat(32),
       publicKeyHex: 'd'.repeat(128),
     });
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       displayName: 'Fresh node',
@@ -296,7 +314,7 @@ describe('NomadNetView', () => {
   it('keeps a long-press destination menu open when the opening touch is released', async () => {
     vi.useFakeTimers();
     const destinationHash = 'e'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       displayName: 'Touch node',
@@ -349,7 +367,7 @@ describe('NomadNetView', () => {
 
   it('focuses the first destination action when the menu is opened from the keyboard', async () => {
     const destinationHash = 'f'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       displayName: 'Keyboard node',
@@ -452,10 +470,9 @@ describe('NomadNetView', () => {
       identityHashHex: 'b'.repeat(32),
       publicKeyHex: 'c'.repeat(128),
     });
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       displayName: 'Community Node',
       hops: 1,
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -494,10 +511,9 @@ describe('NomadNetView', () => {
 
   it('shows detailed loading stages, transfer progress, and the final error', async () => {
     const destinationHash = '5'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     let reportUpdate: ((update: NomadPageLoadUpdate) => void) | undefined;
@@ -528,7 +544,7 @@ describe('NomadNetView', () => {
   it('retries the failed page even after the address input is changed', async () => {
     const previousHash = '1'.repeat(32);
     const failedHash = '2'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: previousHash,
       destinationHash: previousHash,
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -583,7 +599,7 @@ describe('NomadNetView', () => {
     const previousHash = '3'.repeat(32);
     const failedHash = '4'.repeat(32);
     const unrelatedHash = '5'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: previousHash,
       destinationHash: previousHash,
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -638,7 +654,7 @@ describe('NomadNetView', () => {
     const firstHash = '6'.repeat(32);
     const secondHash = '7'.repeat(32);
     const unknownHash = '8'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: firstHash,
       destinationHash: firstHash,
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -691,10 +707,9 @@ describe('NomadNetView', () => {
       identityHashHex: 'b'.repeat(32),
       publicKeyHex: 'c'.repeat(128),
     });
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
@@ -725,10 +740,9 @@ describe('NomadNetView', () => {
 
   it('replaces an in-progress load with an atomic hard reload', async () => {
     const destinationHash = '6'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     let finishFirstLoad: ((page: NomadPage | undefined) => void) | undefined;
@@ -758,10 +772,9 @@ describe('NomadNetView', () => {
 
   it('cancels an in-progress navigation and restores the last rendered page', async () => {
     const destinationHash = '4'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     let finishDetails: ((page: NomadPage | undefined) => void) | undefined;
@@ -796,10 +809,9 @@ describe('NomadNetView', () => {
 
   it('shows a cancel action in the Home slot while loading and restores the cached page', async () => {
     const destinationHash = '3'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     let finishSlowPage: ((page: NomadPage | undefined) => void) | undefined;
@@ -836,7 +848,7 @@ describe('NomadNetView', () => {
 
   it('cancels an initial page load from the Home slot', async () => {
     const destinationHash = '5'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       heardAt: '2026-07-16T10:00:00.000Z',
@@ -861,10 +873,9 @@ describe('NomadNetView', () => {
 
   it('shares the active identity over the NomadNet link and reloads the page', async () => {
     const destinationHash = '7'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
-      publicKey: 'd'.repeat(128),
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
@@ -918,7 +929,7 @@ describe('NomadNetView', () => {
 
   it('restores cached history when navigating back and returns to the announced home page', async () => {
     const destinationHash = '8'.repeat(32);
-    nomadAnnounces.set([{
+    setNomadDestinations([{
       id: destinationHash,
       destinationHash,
       heardAt: '2026-07-16T10:00:00.000Z',

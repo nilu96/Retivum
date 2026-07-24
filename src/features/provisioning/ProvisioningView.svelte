@@ -9,11 +9,21 @@
     ProvisioningValue,
   } from '../../domain/provisioning';
   import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/provisioning';
+  import {
+    destinationsByFullName,
+    knownDestinationDirectory,
+  } from '../../domain/known-destination';
   import { normalizeDestinationHash } from '../../domain/settings';
   import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
   import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
   import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
-  import { destinationPathStatuses, nomadAnnounces, provisioningNodes, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
+  import {
+    destinationPathStatuses,
+    knownDestinations,
+    remoteDestinationInventory,
+    provisioningBookmarks,
+    reticulumRuntime,
+  } from '../../infrastructure/reticulum/runtime';
   import { createDateFormatter, locale, t } from '../../i18n';
   import {
     contextMenuTrigger,
@@ -52,15 +62,48 @@
   }>();
   let loadSequence = 0;
   const heardAtFormatter = $derived(createDateFormatter($locale));
+  const destinationDirectory = $derived(knownDestinationDirectory(
+    $knownDestinations,
+    $remoteDestinationInventory,
+  ));
+  const managementDestinations = $derived(destinationsByFullName(
+    destinationDirectory,
+    'rnstransport.remote.management',
+  ));
+  const provisioningNodes = $derived.by(() => {
+    const destinationsByHash = new Map(managementDestinations.map((destination) => [
+      destination.destinationHash,
+      destination,
+    ]));
+    const bookmarked = $provisioningBookmarks.map((bookmark): ProvisioningNode => ({
+      id: bookmark.id,
+      destinationHash: bookmark.destinationHash,
+      lastAnnouncedAt: destinationsByHash.get(bookmark.destinationHash)?.lastAnnouncedAt,
+      bookmarked: true,
+      label: bookmark.label,
+    }));
+    const bookmarkedHashes = new Set(bookmarked.map((node) => node.destinationHash));
+    const announced = managementDestinations
+      .filter((destination) => !bookmarkedHashes.has(destination.destinationHash))
+      .map((destination): ProvisioningNode => ({
+        id: destination.destinationHash,
+        destinationHash: destination.destinationHash,
+        lastAnnouncedAt: destination.lastAnnouncedAt,
+      }));
+    return [...bookmarked, ...announced].sort((left, right) => (
+      (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
+      || left.destinationHash.localeCompare(right.destinationHash)
+    ));
+  });
   const selectedNode = $derived(
-    $provisioningNodes.find((node) => node.id === selectedNodeId)
+    provisioningNodes.find((node) => node.id === selectedNodeId)
       ?? (selectedNodeSnapshot?.id === selectedNodeId ? selectedNodeSnapshot : undefined),
   );
-  const destinationNode = $derived($provisioningNodes.find((node) => (
+  const destinationNode = $derived(provisioningNodes.find((node) => (
     node.destinationHash === managementDestination.trim().toLowerCase()
   )));
   const normalizedQuery = $derived(query.trim().toLowerCase());
-  const filteredNodes = $derived($provisioningNodes.filter((node) => [
+  const filteredNodes = $derived(provisioningNodes.filter((node) => [
     nodeName(node),
     node.label,
     node.destinationHash,
@@ -75,14 +118,16 @@
   });
 
   function nodeName(node: ProvisioningNode): string {
-    if (node.bookmarked) return node.label ?? '';
     return node.label
       ?? announcedNodeName(node)
       ?? '';
   }
 
   function announcedNodeName(node: ProvisioningNode): string | undefined {
-    return $nomadAnnounces.find((announce) => announce.publicKey === node.publicKey)?.displayName;
+    const destination = managementDestinations.find((destination) => (
+      destination.destinationHash === node.destinationHash
+    ));
+    return destination?.displayName ?? destination?.sharedDisplayName;
   }
 
   async function selectNode(node: ProvisioningNode): Promise<void> {
@@ -114,8 +159,6 @@
     const node = destinationNode ?? {
       id: normalizedDestination,
       destinationHash: normalizedDestination,
-      publicKey: '',
-      heardAt: new Date().toISOString(),
     };
     void selectNode(node);
   }
@@ -476,7 +519,9 @@
                   <span>
                     {#if node.label}<strong>{node.label}</strong>{/if}
                     <code>{node.destinationHash}</code>
-                    <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.heardAt)) })}</small>
+                    {#if node.lastAnnouncedAt}
+                      <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.lastAnnouncedAt)) })}</small>
+                    {/if}
                   </span>
                   <span class="directory-row-route">
                     <PathStatus status={$destinationPathStatuses[node.destinationHash]} />
@@ -506,7 +551,9 @@
                   <span>
                     {#if nodeName(node)}<strong>{nodeName(node)}</strong>{/if}
                     <code>{node.destinationHash}</code>
-                    <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.heardAt)) })}</small>
+                    {#if node.lastAnnouncedAt}
+                      <small>{$t('provisioning.node.lastHeard', { date: heardAtFormatter.format(new Date(node.lastAnnouncedAt)) })}</small>
+                    {/if}
                   </span>
                   <span class="directory-row-route">
                     <PathStatus status={$destinationPathStatuses[node.destinationHash]} />

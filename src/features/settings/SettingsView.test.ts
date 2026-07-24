@@ -3,14 +3,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import packageJson from '../../../package.json';
 import {
   blockedChatDestinations,
-  chatAnnounces,
   chatContacts,
+  knownDestinations,
 } from '../../infrastructure/reticulum/runtime';
 import SettingsView from './SettingsView.svelte';
 
 describe('SettingsView blocked destinations', () => {
   beforeEach(() => {
-    chatAnnounces.set([]);
+    knownDestinations.set([]);
     chatContacts.set([]);
     blockedChatDestinations.set(Array.from({ length: 4 }, (_, index) => {
       const destinationHash = String(index + 1).repeat(32);

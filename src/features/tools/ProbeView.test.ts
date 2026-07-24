@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  knownDestinationHashes,
+  remoteDestinationInventory,
   reticulumRuntime,
   runtimeStatus,
 } from '../../infrastructure/reticulum/runtime';
@@ -16,7 +16,10 @@ describe('ProbeView', () => {
     clearProbeHistory();
     clearToasts();
     runtimeStatus.set('online');
-    knownDestinationHashes.set(['1'.repeat(32), '2'.repeat(32)]);
+    remoteDestinationInventory.set([
+      { destinationHash: '1'.repeat(32) },
+      { destinationHash: '2'.repeat(32) },
+    ]);
   });
 
   it('shows the configured defaults and every known destination', async () => {

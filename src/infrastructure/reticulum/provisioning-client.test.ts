@@ -6,8 +6,7 @@ import { ProvisioningRequestFailure, reticulumRuntime } from './runtime';
 const node: ProvisioningNode = {
   id: 'management-node',
   destinationHash: '01'.repeat(16),
-  publicKey: '02'.repeat(64),
-  heardAt: '2026-07-20T10:00:00.000Z',
+  lastAnnouncedAt: '2026-07-20T10:00:00.000Z',
 };
 
 describe('ProvisioningClient reboot behavior', () => {

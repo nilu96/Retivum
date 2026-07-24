@@ -1,6 +1,5 @@
 import { get, writable } from 'svelte/store';
 import type {
-  ChatAnnounce,
   ChatBlockedDestination,
   ChatContact,
   ChatAttachment,
@@ -17,7 +16,6 @@ import {
   isUnconfirmedPacket,
   messageTime,
   shouldUsePropagationFallback,
-  upsertChatAnnounce,
   upsertChatBlockedDestination,
   upsertChatContact,
   upsertChatMessage,
@@ -28,16 +26,20 @@ import type {
   PersistedIdentityRecord,
 } from '../../domain/identity';
 import { identitySummary, upsertIdentitySummary as upsertSummaryInList } from '../../domain/identity';
+import {
+  reconcileKnownDestinations,
+  upsertKnownDestination,
+  type KnownDestinationRecord,
+} from '../../domain/known-destination';
 import type { ReticulumLogEntry } from '../../domain/logging';
 import type {
-  NomadAnnounce,
   NomadBookmark,
   NomadPage,
   NomadPageLoadUpdate,
   NomadRequestData,
 } from '../../domain/nomadnet';
-import type { ProvisioningNode } from '../../domain/provisioning';
-import { formatNomadAddress, nomadRequestPath, parseNomadAddress, upsertNomadAnnounce } from '../../domain/nomadnet';
+import type { ProvisioningBookmark, ProvisioningNode } from '../../domain/provisioning';
+import { formatNomadAddress, nomadRequestPath, parseNomadAddress } from '../../domain/nomadnet';
 import {
   defaultAppPreferences,
   normalizeDestinationHash,
@@ -51,6 +53,7 @@ import { BrowserNomadRepository } from '../database/nomad-repository';
 import { BrowserSettingsRepository } from '../database/settings-repository';
 import { BrowserNetworkStateRepository } from '../database/network-state-repository';
 import { BrowserProvisioningRepository } from '../database/provisioning-repository';
+import { BrowserKnownDestinationRepository } from '../database/known-destination-repository';
 import { runtimeInterfaceConfigurations } from '../platform/interface-capabilities';
 import { PlatformInterfaceHost } from '../platform/interface-host';
 import type {
@@ -58,8 +61,8 @@ import type {
   DestinationPathRequestResult,
   DestinationPathStatus,
   KnownDestinationEntry,
+  LocalDestinationEntry,
   InterfaceRuntimeState,
-  AnnouncedPropagationNode,
   LxmfPropagationSyncResult,
   PathTableEntry,
   ProbeResult,
@@ -73,7 +76,6 @@ import type {
 import { maximumProbePayloadBytes } from './protocol';
 import { pathRequestTimeoutMs } from './timeouts';
 import {
-  chatAnnounces,
   chatDirectoryReady,
   blockedChatDestinations,
   chatContacts,
@@ -86,7 +88,6 @@ import {
 
 export {
   blockedChatDestinations,
-  chatAnnounces,
   chatContacts,
   chatDirectoryReady,
   chatMessages,
@@ -104,14 +105,13 @@ export const identities = writable<IdentitySummary[]>([]);
 export const deliveryDestinationHash = writable<string | undefined>();
 export const runtimeErrorCode = writable<string | undefined>();
 export const propagationSyncActive = writable(false);
-export const nomadAnnounces = writable<NomadAnnounce[]>([]);
 export const nomadBookmarks = writable<NomadBookmark[]>([]);
-export const propagationNodeAnnounces = writable<AnnouncedPropagationNode[]>([]);
-export const provisioningNodes = writable<ProvisioningNode[]>([]);
+export const provisioningBookmarks = writable<ProvisioningBookmark[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
-export const knownDestinationHashes = writable<string[]>([]);
 export const pathTableEntries = writable<PathTableEntry[]>([]);
-export const knownDestinations = writable<KnownDestinationEntry[]>([]);
+export const remoteDestinationInventory = writable<KnownDestinationEntry[]>([]);
+export const localDestinationInventory = writable<LocalDestinationEntry[]>([]);
+export const knownDestinations = writable<KnownDestinationRecord[]>([]);
 export const reticulumLogs = writable<ReticulumLogEntry[]>([]);
 
 export function clearReticulumLogs(): void {
@@ -151,6 +151,8 @@ class ReticulumRuntimeController {
   private readonly settingsRepository = new BrowserSettingsRepository();
   private readonly networkStateRepository = new BrowserNetworkStateRepository();
   private readonly provisioningRepository = new BrowserProvisioningRepository();
+  private readonly knownDestinationRepository = new BrowserKnownDestinationRepository();
+  private destinationDirectoryReconciled = false;
   private readonly platformInterfaceHost = new PlatformInterfaceHost(
     (command) => this.post(command),
     (code, details) => appendLocalLog('debug', 'runtime', code, details),
@@ -199,20 +201,30 @@ class ReticulumRuntimeController {
     chatDirectoryReady.set(false);
 
     try {
-      const [wrappingKey, identity, storedIdentities, settings, networkState, storedProvisioningNodes] = await Promise.all([
+      const [
+        wrappingKey,
+        identity,
+        storedIdentities,
+        settings,
+        networkState,
+        storedProvisioningBookmarks,
+        storedKnownDestinations,
+      ] = await Promise.all([
         this.identityRepository.getOrCreateWrappingKey(),
         this.identityRepository.loadActiveIdentity(),
         this.identityRepository.loadAll(),
         this.settingsRepository.load(),
         this.networkStateRepository.load(),
-        this.provisioningRepository.loadNodes(),
+        this.provisioningRepository.loadBookmarks(),
+        this.knownDestinationRepository.loadAll(),
       ]);
       identities.set(storedIdentities.map(identitySummary));
       appPreferences.set(structuredClone(settings.preferences));
       interfaceConfigurations.set(structuredClone(settings.interfaces));
       this.scheduleMessageRetention();
-      propagationNodeAnnounces.set([]);
-      provisioningNodes.set(storedProvisioningNodes);
+      provisioningBookmarks.set(storedProvisioningBookmarks);
+      knownDestinations.set(storedKnownDestinations);
+      this.destinationDirectoryReconciled = false;
       const worker = new Worker(new URL('../../workers/reticulum.worker.ts', import.meta.url), { type: 'module' });
       this.worker = worker;
       worker.onmessage = (message: MessageEvent<RuntimeEvent>) => void this.handleEvent(message.data);
@@ -232,9 +244,9 @@ class ReticulumRuntimeController {
         for (const resolve of this.pathManagementWaiters.values()) resolve(false);
         this.pathManagementWaiters.clear();
         this.failPathRequestWaiters('PATH_REQUEST_RUNTIME_FAILED');
-        knownDestinationHashes.set([]);
         pathTableEntries.set([]);
-        knownDestinations.set([]);
+        remoteDestinationInventory.set([]);
+        localDestinationInventory.set([]);
       };
 
       let blockedDestinationHashes: string[] = [];
@@ -451,11 +463,26 @@ class ReticulumRuntimeController {
   }
 
   async forgetKnownDestination(destination: string): Promise<boolean> {
-    return this.performPathManagementOperation('forgetKnownDestination', destination);
+    const destinationHash = normalizeDestinationHash(destination);
+    if (!destinationHash) return false;
+    const forgotten = await this.performPathManagementOperation(
+      'forgetKnownDestination',
+      destinationHash,
+    );
+    if (!forgotten) return false;
+    await this.knownDestinationRepository.delete(destinationHash);
+    knownDestinations.update((records) => (
+      records.filter((record) => record.destinationHash !== destinationHash)
+    ));
+    return true;
   }
 
   async clearKnownDestinations(): Promise<boolean> {
-    return this.performPathManagementOperation('clearKnownDestinations');
+    const cleared = await this.performPathManagementOperation('clearKnownDestinations');
+    if (!cleared) return false;
+    await this.knownDestinationRepository.clear();
+    knownDestinations.set([]);
+    return true;
   }
 
   async syncLxmfPropagation(): Promise<LxmfPropagationSyncResult | undefined> {
@@ -858,9 +885,6 @@ class ReticulumRuntimeController {
       onUpdate?.({ type: 'failed', code: 'NOMAD_RUNTIME_UNAVAILABLE' });
       return undefined;
     }
-    const announce = get(nomadAnnounces).find((item) => (
-      item.destinationHash === normalizedDestination && item.publicKey
-    ));
     const requestId = crypto.randomUUID();
     return new Promise((resolve) => {
       this.nomadPageWaiters.set(requestId, { resolve, onUpdate });
@@ -870,7 +894,6 @@ class ReticulumRuntimeController {
         destinationHash: normalizedDestination,
         path: nomadRequestPath(path),
         requestData,
-        ...(announce?.publicKey ? { publicKey: announce.publicKey } : {}),
         ...(freshLink ? { freshLink: true } : {}),
         ...(identifyBeforeLoad ? { identifyBeforeLoad: true } : {}),
       });
@@ -909,8 +932,7 @@ class ReticulumRuntimeController {
     responseTimeoutMs?: number,
   ): Promise<Uint8Array> {
     const destinationHash = normalizeDestinationHash(provisioningNode.destinationHash);
-    const publicKey = provisioningNode.publicKey.trim().toLowerCase();
-    if (!this.worker || !get(activeIdentity) || !destinationHash || (publicKey && !/^[0-9a-f]{128}$/.test(publicKey))) {
+    if (!this.worker || !get(activeIdentity) || !destinationHash) {
       throw new ProvisioningRequestFailure('PROVISIONING_DESTINATION_UNKNOWN');
     }
     const requestId = crypto.randomUUID();
@@ -920,7 +942,6 @@ class ReticulumRuntimeController {
         type: 'requestProvisioning',
         requestId,
         destinationHash,
-        ...(publicKey ? { publicKey } : {}),
         payload: new Uint8Array(payload),
         safeToRetry,
         responseTimeoutMs,
@@ -941,34 +962,42 @@ class ReticulumRuntimeController {
 
   async saveProvisioningNodeBookmark(node: ProvisioningNode, label: string): Promise<boolean> {
     const destinationHash = normalizeDestinationHash(node.destinationHash);
-    const publicKey = node.publicKey.trim().toLowerCase();
-    if (!destinationHash || (publicKey && !/^[0-9a-f]{128}$/.test(publicKey))) return false;
-    const existing = get(provisioningNodes).find((item) => (
+    if (!destinationHash) return false;
+    const existing = get(provisioningBookmarks).find((item) => (
       item.id === node.id || item.destinationHash === destinationHash
     ));
-    const updated: ProvisioningNode = {
-      ...node,
-      ...existing,
+    const now = new Date().toISOString();
+    const updated: ProvisioningBookmark = {
       id: existing?.id ?? destinationHash,
       destinationHash,
-      publicKey: existing?.publicKey || publicKey,
-      heardAt: existing?.heardAt ?? node.heardAt ?? new Date().toISOString(),
-      bookmarked: true,
       label: label.trim() || undefined,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
     };
-    await this.provisioningRepository.saveNode(updated);
-    provisioningNodes.update((items) => [
+    await this.provisioningRepository.saveBookmark(updated);
+    provisioningBookmarks.update((items) => [
       updated,
       ...items.filter((item) => item.id !== updated.id),
-    ].sort((left, right) => right.heardAt.localeCompare(left.heardAt)));
+    ].sort((left, right) => left.createdAt.localeCompare(right.createdAt)));
     this.refreshDestinationPaths([destinationHash]);
     return true;
   }
 
   async setProvisioningNodeBookmarked(id: string, bookmarked: boolean, label?: string): Promise<boolean> {
-    const updated = await this.provisioningRepository.setNodeBookmarked(id, bookmarked, label);
-    if (!updated) return false;
-    provisioningNodes.update((items) => items.map((item) => item.id === id ? updated : item));
+    const existing = get(provisioningBookmarks).find((item) => item.id === id);
+    if (!bookmarked) {
+      if (!await this.provisioningRepository.deleteBookmark(id)) return false;
+      provisioningBookmarks.update((items) => items.filter((item) => item.id !== id));
+      return true;
+    }
+    if (!existing) return false;
+    const updated: ProvisioningBookmark = {
+      ...existing,
+      label: label?.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    await this.provisioningRepository.saveBookmark(updated);
+    provisioningBookmarks.update((items) => items.map((item) => item.id === id ? updated : item));
     return true;
   }
 
@@ -1059,6 +1088,7 @@ class ReticulumRuntimeController {
     if (!record) return false;
     const directory = await this.chatRepository.load(identityId);
     const requestId = crypto.randomUUID();
+    this.destinationDirectoryReconciled = false;
     return this.waitForIdentityOperation(requestId, {
       type: 'activateIdentity',
       requestId,
@@ -1117,9 +1147,10 @@ class ReticulumRuntimeController {
     this.worker = undefined;
     this.started = false;
     statusDetails.set(undefined);
-    knownDestinationHashes.set([]);
     pathTableEntries.set([]);
-    knownDestinations.set([]);
+    remoteDestinationInventory.set([]);
+    localDestinationInventory.set([]);
+    this.destinationDirectoryReconciled = false;
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
     for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
@@ -1198,13 +1229,23 @@ class ReticulumRuntimeController {
       });
       return;
     }
-    if (event.type === 'knownDestinationSnapshot') {
-      knownDestinationHashes.set(event.destinationHashes);
-      return;
-    }
     if (event.type === 'pathManagementSnapshot') {
       pathTableEntries.set(event.paths);
-      knownDestinations.set(event.knownDestinations);
+      remoteDestinationInventory.set(event.remoteDestinations);
+      localDestinationInventory.set(event.localDestinations);
+      if (event.reconcileDirectory === true && !this.destinationDirectoryReconciled) {
+        this.destinationDirectoryReconciled = true;
+        const reconciled = reconcileKnownDestinations(
+          get(knownDestinations),
+          event.remoteDestinations,
+        );
+        knownDestinations.set(reconciled);
+        try {
+          await this.knownDestinationRepository.replaceAll(reconciled);
+        } catch {
+          runtimeErrorCode.set('RUNTIME_KNOWN_DESTINATION_PERSIST_FAILED');
+        }
+      }
       return;
     }
     if (event.type === 'pathManagementOperationResult') {
@@ -1230,57 +1271,17 @@ class ReticulumRuntimeController {
       this.probeWaiters.delete(event.requestId);
       return;
     }
-    if (event.type === 'propagationNodeAnnounce') {
-      propagationNodeAnnounces.update((items) => [
-        event,
-        ...items.filter((item) => item.destinationHash !== event.destinationHash),
-      ].sort((left, right) => Date.parse(right.heardAt) - Date.parse(left.heardAt)));
-      return;
-    }
-    if (event.type === 'propagationNodeSnapshot') {
-      propagationNodeAnnounces.set(event.nodes);
-      return;
-    }
-    if (event.type === 'nomadAnnounce') {
-      const announce: NomadAnnounce = {
-        id: event.destinationHash,
-        destinationHash: event.destinationHash,
-        displayName: event.displayName,
-        publicKey: event.publicKey,
-        interfaceId: event.interfaceId,
-        hops: event.hops,
-        heardAt: event.heardAt,
-      };
+    if (event.type === 'knownDestinationObserved') {
+      const { type: _type, ...observation } = event;
+      const updated = upsertKnownDestination(get(knownDestinations), observation);
+      const record = updated.find((item) => item.destinationHash === event.destinationHash);
+      knownDestinations.set(updated);
+      if (!record) return;
       try {
-        const mergedAnnounces = upsertNomadAnnounce(get(nomadAnnounces), announce);
-        const mergedAnnounce = mergedAnnounces.find((item) => item.id === announce.id) ?? announce;
-        await this.nomadRepository.saveAnnounce(mergedAnnounce);
-        nomadAnnounces.update((items) => upsertNomadAnnounce(items, mergedAnnounce));
+        await this.knownDestinationRepository.save(record);
       } catch {
-        runtimeErrorCode.set('RUNTIME_NOMAD_DIRECTORY_PERSIST_FAILED');
-      }
-      return;
-    }
-    if (event.type === 'managementAnnounce') {
-      const previousNode = get(provisioningNodes).find((item) => item.id === event.id);
-      const managementNode: ProvisioningNode = {
-        id: event.id,
-        destinationHash: event.destinationHash,
-        publicKey: event.publicKey,
-        interfaceId: event.interfaceId,
-        hops: event.hops,
-        heardAt: event.heardAt,
-        bookmarked: previousNode?.bookmarked === true,
-        label: previousNode?.label,
-      };
-      try {
-        await this.provisioningRepository.saveNode(managementNode);
-        provisioningNodes.update((items) => [
-          managementNode,
-          ...items.filter((item) => item.id !== managementNode.id),
-        ].sort((left, right) => right.heardAt.localeCompare(left.heardAt)));
-      } catch {
-        appendLocalLog('error', 'persistence', 'PROVISIONING_NODE_PERSIST_FAILED', {
+        runtimeErrorCode.set('RUNTIME_KNOWN_DESTINATION_PERSIST_FAILED');
+        appendLocalLog('error', 'persistence', 'KNOWN_DESTINATION_PERSIST_FAILED', {
           destinationHash: event.destinationHash,
         });
       }
@@ -1345,34 +1346,6 @@ class ReticulumRuntimeController {
     if (event.type === 'lxmaPeerImportResult') {
       this.lxmaPeerWaiters.get(event.requestId)?.(event.ok ? event.destinationHash : undefined);
       this.lxmaPeerWaiters.delete(event.requestId);
-      return;
-    }
-    if (event.type === 'chatAnnounce') {
-      const announce: ChatAnnounce = {
-        id: `${event.identityId}:${event.destinationHash}`,
-        identityId: event.identityId,
-        destinationHash: event.destinationHash,
-        identityHash: event.identityHash,
-        publicKey: event.publicKey,
-        displayName: event.displayName,
-        stampCost: event.stampCost,
-        compressionSupported: event.compressionSupported,
-        interfaceId: event.interfaceId,
-        hops: event.hops,
-        heardAt: event.heardAt,
-      };
-      chatAnnounces.update((items) => upsertChatAnnounce(items, announce));
-      try {
-        await this.chatRepository.saveAnnounce(announce);
-        appendLocalLog('debug', 'persistence', 'CHAT_ANNOUNCE_PERSISTED', {
-          destinationHash: announce.destinationHash,
-        });
-      } catch {
-        runtimeErrorCode.set('RUNTIME_CHAT_PERSIST_FAILED');
-        appendLocalLog('error', 'persistence', 'CHAT_ANNOUNCE_PERSIST_FAILED', {
-          destinationHash: announce.destinationHash,
-        });
-      }
       return;
     }
     if (event.type === 'chatMessageReceived') {
@@ -1703,11 +1676,9 @@ class ReticulumRuntimeController {
 
   private async loadNomadDirectory(identityId: string): Promise<void> {
     if (this.loadedNomadIdentityId === identityId) return;
-    const directory = await this.nomadRepository.load(identityId);
+    const bookmarks = await this.nomadRepository.loadBookmarks(identityId);
     this.loadedNomadIdentityId = identityId;
-    nomadAnnounces.update((liveItems) => liveItems
-      .reduce((items, item) => upsertNomadAnnounce(items, item), directory.announces));
-    nomadBookmarks.set(directory.bookmarks);
+    nomadBookmarks.set(bookmarks);
   }
 
   private async loadChatDirectory(identityId: string): Promise<void> {
@@ -1720,9 +1691,6 @@ class ReticulumRuntimeController {
     if (get(activeIdentity)?.id !== identityId) return;
     if (this.loadedChatIdentityId && this.loadedChatIdentityId !== identityId) markChatMessagesRead();
     this.loadedChatIdentityId = identityId;
-    chatAnnounces.update((liveItems) => liveItems
-      .filter((item) => item.identityId === identityId)
-      .reduce((items, item) => upsertChatAnnounce(items, item), directory.announces));
     chatContacts.update((liveItems) => liveItems
       .filter((item) => item.identityId === identityId)
       .reduce((items, item) => upsertChatContact(items, item), directory.contacts));
@@ -1790,13 +1758,12 @@ class ReticulumRuntimeController {
 
   private refreshKnownDestinationPaths(): void {
     this.refreshDestinationPaths([
-      ...get(nomadAnnounces).map((item) => item.destinationHash),
+      ...get(knownDestinations).map((item) => item.destinationHash),
       ...get(nomadBookmarks).map((item) => item.destinationHash),
-      ...get(chatAnnounces).map((item) => item.destinationHash),
       ...get(chatContacts).map((item) => item.destinationHash),
       ...get(chatMessages).map(chatMessagePeerHash),
       ...get(blockedChatDestinations).map((item) => item.destinationHash),
-      ...get(provisioningNodes).map((item) => item.destinationHash),
+      ...get(provisioningBookmarks).map((item) => item.destinationHash),
     ]);
   }
 
