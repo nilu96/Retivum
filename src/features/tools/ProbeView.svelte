@@ -9,14 +9,25 @@
     reticulumRuntime,
     runtimeStatus,
   } from '../../infrastructure/reticulum/runtime';
-  import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
+  import {
+    clearProbeHistory,
+    probeHistory,
+    type ProbeHistoryEntry,
+  } from '../../infrastructure/reticulum/probe-history';
   import {
     cancelPendingDestinationProbe,
     pendingProbeDestinationHashes,
   } from '../../infrastructure/reticulum/probe-operations';
+  import {
+    contextMenuTrigger,
+    type ContextMenuOpenMethod,
+  } from '../../lib/actions/contextMenuTrigger';
+  import { copyText } from '../../lib/clipboard';
+  import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
+  import { toast } from '../../lib/notifications/toasts';
 
   const destinationNames = ['lxmf.delivery', 'rnstransport.probe'] as const;
   let page: HTMLDivElement;
@@ -31,6 +42,13 @@
   let namePicker = $state<HTMLDivElement>();
   let validationVisible = $state(false);
   let pathDropFeedback = $state<'dropped' | 'notFound' | undefined>();
+  let historyActions = $state<{
+    entry: ProbeHistoryEntry;
+    x: number;
+    y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
+  }>();
   const completedAtFormatter = $derived(createDateFormatter($locale, { dateStyle: undefined, timeStyle: 'medium' }));
   const normalizedDestination = $derived(normalizeDestinationHash(destinationHash));
   const validTimeout = $derived(Number.isInteger(timeoutSeconds) && timeoutSeconds > 0 && timeoutSeconds <= 2_147_483);
@@ -92,6 +110,39 @@
       fullDestinationName,
       timeoutMs: timeoutSeconds * 1_000,
       probeSizeBytes,
+      liveHistory: true,
+    });
+  }
+
+  function openHistoryActions(
+    entry: ProbeHistoryEntry,
+    x: number,
+    y: number,
+    method: ContextMenuOpenMethod,
+  ): void {
+    historyActions = {
+      entry,
+      x,
+      y,
+      autofocus: method === 'keyboard',
+      guardOpeningRelease: method === 'longpress',
+    };
+  }
+
+  async function copyHistoryDestinationHash(destination: string): Promise<void> {
+    historyActions = undefined;
+    if (await copyText(destination)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
+  function repeatHistoryProbe(entry: ProbeHistoryEntry): void {
+    if ($pendingProbeDestinationHashes.has(entry.destinationHash)) return;
+    historyActions = undefined;
+    showDestinationProbeActivity({
+      destinationHash: entry.destinationHash,
+      fullDestinationName: entry.fullDestinationName,
+      timeoutMs: entry.timeoutMs,
+      probeSizeBytes: entry.probeSizeBytes,
       liveHistory: true,
     });
   }
@@ -285,45 +336,59 @@
     {:else}
       <ol class="probe-history-list" aria-label={$t('probe.history.list')}>
         {#each $probeHistory as entry (entry.id)}
-          <li class:failed={entry.status === 'completed' && !entry.ok} class:pending={entry.status === 'pending'}>
-            <header>
-              <div class="probe-result-title">
-                <span class="probe-result-dot" aria-hidden="true"></span>
-                <strong>{$t(entry.status === 'pending'
-                  ? 'probe.history.waiting'
-                  : entry.ok ? 'probe.history.success' : 'probe.history.failure')}</strong>
-              </div>
-              {#if entry.status === 'pending'}
-                <button
-                  class="button secondary compact probe-cancel-button"
-                  type="button"
-                  aria-label={$t('probe.history.cancel')}
-                  onclick={() => cancelPendingDestinationProbe(entry.destinationHash)}
-                ><Icon name="close" size={14} />{$t('common.cancel')}</button>
-              {:else}
-                <time datetime={entry.completedAt}>{completedAtFormatter.format(new Date(entry.completedAt))}</time>
+          <li
+            class:failed={entry.status === 'completed' && !entry.ok}
+            class:pending={entry.status === 'pending'}
+          >
+            <div
+              class="probe-history-context-trigger"
+              role="button"
+              tabindex="0"
+              aria-haspopup="menu"
+              use:contextMenuTrigger={{
+                onopen: (x, y, method) => openHistoryActions(entry, x, y, method),
+              }}
+            >
+              <header>
+                <div class="probe-result-title">
+                  <span class="probe-result-dot" aria-hidden="true"></span>
+                  <strong>{$t(entry.status === 'pending'
+                    ? 'probe.history.waiting'
+                    : entry.ok ? 'probe.history.success' : 'probe.history.failure')}</strong>
+                </div>
+                {#if entry.status === 'completed'}
+                  <time datetime={entry.completedAt}>{completedAtFormatter.format(new Date(entry.completedAt))}</time>
+                {/if}
+              </header>
+              <code class="probe-result-destination">{entry.destinationHash}</code>
+              {#if entry.status === 'completed' && entry.viaHash && entry.interfaceName && entry.interfaceType}
+                <p class="probe-result-route">{$t('probe.history.route', {
+                  via: entry.viaHash,
+                  name: entry.interfaceName,
+                  type: $t(`status.interface.type.${entry.interfaceType}`),
+                })}</p>
               {/if}
-            </header>
-            <code class="probe-result-destination">{entry.destinationHash}</code>
-            {#if entry.status === 'completed' && entry.viaHash && entry.interfaceName && entry.interfaceType}
-              <p class="probe-result-route">{$t('probe.history.route', {
-                via: entry.viaHash,
-                name: entry.interfaceName,
-                type: $t(`status.interface.type.${entry.interfaceType}`),
-              })}</p>
-            {/if}
-            <dl>
-              <div><dt>{$t('probe.history.name')}</dt><dd><code>{entry.fullDestinationName}</code></dd></div>
-              <div><dt>{$t('probe.history.size')}</dt><dd>{$t('probe.history.bytes', { count: entry.probeSizeBytes })}</dd></div>
-              {#if entry.status === 'completed' && entry.ok && entry.roundTripTimeMs !== undefined}
-                <div><dt>{$t('probe.history.rtt')}</dt><dd>{formatRoundTripTime(entry.roundTripTimeMs)}</dd></div>
+              <dl>
+                <div><dt>{$t('probe.history.name')}</dt><dd><code>{entry.fullDestinationName}</code></dd></div>
+                <div><dt>{$t('probe.history.size')}</dt><dd>{$t('probe.history.bytes', { count: entry.probeSizeBytes })}</dd></div>
+                {#if entry.status === 'completed' && entry.ok && entry.roundTripTimeMs !== undefined}
+                  <div><dt>{$t('probe.history.rtt')}</dt><dd>{formatRoundTripTime(entry.roundTripTimeMs)}</dd></div>
+                {/if}
+                {#if entry.status === 'completed' && entry.ok && entry.hops !== undefined}
+                  <div><dt>{$t('probe.history.hops')}</dt><dd>{$t(entry.hops === 1 ? 'announce.hops.one' : 'announce.hops.other', { count: entry.hops })}</dd></div>
+                {/if}
+              </dl>
+              {#if entry.status === 'completed' && !entry.ok}
+                <p class="probe-result-error">{$t('probe.history.errorCode', { code: entry.code ?? 'PROBE_FAILED' })}</p>
               {/if}
-              {#if entry.status === 'completed' && entry.ok && entry.hops !== undefined}
-                <div><dt>{$t('probe.history.hops')}</dt><dd>{$t(entry.hops === 1 ? 'announce.hops.one' : 'announce.hops.other', { count: entry.hops })}</dd></div>
-              {/if}
-            </dl>
-            {#if entry.status === 'completed' && !entry.ok}
-              <p class="probe-result-error">{$t('probe.history.errorCode', { code: entry.code ?? 'PROBE_FAILED' })}</p>
+            </div>
+            {#if entry.status === 'pending'}
+              <button
+                class="button secondary compact probe-cancel-button"
+                type="button"
+                aria-label={$t('probe.history.cancel')}
+                onclick={() => cancelPendingDestinationProbe(entry.destinationHash)}
+              ><Icon name="close" size={14} />{$t('common.cancel')}</button>
             {/if}
           </li>
         {/each}
@@ -331,3 +396,29 @@
     {/if}
   </section>
 </div>
+
+{#if historyActions}
+  <ContextMenu
+    x={historyActions.x}
+    y={historyActions.y}
+    autofocus={historyActions.autofocus}
+    guardOpeningRelease={historyActions.guardOpeningRelease}
+    label={$t('probe.history.actions.label')}
+    closeLabel={$t('probe.history.actions.close')}
+    onclose={() => { historyActions = undefined; }}
+  >
+    <button
+      role="menuitem"
+      onclick={() => { void copyHistoryDestinationHash(historyActions!.entry.destinationHash); }}
+    >
+      <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={$pendingProbeDestinationHashes.has(historyActions.entry.destinationHash)}
+      onclick={() => { repeatHistoryProbe(historyActions!.entry); }}
+    >
+      <Icon name="probe" size={17} />{$t('probe.history.actions.repeat')}
+    </button>
+  </ContextMenu>
+{/if}

@@ -87,6 +87,64 @@ describe('ProbeView', () => {
     expect(screen.getByRole('status')).toHaveTextContent('The cached path was dropped.');
   });
 
+  it('copies and repeats a completed probe from its history context menu', async () => {
+    const destination = 'b'.repeat(32);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const probe = vi.spyOn(reticulumRuntime, 'probeDestination').mockResolvedValue({
+      ok: true,
+      destinationHash: destination,
+      fullDestinationName: 'lxmf.delivery',
+      probeSizeBytes: 16,
+      roundTripTimeMs: 12,
+      hops: 1,
+    });
+
+    try {
+      render(ProbeView);
+      await fireEvent.input(screen.getByLabelText('Destination hash'), { target: { value: destination } });
+      await fireEvent.input(screen.getByRole('spinbutton', { name: /^Timeout \(seconds\)/ }), {
+        target: { value: '37' },
+      });
+      await fireEvent.input(screen.getByRole('spinbutton', { name: /^Probe size \(bytes\)/ }), {
+        target: { value: '16' },
+      });
+      await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
+
+      const historyEntry = await screen.findByRole('listitem');
+      const contextTrigger = historyEntry.querySelector<HTMLElement>('.probe-history-context-trigger')!;
+      expect(contextTrigger).toHaveAttribute('aria-haspopup', 'menu');
+      await fireEvent.contextMenu(contextTrigger, { clientX: 100, clientY: 100 });
+      expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+        'Copy destination hash',
+        'Repeat probe',
+      ]);
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
+      expect(writeText).toHaveBeenCalledWith(destination);
+
+      await fireEvent.input(screen.getByRole('spinbutton', { name: /^Timeout \(seconds\)/ }), {
+        target: { value: '99' },
+      });
+      await fireEvent.contextMenu(contextTrigger, { clientX: 100, clientY: 100 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Repeat probe' }));
+      expect(probe).toHaveBeenLastCalledWith(
+        destination,
+        'lxmf.delivery',
+        37_000,
+        16,
+        expect.any(AbortSignal),
+      );
+      expect(probe).toHaveBeenCalledTimes(2);
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
   it('shows cancellable pending entries and only blocks their destinations', async () => {
     const firstDestination = 'c'.repeat(32);
     const secondDestination = 'd'.repeat(32);
@@ -119,6 +177,12 @@ describe('ProbeView', () => {
     expect(screen.getByRole('button', { name: 'Waiting for response…' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Drop path' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Cancel probe' })).toBeInTheDocument();
+    const contextTrigger = within(history).getByRole('listitem')
+      .querySelector<HTMLElement>('.probe-history-context-trigger')!;
+    await fireEvent.contextMenu(contextTrigger, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menuitem', { name: 'Copy destination hash' })).toBeEnabled();
+    expect(screen.getByRole('menuitem', { name: 'Repeat probe' })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Close probe history actions' }));
 
     await fireEvent.input(destinationInput, { target: { value: secondDestination } });
     expect(screen.getByRole('button', { name: 'Send probe' })).toBeEnabled();

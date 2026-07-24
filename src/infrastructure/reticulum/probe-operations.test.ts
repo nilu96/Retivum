@@ -36,7 +36,11 @@ describe('probe operations', () => {
     await first?.result;
 
     expect(get(pendingProbeDestinationHashes).has(destinationHash)).toBe(false);
-    expect(get(probeHistory)[0]).toEqual(expect.objectContaining({ destinationHash, ok: true }));
+    expect(get(probeHistory)[0]).toEqual(expect.objectContaining({
+      destinationHash,
+      timeoutMs: 20_000,
+      ok: true,
+    }));
   });
 
   it('releases a destination after a rejected probe', async () => {
@@ -105,6 +109,7 @@ describe('probe operations', () => {
       status: 'pending',
       destinationHash,
       fullDestinationName: 'lxmf.delivery',
+      timeoutMs: 20_000,
       probeSizeBytes: 8,
     }));
 
@@ -115,6 +120,7 @@ describe('probe operations', () => {
     expect(get(probeHistory)[0]).toEqual(expect.objectContaining({
       id: pendingEntry.id,
       status: 'completed',
+      timeoutMs: 20_000,
       ok: false,
       code: 'PROBE_CANCELLED',
     }));

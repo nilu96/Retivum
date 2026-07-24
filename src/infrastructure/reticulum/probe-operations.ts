@@ -38,7 +38,7 @@ export function startDestinationProbe(
   const controller = new AbortController();
   pendingProbeControllers.set(destinationHash, controller);
   const historyEntryId = options.liveHistory
-    ? beginProbeHistoryEntry(destinationHash, fullDestinationName, probeSizeBytes)
+    ? beginProbeHistoryEntry(destinationHash, fullDestinationName, timeoutMs, probeSizeBytes)
     : undefined;
   const result = reticulumRuntime.probeDestination(
     destinationHash,
@@ -48,7 +48,7 @@ export function startDestinationProbe(
     controller.signal,
   ).then((result) => {
     if (historyEntryId) resolveProbeHistoryEntry(historyEntryId, result);
-    else if (result.code !== 'PROBE_CANCELLED') recordProbeResult(result);
+    else if (result.code !== 'PROBE_CANCELLED') recordProbeResult(result, timeoutMs);
     return result;
   }).catch((error: unknown) => {
     if (historyEntryId) {

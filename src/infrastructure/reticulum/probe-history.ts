@@ -5,6 +5,7 @@ interface ProbeHistoryEntryBase {
   id: string;
   destinationHash: string;
   fullDestinationName: string;
+  timeoutMs: number;
   probeSizeBytes: number;
   startedAt: string;
 }
@@ -22,12 +23,13 @@ export type ProbeHistoryEntry = PendingProbeHistoryEntry | CompletedProbeHistory
 
 export const probeHistory = writable<ProbeHistoryEntry[]>([]);
 
-export function recordProbeResult(result: ProbeResult): void {
+export function recordProbeResult(result: ProbeResult, timeoutMs: number): void {
   const completedAt = new Date().toISOString();
   const entry: CompletedProbeHistoryEntry = {
     ...result,
     id: crypto.randomUUID(),
     status: 'completed',
+    timeoutMs,
     startedAt: completedAt,
     completedAt,
   };
@@ -37,6 +39,7 @@ export function recordProbeResult(result: ProbeResult): void {
 export function beginProbeHistoryEntry(
   destinationHash: string,
   fullDestinationName: string,
+  timeoutMs: number,
   probeSizeBytes: number,
 ): string {
   const id = crypto.randomUUID();
@@ -45,6 +48,7 @@ export function beginProbeHistoryEntry(
     status: 'pending',
     destinationHash,
     fullDestinationName,
+    timeoutMs,
     probeSizeBytes,
     startedAt: new Date().toISOString(),
   };
@@ -58,6 +62,7 @@ export function resolveProbeHistoryEntry(id: string, result: ProbeResult): void 
         ...result,
         id,
         status: 'completed' as const,
+        timeoutMs: entry.timeoutMs,
         startedAt: entry.startedAt,
         completedAt: new Date().toISOString(),
       }
