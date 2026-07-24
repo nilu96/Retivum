@@ -1182,9 +1182,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .desktop-navigation .navigation-copy { position: absolute; inset-block-start: 3px; inset-inline-end: 3px; }
   .desktop-navigation { width: 100%; }
   .desktop-navigation button { justify-content: center; padding: 0; }
-  .sidebar-status { display: grid; width: 48px; place-items: center; padding: 13px; }
+  .sidebar-status { display: grid; width: 48px; height: 48px; place-items: center; padding: 0; }
   .sidebar-identity-actions { grid-template-columns: 48px; width: 48px; }
-  .sidebar-identity-actions button { width: 48px; padding: 0; }
+  .sidebar-identity-actions button { width: 48px; height: 48px; padding: 0; }
   .chat-workspace { grid-template-columns: minmax(290px, 340px) 1fr; }
 }
 
