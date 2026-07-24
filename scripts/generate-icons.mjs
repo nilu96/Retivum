@@ -14,6 +14,7 @@ const androidDensities = {
   xxhdpi: { legacy: 144, foreground: 324 },
   xxxhdpi: { legacy: 192, foreground: 432 },
 };
+const androidArtworkScale = 0.86;
 
 async function ensureParent(path) {
   await mkdir(dirname(path), { recursive: true });
@@ -41,7 +42,7 @@ async function renderOpaqueSquare(size) {
 }
 
 async function renderAdaptiveForeground(size) {
-  const markSize = Math.round(size * 0.72);
+  const markSize = Math.round(size * 0.72 * androidArtworkScale);
   const offset = Math.floor((size - markSize) / 2);
   return sharp({
     create: { width: size, height: size, channels: 4, background: '#00000000' },
@@ -51,13 +52,24 @@ async function renderAdaptiveForeground(size) {
     .toBuffer();
 }
 
-async function renderRound(size) {
+async function renderAndroidSquare(size) {
+  const markSize = Math.round(size * androidArtworkScale);
+  const offset = Math.floor((size - markSize) / 2);
+  return sharp({
+    create: { width: size, height: size, channels: 4, background: '#ffffff' },
+  })
+    .composite([{ input: await renderMark(markSize), left: offset, top: offset }])
+    .png()
+    .toBuffer();
+}
+
+async function renderAndroidRound(size) {
   const mask = Buffer.from(
     `<svg width="${size}" height="${size}" xmlns="http://www.w3.org/2000/svg">` +
       `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="#fff"/>` +
     '</svg>',
   );
-  return sharp(await opaqueSquare(size))
+  return sharp(await renderAndroidSquare(size))
     .composite([{ input: mask, blend: 'dest-in' }])
     .png()
     .toBuffer();
@@ -163,8 +175,8 @@ await write(
 for (const [density, sizes] of Object.entries(androidDensities)) {
   const directory = join(root, 'android', 'app', 'src', 'main', 'res', `mipmap-${density}`);
   await Promise.all([
-    write(join(directory, 'ic_launcher.png'), await opaqueSquare(sizes.legacy)),
-    write(join(directory, 'ic_launcher_round.png'), await renderRound(sizes.legacy)),
+    write(join(directory, 'ic_launcher.png'), await renderAndroidSquare(sizes.legacy)),
+    write(join(directory, 'ic_launcher_round.png'), await renderAndroidRound(sizes.legacy)),
     write(join(directory, 'ic_launcher_foreground.png'), await renderAdaptiveForeground(sizes.foreground)),
   ]);
 }
