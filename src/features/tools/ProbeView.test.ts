@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  knownDestinations,
   remoteDestinationInventory,
   reticulumRuntime,
   runtimeStatus,
@@ -16,23 +17,60 @@ describe('ProbeView', () => {
     clearProbeHistory();
     clearToasts();
     runtimeStatus.set('online');
+    knownDestinations.set([]);
     remoteDestinationInventory.set([
-      { destinationHash: '1'.repeat(32) },
-      { destinationHash: '2'.repeat(32) },
+      { destinationHash: '1'.repeat(32), fullDestinationName: 'lxmf.delivery' },
+      { destinationHash: '2'.repeat(32), fullDestinationName: 'rnstransport.probe' },
     ]);
   });
 
-  it('shows the configured defaults and every known destination', async () => {
+  it('shows the configured defaults and every known destination while a hash is entered', async () => {
     render(ProbeView);
 
     expect(screen.getByRole('spinbutton', { name: /^Timeout \(seconds\)/ })).toHaveValue(20);
     expect(screen.getByRole('spinbutton', { name: /^Probe size \(bytes\)/ })).toHaveValue(8);
     expect(screen.getByLabelText('Full destination name')).toHaveValue('lxmf.delivery');
 
+    await fireEvent.input(screen.getByLabelText('Destination hash'), { target: { value: '1111' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Show known destinations' }));
     const list = screen.getByRole('listbox', { name: 'Known Reticulum destinations' });
     expect(within(list).getByText('1'.repeat(32))).toBeInTheDocument();
     expect(within(list).getByText('2'.repeat(32))).toBeInTheDocument();
+  });
+
+  it('fills known destination names and clears the name for unknown destinations', async () => {
+    const propagationHash = '3'.repeat(32);
+    const unknownHash = '4'.repeat(32);
+    const inventoryNamedHash = '5'.repeat(32);
+    remoteDestinationInventory.set([
+      { destinationHash: propagationHash },
+      { destinationHash: unknownHash },
+      {
+        destinationHash: inventoryNamedHash,
+        fullDestinationName: 'nomadnetwork.node',
+      },
+    ]);
+    knownDestinations.set([{
+      destinationHash: propagationHash,
+      fullDestinationName: 'lxmf.propagation',
+    }]);
+    render(ProbeView);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Show known destinations' }));
+    const list = screen.getByRole('listbox', { name: 'Known Reticulum destinations' });
+    expect(within(list).getByText(propagationHash)).toBeInTheDocument();
+    expect(within(list).getByText(inventoryNamedHash)).toBeInTheDocument();
+    expect(within(list).getByText(unknownHash)).toBeInTheDocument();
+
+    await fireEvent.click(within(list).getByRole('option', { name: propagationHash }));
+    expect(screen.getByLabelText('Destination hash')).toHaveValue(propagationHash);
+    expect(screen.getByLabelText('Full destination name')).toHaveValue('lxmf.propagation');
+
+    await fireEvent.input(screen.getByLabelText('Destination hash'), { target: { value: '' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Show known destinations' }));
+    await fireEvent.click(screen.getByRole('option', { name: unknownHash }));
+    expect(screen.getByLabelText('Destination hash')).toHaveValue(unknownHash);
+    expect(screen.getByLabelText('Full destination name')).toHaveValue('');
   });
 
   it('uses the shared probe API and places newest results first', async () => {

@@ -5,6 +5,7 @@
   import { createDateFormatter, locale, t } from '../../i18n';
   import { maximumProbePayloadBytes } from '../../infrastructure/reticulum/protocol';
   import {
+    knownDestinations,
     remoteDestinationInventory,
     reticulumRuntime,
     runtimeStatus,
@@ -63,11 +64,18 @@
   ));
   const hasCompletedHistory = $derived($probeHistory.some((entry) => entry.status === 'completed'));
   const visibleDestinations = $derived.by(() => {
-    const query = destinationHash.trim().toLowerCase();
-    const hashes = $remoteDestinationInventory.map((entry) => entry.destinationHash);
-    return query
-      ? hashes.filter((hash) => hash.includes(query))
-      : hashes;
+    const recordsByHash = new Map($knownDestinations.map((record) => [
+      record.destinationHash,
+      record,
+    ]));
+    return $remoteDestinationInventory.map((entry) => {
+      const fullDestinationName = recordsByHash.get(entry.destinationHash)?.fullDestinationName
+        ?? entry.fullDestinationName;
+      return {
+        destinationHash: entry.destinationHash,
+        fullDestinationName,
+      };
+    });
   });
 
   onMount(() => {
@@ -90,8 +98,9 @@
     };
   });
 
-  function selectDestination(hash: string): void {
+  function selectDestination(hash: string, name?: string): void {
     destinationHash = hash;
+    fullDestinationName = name ?? '';
     validationVisible = false;
     pathDropFeedback = undefined;
     destinationMenuOpen = false;
@@ -216,13 +225,16 @@
               {#if visibleDestinations.length === 0}
                 <p>{$t('probe.destination.empty')}</p>
               {:else}
-                {#each visibleDestinations as hash (hash)}
+                {#each visibleDestinations as destination (destination.destinationHash)}
                   <button
                     type="button"
                     role="option"
-                    aria-selected={normalizedDestination === hash}
-                    onclick={() => selectDestination(hash)}
-                  ><code>{hash}</code></button>
+                    aria-selected={normalizedDestination === destination.destinationHash}
+                    onclick={() => selectDestination(
+                      destination.destinationHash,
+                      destination.fullDestinationName,
+                    )}
+                  ><code>{destination.destinationHash}</code></button>
                 {/each}
               {/if}
             </div>
