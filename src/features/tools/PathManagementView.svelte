@@ -456,31 +456,33 @@
     <form class="path-request-form" onsubmit={(event) => { event.preventDefault(); void requestPath(); }}>
       <div class="field">
         <label for="path-management-destination">{$t('pathManagement.destination.label')}</label>
-        <input
-          id="path-management-destination"
-          bind:value={destinationHash}
-          placeholder={$t('pathManagement.destination.placeholder')}
-          autocapitalize="none"
-          autocomplete="off"
-          spellcheck="false"
-          aria-invalid={validationVisible && !normalizedDestination}
-          oninput={() => { validationVisible = false; }}
-        />
+        <div class="path-request-controls">
+          <input
+            id="path-management-destination"
+            bind:value={destinationHash}
+            placeholder={$t('pathManagement.destination.placeholder')}
+            autocapitalize="none"
+            autocomplete="off"
+            spellcheck="false"
+            aria-invalid={validationVisible && !normalizedDestination}
+            oninput={() => { validationVisible = false; }}
+          />
+          <button
+            class="button primary"
+            type="submit"
+            disabled={$runtimeStatus !== 'online'
+              || Boolean(normalizedDestination && pathRequestIsDisabled(normalizedDestination))}
+          >
+            <Icon name="send" size={17} />
+            {$t('pathManagement.request.action')}
+          </button>
+        </div>
         <small class:field-error={validationVisible && !normalizedDestination}>
           {$t(validationVisible && !normalizedDestination
             ? 'pathManagement.destination.invalid'
             : 'pathManagement.destination.help')}
         </small>
       </div>
-      <button
-        class="button primary"
-        type="submit"
-        disabled={$runtimeStatus !== 'online'
-          || Boolean(normalizedDestination && pathRequestIsDisabled(normalizedDestination))}
-      >
-        <Icon name="send" size={17} />
-        {$t('pathManagement.request.action')}
-      </button>
     </form>
   </section>
 

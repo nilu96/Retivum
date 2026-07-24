@@ -925,8 +925,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .path-management-page { display: grid; max-width: 1100px; min-width: 0; align-content: start; gap: 26px; }
 .path-management-header { margin-block-end: -3px; }
 .message-scroll-latest.path-management-scroll-top { position: fixed; z-index: 10; inset-inline-end: 24px; inset-block-end: 24px; }
-.path-request-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 12px; padding: 2px 20px 20px 70px; }
-.path-request-form > .button { min-height: 42px; margin-block-end: 23px; }
+.path-request-form { padding: 2px 20px 20px 70px; }
+.path-request-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 12px; }
+.path-request-controls > .button { min-height: 42px; }
 .path-management-lists { min-width: 0; }
 .path-management-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block-end: 12px; }
 .scope-tabs.path-management-tabs { width: min(470px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
@@ -1102,8 +1103,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 }
 
 @media (max-width: 520px) {
-  .path-request-form { grid-template-columns: 1fr; padding: 0 16px 16px; }
-  .path-request-form > .button { width: 100%; margin-block-end: 0; }
+  .path-request-form { padding: 0 16px 16px; }
+  .path-request-controls { grid-template-columns: 1fr; }
+  .path-request-controls > .button { width: 100%; }
   .path-management-entry-header { display: grid; gap: 9px; }
   .path-management-entry-identity,
   .path-management-entry-list > li.has-actions .path-management-entry-identity { padding-block-start: 0; padding-inline-end: 0; }
