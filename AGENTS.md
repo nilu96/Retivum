@@ -97,7 +97,7 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `216c44f0505dee8e1790a675496f3a3dd57aa761`. The generated WASM below was rebuilt from this `feat/wasm` source plus an uncommitted WASM-only `inDestinationHashes()` binding; the core and LXMF crates remain unchanged. The complete Leviculum working-tree diff has SHA-256 `1c58a1674cb14a8b3f51ee679872c49b15b4b5ab036a77209ed6b3f1a2064e3f`. This source also includes optional `interfaceIndex` targeting for `announceLxmf()`.
+The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `216c44f0505dee8e1790a675496f3a3dd57aa761`. The generated WASM below was rebuilt from this `feat/wasm` source plus an uncommitted WASM-only `inDestinationHashes()` binding and an LXMF scheduler fix that prevents active direct packet or Resource resubmission while applying Python's shared five-attempt limit to every delivery method. The complete Leviculum working-tree diff has SHA-256 `a4ba4d0ec49682e1d649e4c4b4a7969a2fe85f08e11215706ec23ff9d49b357a`. This source also includes optional `interfaceIndex` targeting for `announceLxmf()`.
 
 If provenance matters, capture the complete dirty source state or create an immutable commit/archive before publishing a rebuilt artifact.
 
@@ -115,7 +115,7 @@ Current fingerprints:
 | Artifact | SHA-256 |
 | --- | --- |
 | `leviculum_wasm.js` | `bd7039e744a3cecd957081d0ce52fc1411156d65a44668d2084586672240bd3f` |
-| `leviculum_wasm_bg.wasm` | `5b5941a6fd2af6571e3be61765b25c33f429c616bd16d1f64a550316ac51c89f` |
+| `leviculum_wasm_bg.wasm` | `c8741339ff326bb6db1e608549d10c15d25e006616c8ca8b7963f2fa6dc20e40` |
 | `leviculum_wasm.d.ts` | `d0b9b665935f1d6d78979e3580ecdb0eca62887543f744fd8dbd80cb797e50fc` |
 | `leviculum_wasm_bg.wasm.d.ts` | `c460552a70985d08d4f26be754961453ae42072bdc49c3de6fc07120c98b6aa8` |
 

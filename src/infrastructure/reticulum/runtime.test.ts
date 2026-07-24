@@ -20,6 +20,7 @@ type RuntimeInternals = {
   worker?: { postMessage(command: unknown): void };
   chatRepository: {
     deleteMessages(ids: string[]): Promise<void>;
+    replaceMessage(id: string, message: unknown): Promise<void>;
     saveMessage(message: unknown): Promise<void>;
   };
   provisioningRepository: {
@@ -685,6 +686,77 @@ describe('ReticulumRuntimeController chat deletion', () => {
     } finally {
       internals.worker = originalWorker;
     }
+  });
+
+  it('retries a failed attachment as a fresh delivery under the current method', async () => {
+    const destinationHash = 'd'.repeat(32);
+    const attachment = {
+      kind: 'image' as const,
+      name: 'photo.jpg',
+      mimeType: 'image/jpeg',
+      data: new Uint8Array([1, 2, 3]),
+    };
+    chatMessages.set([{
+      id: 'identity-1:failed-opportunistic',
+      identityId: 'identity-1',
+      messageId: 'failed-opportunistic',
+      sourceHash: 'a'.repeat(32),
+      destinationHash,
+      title: '',
+      content: '',
+      attachments: [attachment],
+      method: 'opportunistic',
+      representation: 'directResource',
+      direction: 'outgoing',
+      status: 'failed',
+      timestamp: 1_752_660_000,
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const replace = vi.spyOn(internals.chatRepository, 'replaceMessage').mockResolvedValue();
+
+    const pending = reticulumRuntime.retryChatMessage('failed-opportunistic');
+    const command = postMessage.mock.calls[0][0] as Record<string, unknown>;
+
+    expect(command).toMatchObject({
+      type: 'sendLxmfMessage',
+      destinationHash,
+      attachments: [attachment],
+      replacesMessageId: 'failed-opportunistic',
+    });
+    expect(command).not.toHaveProperty('timestamp');
+
+    await internals.handleEvent({
+      type: 'chatMessageQueued',
+      requestId: command.requestId,
+      identityId: 'identity-1',
+      messageId: 'fresh-direct-message',
+      sourceHash: 'a'.repeat(32),
+      destinationHash,
+      title: '',
+      content: '',
+      attachments: [attachment],
+      method: 'direct',
+      propagationFallbackPending: false,
+      replacesMessageId: 'failed-opportunistic',
+      timestamp: 1_752_660_100,
+      queuedAt: '2026-07-16T10:01:40.000Z',
+    });
+
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(replace).toHaveBeenCalledWith(
+      'identity-1:failed-opportunistic',
+      expect.objectContaining({
+        messageId: 'fresh-direct-message',
+        method: 'direct',
+        status: 'queued',
+      }),
+    );
+    expect(get(chatMessages)).toEqual([
+      expect.objectContaining({ messageId: 'fresh-direct-message', method: 'direct' }),
+    ]);
   });
 
   it('tracks and clears inbound LXMF resource progress', async () => {

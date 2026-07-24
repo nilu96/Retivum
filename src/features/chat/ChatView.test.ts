@@ -541,7 +541,7 @@ describe('ChatView', () => {
       status: 'sending',
       progress: 0.42,
       attempts: 1,
-      maxAttempts: 3,
+      maxAttempts: 5,
       method: 'direct',
       representation: 'directResource',
       receivedAt: '2026-07-16T10:01:00.000Z',
