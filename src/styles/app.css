@@ -549,7 +549,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .nomad-canvas.page-loaded { display: block; place-items: initial; overflow: auto; }
 .nomad-grid { position: absolute; inset: 0; opacity: .22; background-image: linear-gradient(var(--border) 1px, transparent 1px), linear-gradient(90deg, var(--border) 1px, transparent 1px); background-size: 38px 38px; mask-image: radial-gradient(circle, black, transparent 75%); }
 .nomad-canvas.page-loaded .nomad-grid { display: none; }
-.nomad-page-error { position: relative; z-index: 1; display: grid; justify-items: center; gap: 18px; padding: 24px; }
+.nomad-page-error { position: relative; z-index: 1; display: grid; width: min(378px, 100%); justify-items: center; gap: 18px; }
+.nomad-page-error > .empty-state { width: 100%; }
 .nomad-workspace { display: grid; height: clamp(430px, calc(100dvh - 250px), 680px); grid-template-columns: minmax(270px, 330px) minmax(0, 1fr); gap: 14px; min-height: 430px; }
 .nomad-directory { display: grid; height: 100%; grid-template-rows: auto auto auto minmax(0, 1fr); min-height: 0; overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .nomad-directory .scope-tabs { grid-template-columns: repeat(2, 1fr); }
@@ -584,11 +585,17 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
   .nomad-workspace { height: auto; min-height: 0; }
   .nomad-directory { position: relative; }
   .overview-content:not(.has-items) > .empty-state,
-  .conversation-empty > .empty-state,
-  .nomad-directory-content > .empty-state,
-  .nomad-canvas:not(.page-loaded)[aria-busy='false'] > .empty-state {
+  .conversation-empty > .empty-state {
     position: absolute;
     inset-block-start: calc(50% - 4.8rem);
+    inset-inline: 0;
+    margin-inline: auto;
+  }
+  .nomad-directory-content > .empty-state,
+  .nomad-canvas:not(.page-loaded) > .empty-state,
+  .nomad-canvas:not(.page-loaded) > .nomad-page-error {
+    position: absolute;
+    inset-block-start: clamp(8rem, calc(50% - 7rem), 14rem);
     inset-inline: 0;
     margin-inline: auto;
   }
