@@ -956,10 +956,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .path-management-entry-header { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .path-management-entry-identity { display: grid; min-width: 0; gap: 5px; padding-inline-end: 280px; }
 .path-management-entry-list > li.has-actions .path-management-entry-identity { padding-inline-end: 0; }
-.path-management-entry-name { display: flex; min-width: 0; min-height: 24px; flex-wrap: wrap; align-items: center; gap: 7px; }
+.path-management-entry-name { display: flex; min-width: 0; flex-wrap: wrap; align-items: flex-start; gap: 7px; }
 .path-management-entry-name strong { min-width: 0; color: var(--text); font-size: .86rem; overflow-wrap: anywhere; }
 .path-management-entry-badges { position: absolute; inset-block-start: 10px; inset-inline-end: 17px; display: flex; max-width: calc(100% - 34px); flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.path-management-entry-list > li.has-entry-name .path-management-entry-badges { inset-block-start: 15px; }
 .path-management-entry-badge { display: inline-flex; min-height: 24px; align-items: center; justify-content: center; gap: 4px; padding: 4px 8px; border: 0; border-radius: 999px; color: var(--text-muted); background: var(--surface-3); font-size: .65rem; font-weight: 720; line-height: 1; white-space: nowrap; }
 .path-management-entry-badge.hop-count { color: var(--accent-strong); background: var(--accent-soft); }
 .path-management-hash { min-width: 0; color: var(--text); font-size: .76rem; font-weight: 700; overflow-wrap: normal; white-space: nowrap; }
