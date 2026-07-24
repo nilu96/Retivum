@@ -18,7 +18,10 @@
     statusDetails,
   } from '../../infrastructure/reticulum/runtime';
   import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
-  import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
+  import {
+    pathRequestTimeoutMs,
+    probeTimeoutMsForPath,
+  } from '../../infrastructure/reticulum/timeouts';
   import type { ContextMenuOpenMethod } from '../../lib/actions/contextMenuTrigger';
   import { copyText } from '../../lib/clipboard';
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
@@ -77,12 +80,14 @@
   let groupDestinationsByIdentity = $state(false);
   let validationVisible = $state(false);
   let busyOperations = $state<string[]>([]);
+  let pathRequestCooldownHashes = $state<string[]>([]);
   let confirmation = $state<Confirmation>();
   let entryActions = $state<EntryActions>();
   let highlightedDestination = $state<string>();
   let scrollContainer: HTMLElement | undefined;
   let scrollToTopVisible = $state(false);
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
+  const pathRequestCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const dateFormatter = $derived(createDateFormatter($locale));
   const numberFormatter = $derived(new Intl.NumberFormat($locale, { maximumFractionDigits: 1 }));
   const normalizedDestination = $derived(normalizeDestinationHash(destinationHash));
@@ -177,6 +182,8 @@
     updateScrollState();
     return () => {
       if (highlightTimer !== undefined) clearTimeout(highlightTimer);
+      for (const timer of pathRequestCooldownTimers.values()) clearTimeout(timer);
+      pathRequestCooldownTimers.clear();
       scrollContainer?.removeEventListener('scroll', updateScrollState);
       window.removeEventListener('scroll', updateScrollState);
       scrollContainer = undefined;
@@ -204,6 +211,22 @@
     return busyOperations.includes(key);
   }
 
+  function pathRequestIsDisabled(hash: string): boolean {
+    return operationIsBusy(`request:${hash}`) || pathRequestCooldownHashes.includes(hash);
+  }
+
+  function beginPathRequestCooldown(hash: string): void {
+    const currentTimer = pathRequestCooldownTimers.get(hash);
+    if (currentTimer !== undefined) clearTimeout(currentTimer);
+    if (!pathRequestCooldownHashes.includes(hash)) {
+      pathRequestCooldownHashes = [...pathRequestCooldownHashes, hash];
+    }
+    pathRequestCooldownTimers.set(hash, setTimeout(() => {
+      pathRequestCooldownTimers.delete(hash);
+      pathRequestCooldownHashes = pathRequestCooldownHashes.filter((item) => item !== hash);
+    }, pathRequestTimeoutMs));
+  }
+
   async function runOperation(key: string, operation: () => Promise<boolean>): Promise<boolean> {
     if (operationIsBusy(key)) return false;
     busyOperations = [...busyOperations, key];
@@ -219,8 +242,9 @@
     const hash = selectedHash ?? normalizedDestination;
     if (manualRequest) validationVisible = true;
     const operationKey = hash ? `request:${hash}` : '';
-    if (!hash || $runtimeStatus !== 'online' || operationIsBusy(operationKey)) return;
+    if (!hash || $runtimeStatus !== 'online' || pathRequestIsDisabled(hash)) return;
     busyOperations = [...busyOperations, operationKey];
+    beginPathRequestCooldown(hash);
     const destination = shortHash(hash);
     const controller = new AbortController();
     const activity = liveActivity.start(
@@ -229,6 +253,7 @@
       () => controller.abort(),
     );
     try {
+      await reticulumRuntime.dropDestinationPath(hash);
       const result = await reticulumRuntime.requestDestinationPath(hash, controller.signal);
       if (result.code === 'PATH_REQUEST_CANCELLED') {
         activity.dismiss();
@@ -433,12 +458,10 @@
         class="button primary"
         type="submit"
         disabled={$runtimeStatus !== 'online'
-          || Boolean(normalizedDestination && operationIsBusy(`request:${normalizedDestination}`))}
+          || Boolean(normalizedDestination && pathRequestIsDisabled(normalizedDestination))}
       >
         <Icon name="send" size={17} />
-        {normalizedDestination && operationIsBusy(`request:${normalizedDestination}`)
-          ? $t('pathManagement.request.pending')
-          : $t('pathManagement.request.action')}
+        {$t('pathManagement.request.action')}
       </button>
     </form>
   </section>
@@ -651,7 +674,7 @@
                   <button
                     class="button secondary compact"
                     type="button"
-                    disabled={$runtimeStatus !== 'online' || operationIsBusy(`request:${entry.destinationHash}`)}
+                    disabled={$runtimeStatus !== 'online' || pathRequestIsDisabled(entry.destinationHash)}
                     onclick={() => void requestPath(entry.destinationHash)}
                   ><Icon name="sync" size={15} />{$t('pathManagement.entry.request')}</button>
                   <button
@@ -807,7 +830,7 @@
                     <button
                       class="button secondary compact"
                       type="button"
-                      disabled={$runtimeStatus !== 'online' || operationIsBusy(`request:${entry.destinationHash}`)}
+                      disabled={$runtimeStatus !== 'online' || pathRequestIsDisabled(entry.destinationHash)}
                       onclick={() => void requestPath(entry.destinationHash)}
                     ><Icon name="sync" size={15} />{$t('pathManagement.entry.request')}</button>
                     <button

@@ -31,7 +31,6 @@
     details: Snippet;
     actions?: Snippet;
   } = $props();
-  let actionsHovered = $state(false);
 </script>
 
 <li
@@ -45,7 +44,6 @@
   class:local-destination-entry={local}
   class:has-entry-name={Boolean(localContactName || announcedName)}
   class:has-actions={actions !== undefined && showActions}
-  class:entry-actions-hovered={actionsHovered}
 >
   <div
     class="path-management-entry-copy"
@@ -81,12 +79,7 @@
     </div>
   </div>
   {#if actions && showActions}
-    <div
-      class="path-management-entry-actions"
-      role="group"
-      onpointerenter={() => { actionsHovered = true; }}
-      onpointerleave={() => { actionsHovered = false; }}
-    >
+    <div class="path-management-entry-actions" role="group">
       {@render actions()}
     </div>
   {/if}

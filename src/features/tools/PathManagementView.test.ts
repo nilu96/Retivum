@@ -263,10 +263,6 @@ describe('PathManagementView', () => {
     render(ToastViewport);
 
     const pathEntry = screen.getByText(pathDestination).closest('li');
-    const pathActions = pathEntry!.querySelector('.path-management-entry-actions');
-    await fireEvent.pointerEnter(pathActions!);
-    expect(pathEntry).toHaveClass('entry-actions-hovered');
-    await fireEvent.pointerLeave(pathActions!);
     expect(pathEntry).not.toHaveClass('entry-actions-hovered');
 
     const manualDestination = 'a'.repeat(32);
@@ -275,6 +271,7 @@ describe('PathManagementView', () => {
     });
     await fireEvent.click(screen.getByRole('button', { name: 'Request path' }));
 
+    expect(screen.getByRole('button', { name: 'Request path' })).toBeDisabled();
     expect(request).toHaveBeenCalledWith(manualDestination, expect.any(AbortSignal));
     expect(screen.getByRole('status')).toHaveTextContent('Looking for a path to <aaaaaaaa…aaaaaa>');
     expect(screen.getByRole('status')).toHaveAttribute('aria-busy', 'true');
@@ -296,6 +293,68 @@ describe('PathManagementView', () => {
     request.mockResolvedValueOnce({ ok: true, destinationHash: pathDestination, hops: 2 });
     await fireEvent.click(screen.getByRole('button', { name: 'Request new path' }));
     expect(request).toHaveBeenLastCalledWith(pathDestination, expect.any(AbortSignal));
+  });
+
+  it('invalidates a cached path before requesting its replacement', async () => {
+    const calls: string[] = [];
+    vi.spyOn(reticulumRuntime, 'dropDestinationPath').mockImplementation(async () => {
+      calls.push('drop');
+      return true;
+    });
+    vi.spyOn(reticulumRuntime, 'requestDestinationPath').mockImplementation(async (destinationHash) => {
+      calls.push('request');
+      return { ok: true, destinationHash, hops: 2 };
+    });
+    render(PathManagementView);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Request new path' }));
+    await waitFor(() => expect(calls).toEqual(['drop', 'request']));
+  });
+
+  it('shares the per-destination request cooldown between the form and path entry', async () => {
+    vi.useFakeTimers();
+    let resolveRequest!: (result: Awaited<ReturnType<typeof reticulumRuntime.requestDestinationPath>>) => void;
+    vi.spyOn(reticulumRuntime, 'dropDestinationPath').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'requestDestinationPath').mockImplementation(() => new Promise((resolve) => {
+      resolveRequest = resolve;
+    }));
+
+    try {
+      render(PathManagementView);
+      await fireEvent.input(screen.getByLabelText('Destination hash'), {
+        target: { value: pathDestination },
+      });
+      const formButton = screen.getByRole('button', { name: 'Request path' });
+      const entryButton = screen.getByRole('button', { name: 'Request new path' });
+
+      await fireEvent.click(formButton);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(formButton).toBeDisabled();
+      expect(entryButton).toBeDisabled();
+
+      resolveRequest({ ok: true, destinationHash: pathDestination, hops: 2 });
+      await vi.advanceTimersByTimeAsync(19_999);
+      expect(formButton).toBeDisabled();
+      expect(entryButton).toBeDisabled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(formButton).toBeEnabled();
+      expect(entryButton).toBeEnabled();
+
+      await fireEvent.click(entryButton);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(formButton).toBeDisabled();
+      expect(entryButton).toBeDisabled();
+      resolveRequest({
+        ok: false,
+        destinationHash: pathDestination,
+        code: 'PATH_REQUEST_TIMEOUT',
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(formButton).toBeEnabled();
+      expect(entryButton).toBeEnabled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('finishes a live path activity with an error when discovery times out', async () => {
@@ -341,7 +400,7 @@ describe('PathManagementView', () => {
     expect(observedSignal?.aborted).toBe(true);
     await waitFor(() => {
       expect(screen.queryByRole('status')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Request new path' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Request new path' })).toBeDisabled();
     });
   });
 
