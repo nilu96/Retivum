@@ -192,6 +192,25 @@ describe('PathManagementView', () => {
     expect(screen.getByRole('heading', { name: 'No matching destinations' })).toBeInTheDocument();
   });
 
+  it('excludes local destinations from the known-destination tab count', async () => {
+    knownDestinations.set([{
+      destinationHash: 'a'.repeat(32),
+      isLocal: true,
+      fullDestinationName: 'lxmf.delivery',
+    }, {
+      destinationHash: 'b'.repeat(32),
+      isLocal: true,
+    }]);
+    render(PathManagementView);
+
+    const destinationTab = screen.getByRole('tab', { name: /Known destinations/ });
+    expect(destinationTab.querySelector('span')).toHaveTextContent('0');
+
+    await fireEvent.click(destinationTab);
+    expect(screen.getByText('a'.repeat(32))).toBeInTheDocument();
+    expect(screen.getByText('b'.repeat(32))).toBeInTheDocument();
+  });
+
   it('filters known destinations by destination type and clears the filter', async () => {
     const lxmfDestination = 'a'.repeat(32);
     knownDestinations.set([

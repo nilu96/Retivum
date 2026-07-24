@@ -466,7 +466,7 @@
           onclick={() => { activeTab = 'destinations'; }}
         >
           {$t('pathManagement.tabs.destinations')}
-          <span>{$knownDestinations.length}</span>
+          <span>{forgettableDestinationCount}</span>
         </button>
       </div>
       <button
