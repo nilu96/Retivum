@@ -490,7 +490,7 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .message-attachments { display: flex; flex-direction: column; gap: 8px; margin-block-start: 8px; }
 .message-attachment { position: relative; display: flex; min-width: 0; flex-direction: column; gap: 7px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-1) 76%, transparent); }
 .message-attachment.image { padding: 5px; }
-.message-attachment-image-button { display: block; max-width: 100%; align-self: flex-start; padding: 0; overflow: hidden; border: 0; border-radius: 7px; outline: 0; background: var(--bg); cursor: pointer; }
+.message-attachment-image-button { display: block; max-width: 100%; align-self: flex-start; padding: 0; overflow: hidden; border: 0; border-radius: 7px; outline: 0; background: transparent; cursor: pointer; }
 .message-attachment-image-button:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1px var(--accent); }
 .message-attachment img { display: block; width: auto; max-width: min(100%, 440px); max-height: 420px; object-fit: contain; border-radius: 7px; }
 .message-attachment audio { display: block; width: min(100%, 360px); height: 40px; }
