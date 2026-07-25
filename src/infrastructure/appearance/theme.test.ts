@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setNativeBackdropColor } from './native-backdrop';
-import { applyThemePreference } from './theme';
+import { applyThemePreference, setOverlayBackdropVisible } from './theme';
 
 vi.mock('./native-backdrop', () => ({
   setNativeBackdropColor: vi.fn(),
@@ -44,5 +44,36 @@ describe('applyThemePreference', () => {
     lightAppearance = false;
     changeListener?.();
     expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#0b0f0c');
+  });
+
+  it.each([
+    ['dark', '#050906', '#0b0f0c'],
+    ['light', '#464a47', '#f3f6f3'],
+  ] as const)('dims and restores the %s native backdrop while an overlay is visible', (
+    theme,
+    overlayBackground,
+    themeBackground,
+  ) => {
+    applyThemePreference(theme);
+
+    setOverlayBackdropVisible(true);
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', overlayBackground);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith(overlayBackground);
+
+    setOverlayBackdropVisible(false);
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', themeBackground);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith(themeBackground);
+  });
+
+  it('keeps the native backdrop dimmed until the last overlapping overlay closes', () => {
+    applyThemePreference('light');
+
+    setOverlayBackdropVisible(true);
+    setOverlayBackdropVisible(true);
+    setOverlayBackdropVisible(false);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#464a47');
+
+    setOverlayBackdropVisible(false);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#f3f6f3');
   });
 });

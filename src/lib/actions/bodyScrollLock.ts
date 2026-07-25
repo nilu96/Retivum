@@ -1,3 +1,5 @@
+import { setOverlayBackdropVisible } from '../../infrastructure/appearance/theme';
+
 interface SavedScrollState {
   x: number;
   y: number;
@@ -30,6 +32,7 @@ function acquireBodyScrollLock(): void {
     rootOverflow: root.style.overflow,
   };
   root.classList.add('overlay-open');
+  setOverlayBackdropVisible(true);
   root.style.overflow = 'hidden';
   body.style.position = 'fixed';
   body.style.inset = `${-savedState.y}px 0 auto`;
@@ -45,6 +48,7 @@ function releaseBodyScrollLock(): void {
   const body = document.body;
   const root = document.documentElement;
   root.classList.remove('overlay-open');
+  setOverlayBackdropVisible(false);
   root.style.overflow = state.rootOverflow;
   body.style.position = state.bodyPosition;
   body.style.inset = state.bodyInset;
