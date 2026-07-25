@@ -29,7 +29,7 @@
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Retivum uses Bluetooth to connect to an RNode LoRa interface.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Retivum uses the camera when you scan an LXMA contact QR code.</string>
+	<string>Retivum uses the camera when you scan an LXMA contact QR code or take a photo attachment.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Retivum uses the local network to connect to user-configured Reticulum TCP and UDP interfaces.</string>
 	<key>NSMicrophoneUsageDescription</key>

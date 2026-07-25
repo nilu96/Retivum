@@ -6,6 +6,7 @@ const originalViewport = document.querySelector<HTMLMetaElement>('meta[name="vie
 describe('configureNativeViewport', () => {
   afterEach(() => {
     delete document.documentElement.dataset.nativeShell;
+    delete document.documentElement.dataset.nativePlatform;
     const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
     if (viewport && originalViewport) viewport.content = originalViewport;
     else viewport?.remove();
@@ -18,8 +19,9 @@ describe('configureNativeViewport', () => {
   });
 
   it('disables scaling inside the native shell', () => {
-    configureNativeViewport(true);
+    configureNativeViewport(true, 'android');
     expect(document.documentElement.dataset.nativeShell).toBe('true');
+    expect(document.documentElement.dataset.nativePlatform).toBe('android');
     const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
     expect(viewport?.content).toContain('maximum-scale=1');
     expect(viewport?.content).toContain('user-scalable=no');

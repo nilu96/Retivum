@@ -11,8 +11,9 @@ import { lockNativeScreenOrientation } from './infrastructure/platform/screen-or
 import { appPreferences } from './infrastructure/reticulum/runtime';
 
 const native = Capacitor.isNativePlatform();
-const mobile = native && ['android', 'ios'].includes(Capacitor.getPlatform());
-configureNativeViewport(native);
+const platform = Capacitor.getPlatform();
+const mobile = native && ['android', 'ios'].includes(platform);
+configureNativeViewport(native, platform);
 await lockNativeScreenOrientation(native);
 await keepMobileDisplayAwakeWhileForeground(mobile);
 

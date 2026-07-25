@@ -26,6 +26,14 @@ import ToastViewport from '../../lib/components/ToastViewport.svelte';
 import { clearToasts } from '../../lib/notifications/toasts';
 import ChatView from './ChatView.svelte';
 
+const nativeAttachmentMocks = vi.hoisted(() => ({
+  chooseNativeFiles: vi.fn<() => Promise<File[]>>(),
+  chooseNativePhotos: vi.fn<() => Promise<File[]>>(),
+  takeNativePhoto: vi.fn<() => Promise<File[]>>(),
+}));
+
+vi.mock('../../infrastructure/platform/native-attachment-selection', () => nativeAttachmentMocks);
+
 function setChatDestinations(records: Array<{
   [key: string]: unknown;
   destinationHash: string;
@@ -54,6 +62,7 @@ describe('ChatView', () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
     delete document.documentElement.dataset.nativeShell;
+    delete document.documentElement.dataset.nativePlatform;
     window.history.replaceState(null, '', '#/chat');
     stopRouter = startRouter();
     setChatDestinations([]);
@@ -70,6 +79,9 @@ describe('ChatView', () => {
     clearToasts();
     clearProbeHistory();
     vi.restoreAllMocks();
+    nativeAttachmentMocks.chooseNativeFiles.mockReset().mockResolvedValue([]);
+    nativeAttachmentMocks.chooseNativePhotos.mockReset().mockResolvedValue([]);
+    nativeAttachmentMocks.takeNativePhoto.mockReset().mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -1542,6 +1554,51 @@ describe('ChatView', () => {
     await fireEvent.pointerDown(document.body);
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Choose files' })).not.toBeInTheDocument());
   });
+
+  it.each(['android', 'ios'])(
+    'offers the same ordered, direct attachment sources in the native %s shell',
+    async (platform) => {
+      const destinationHash = '4'.repeat(32);
+      document.documentElement.dataset.nativePlatform = platform;
+      setChatDestinations([{
+        id: `identity:${destinationHash}`,
+        identityId: 'identity',
+        destinationHash,
+        identityHash: '5'.repeat(32),
+        publicKey: '6'.repeat(128),
+        displayName: 'Bob',
+        heardAt: '2026-07-16T10:00:00.000Z',
+      }]);
+      render(ChatView);
+
+      await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+      await fireEvent.click(screen.getByRole('button', { name: /Bob/ }));
+      await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+
+      const menu = screen.getByRole('button', { name: 'Photo library' })
+        .closest('.composer-attachment-menu');
+      expect(menu?.querySelectorAll('button')).toHaveLength(4);
+      expect(Array.from(menu?.querySelectorAll('button') ?? [], (button) => button.textContent)).toEqual([
+        'Photo library',
+        'Take photo',
+        'Choose files',
+        'Record audio message',
+      ]);
+      expect(document.querySelector('input[type="file"]')).toBeNull();
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Photo library' }));
+      expect(nativeAttachmentMocks.chooseNativePhotos).toHaveBeenCalledOnce();
+      expect(nativeAttachmentMocks.takeNativePhoto).not.toHaveBeenCalled();
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+      await fireEvent.click(screen.getByRole('button', { name: 'Take photo' }));
+      expect(nativeAttachmentMocks.takeNativePhoto).toHaveBeenCalledOnce();
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
+      await fireEvent.click(screen.getByRole('button', { name: 'Choose files' }));
+      expect(nativeAttachmentMocks.chooseNativeFiles).toHaveBeenCalledOnce();
+    },
+  );
 
   it('allows an attachment-only message to be selected and sent', async () => {
     const destinationHash = '4'.repeat(32);

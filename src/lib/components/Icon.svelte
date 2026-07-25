@@ -39,6 +39,7 @@
     | 'home'
     | 'sync'
     | 'paperclip'
+    | 'camera'
     | 'image'
     | 'microphone'
     | 'stop'
@@ -189,6 +190,9 @@
     <path d="M8 16H3v5" />
   {:else if name === 'paperclip'}
     <path d="m20.5 11.5-8.8 8.8a6 6 0 0 1-8.5-8.5l9.5-9.5a4 4 0 0 1 5.7 5.7l-9.5 9.5a2 2 0 0 1-2.8-2.8l8.8-8.8" />
+  {:else if name === 'camera'}
+    <path d="M4 7h3l1.5-2h7L17 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z" />
+    <circle cx="12" cy="13" r="4" />
   {:else if name === 'image'}
     <rect x="3" y="4" width="18" height="16" rx="2" />
     <circle cx="8.5" cy="9" r="1.5" />

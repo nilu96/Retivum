@@ -6,9 +6,10 @@ const NATIVE_VIEWPORT = [
   'viewport-fit=cover',
 ].join(', ');
 
-export function configureNativeViewport(isNativePlatform: boolean): void {
+export function configureNativeViewport(isNativePlatform: boolean, platform?: string): void {
   if (!isNativePlatform) return;
   document.documentElement.dataset.nativeShell = 'true';
+  if (platform) document.documentElement.dataset.nativePlatform = platform;
   let viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
   if (!viewport) {
     viewport = document.createElement('meta');
@@ -16,4 +17,8 @@ export function configureNativeViewport(isNativePlatform: boolean): void {
     document.head.append(viewport);
   }
   viewport.content = NATIVE_VIEWPORT;
+}
+
+export function isMobileNativeShell(): boolean {
+  return ['android', 'ios'].includes(document.documentElement.dataset.nativePlatform ?? '');
 }

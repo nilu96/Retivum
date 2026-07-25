@@ -51,6 +51,12 @@
     inspectChatImageForDownscale,
     type ChatImageDownscaleCandidate,
   } from '../../infrastructure/platform/chat-image-downscale';
+  import {
+    chooseNativeFiles,
+    chooseNativePhotos,
+    takeNativePhoto,
+  } from '../../infrastructure/platform/native-attachment-selection';
+  import { isMobileNativeShell } from '../../infrastructure/platform/native-viewport';
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
@@ -105,6 +111,7 @@
   let attachmentMenu = $state<HTMLDivElement>();
   let attachmentMenuButton = $state<HTMLButtonElement>();
   let fileInput = $state<HTMLInputElement>();
+  const nativeAttachmentSources = isMobileNativeShell();
   let imageDownscaleConfirmation = $state.raw<PendingImageDownscaleConfirmation>();
   let recording = $state(false);
   let mediaRecorder: MediaRecorder | undefined;
@@ -862,6 +869,30 @@
     input.value = '';
   }
 
+  function openAttachmentPicker(input: HTMLInputElement | undefined): void {
+    attachmentMenuOpen = false;
+    input?.click();
+  }
+
+  async function addNativeAttachments(
+    select: () => Promise<File[]>,
+    destinationHash = selectedDestination,
+  ): Promise<void> {
+    attachmentMenuOpen = false;
+    try {
+      const files = await select();
+      if (files.length > 0) await addFiles(files, destinationHash);
+    } catch (error) {
+      if (error instanceof Error && error.message === 'LXMF_ATTACHMENTS_TOO_LARGE') {
+        toast.error('chat.attachment.tooLarge', {
+          size: formatChatByteSize(MAX_CHAT_ATTACHMENT_BYTES),
+        });
+      } else {
+        toast.error('chat.attachment.selectionError');
+      }
+    }
+  }
+
   function removeAttachment(index: number): void {
     composerAttachments = composerAttachments.filter((_, itemIndex) => itemIndex !== index);
     if (selectedDestination) {
@@ -1369,14 +1400,16 @@
       {/if}
       </div>
       <form class="message-composer" onsubmit={sendMessage}>
-        <input
-          class="sr-only"
-          bind:this={fileInput}
-          type="file"
-          multiple
-          tabindex="-1"
-          onchange={fileSelectionChanged}
-        />
+        {#if !nativeAttachmentSources}
+          <input
+            class="sr-only"
+            bind:this={fileInput}
+            type="file"
+            multiple
+            tabindex="-1"
+            onchange={fileSelectionChanged}
+          />
+        {/if}
         {#if composerAttachments.length > 0}
           <div class="composer-attachments" aria-label={$t('chat.attachment.add')}>
             {#each composerAttachments as attachment, index (`${attachment.name}:${index}`)}
@@ -1398,12 +1431,21 @@
         <div class="composer-attachment-control">
           {#if attachmentMenuOpen && !recording}
             <div class="composer-attachment-menu" bind:this={attachmentMenu}>
-              <button type="button" onclick={() => {
-                attachmentMenuOpen = false;
-                fileInput?.click();
-              }}>
-                <Icon name="file" size={17} />{$t('chat.attachment.addFile')}
-              </button>
+              {#if nativeAttachmentSources}
+                <button type="button" onclick={() => void addNativeAttachments(chooseNativePhotos)}>
+                  <Icon name="image" size={17} />{$t('chat.attachment.photoLibrary')}
+                </button>
+                <button type="button" onclick={() => void addNativeAttachments(takeNativePhoto)}>
+                  <Icon name="camera" size={17} />{$t('chat.attachment.takePhoto')}
+                </button>
+                <button type="button" onclick={() => void addNativeAttachments(chooseNativeFiles)}>
+                  <Icon name="file" size={17} />{$t('chat.attachment.addFile')}
+                </button>
+              {:else}
+                <button type="button" onclick={() => openAttachmentPicker(fileInput)}>
+                  <Icon name="file" size={17} />{$t('chat.attachment.addFile')}
+                </button>
+              {/if}
               <button type="button" onclick={() => {
                 attachmentMenuOpen = false;
                 void toggleRecording();
