@@ -24,6 +24,7 @@
     isRenderableChatImage,
     MAX_CHAT_ATTACHMENT_BYTES,
     normalizeChatAttachments,
+    sortChatAttachmentsForDisplay,
   } from '../../domain/chat-attachments';
   import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
@@ -1338,8 +1339,12 @@
                 {#if message.content}<p>{message.content}</p>{/if}
               </div>
               {#if message.attachments?.length}
-                <div class="message-attachments">
-                  {#each message.attachments as attachment, index (`${attachment.name}:${index}`)}
+                {@const displayAttachments = sortChatAttachmentsForDisplay(message.attachments)}
+                {@const imagePreviewCount = displayAttachments.filter(
+                  (attachment) => isRenderableChatImage(attachment.mimeType),
+                ).length}
+                <div class="message-attachments" class:gallery={imagePreviewCount > 1}>
+                  {#each displayAttachments as attachment, index (`${attachment.name}:${index}`)}
                     <MessageAttachment {attachment} onlayout={() => attachmentLayoutReady(message.id)} />
                   {/each}
                 </div>

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  chatAttachmentDisplayType,
   formatChatByteSize,
   MAX_CHAT_ATTACHMENT_BYTES,
   normalizeChatAttachments,
+  sortChatAttachmentsForDisplay,
 } from './chat-attachments';
 
 describe('chat attachment policy', () => {
@@ -24,6 +26,36 @@ describe('chat attachment policy', () => {
       mimeType: 'application/octet-stream',
       data: new Uint8Array(MAX_CHAT_ATTACHMENT_BYTES + 1),
     }])).toThrow('LXMF_ATTACHMENTS_TOO_LARGE');
+  });
+
+  it('stably sorts images before audio and other files by their media type', () => {
+    const attachments = [
+      { kind: 'file' as const, name: 'notes.txt', mimeType: 'text/plain', data: new Uint8Array([1]) },
+      { kind: 'file' as const, name: 'second.png', mimeType: 'image/png', data: new Uint8Array([2]) },
+      { kind: 'file' as const, name: 'recording.m4a', mimeType: 'audio/mp4', data: new Uint8Array([3]) },
+      { kind: 'image' as const, name: 'first.jpg', mimeType: 'image/jpeg', data: new Uint8Array([4]) },
+      { kind: 'audio' as const, name: 'legacy-audio', mimeType: 'application/octet-stream', data: new Uint8Array([5]) },
+      { kind: 'file' as const, name: 'document.pdf', mimeType: 'application/pdf', data: new Uint8Array([6]) },
+    ];
+
+    expect(sortChatAttachmentsForDisplay(attachments).map((attachment) => attachment.name)).toEqual([
+      'second.png',
+      'first.jpg',
+      'recording.m4a',
+      'legacy-audio',
+      'notes.txt',
+      'document.pdf',
+    ]);
+    expect(attachments.map((attachment) => attachment.name)).toEqual([
+      'notes.txt',
+      'second.png',
+      'recording.m4a',
+      'first.jpg',
+      'legacy-audio',
+      'document.pdf',
+    ]);
+    expect(chatAttachmentDisplayType(attachments[1])).toBe('image');
+    expect(chatAttachmentDisplayType(attachments[2])).toBe('audio');
   });
 
   it('formats byte sizes with decimal SI units', () => {

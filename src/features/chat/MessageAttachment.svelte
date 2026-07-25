@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import type { ChatAttachment } from '../../domain/chat';
   import {
+    chatAttachmentDisplayType,
     formatChatByteSize,
     isRenderableChatImage,
   } from '../../domain/chat-attachments';
@@ -23,11 +24,8 @@
   let previewButton = $state<HTMLButtonElement>();
   let closeButton = $state<HTMLButtonElement>();
   const imageAttachment = $derived(isRenderableChatImage(attachment.mimeType));
-  const attachmentIcon = $derived(
-    imageAttachment
-      ? 'image'
-      : attachment.mimeType.startsWith('audio/') ? 'microphone' : 'file',
-  );
+  const displayType = $derived(chatAttachmentDisplayType(attachment));
+  const attachmentIcon = $derived(displayType === 'audio' ? 'microphone' : displayType);
 
   $effect(() => {
     const url = URL.createObjectURL(new Blob([attachment.data as BlobPart], { type: attachment.mimeType }));
@@ -104,7 +102,7 @@
       onpointerdown={(event) => event.stopPropagation()}
       onkeydown={(event) => event.stopPropagation()}
     ><img src={objectUrl} alt={attachment.name} loading="lazy" onload={attachmentLayoutReady} /></button>
-  {:else if attachment.kind === 'audio'}
+  {:else if displayType === 'audio'}
     <audio src={objectUrl} controls preload="metadata" onloadedmetadata={attachmentLayoutReady}>
       {$t('chat.attachment.audioUnsupported')}
     </audio>

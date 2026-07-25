@@ -1809,10 +1809,10 @@ describe('ChatView', () => {
       content: '',
       attachments: [
         {
-          kind: 'image',
-          name: 'first.gif',
-          mimeType: 'image/gif',
-          data: new Uint8Array([1]),
+          kind: 'file',
+          name: 'notes.txt',
+          mimeType: 'text/plain',
+          data: new Uint8Array([3]),
         },
         {
           kind: 'file',
@@ -1820,14 +1820,34 @@ describe('ChatView', () => {
           mimeType: 'image/gif',
           data: new Uint8Array([2]),
         },
+        {
+          kind: 'file',
+          name: 'recording.m4a',
+          mimeType: 'audio/mp4',
+          data: new Uint8Array([4]),
+        },
+        {
+          kind: 'image',
+          name: 'first.gif',
+          mimeType: 'image/gif',
+          data: new Uint8Array([1]),
+        },
       ],
       receivedAt: '2026-07-16T10:00:00.000Z',
     }]);
 
-    await waitFor(() => expect(document.querySelectorAll('.message-file-copy')).toHaveLength(2));
-    expect(Array.from(document.querySelectorAll('.message-file-copy')).map(
+    await waitFor(() => expect(document.querySelectorAll('.message-file-copy')).toHaveLength(4));
+    const attachmentCopies = Array.from(document.querySelectorAll('.message-file-copy'));
+    expect(attachmentCopies.map((element) => element.textContent?.trim())).toEqual([
+      'second.gif1 B',
+      'first.gif1 B',
+      'recording.m4a1 B',
+      'notes.txt1 B',
+    ]);
+    expect(attachmentCopies.map(
       (element) => element.getAttribute('data-attachment-icon'),
-    )).toEqual(['image', 'image']);
+    )).toEqual(['image', 'image', 'microphone', 'file']);
+    expect(document.querySelector('.message-attachments')).toHaveClass('gallery');
 
     const secondPreview = screen.getByRole('button', { name: 'View second.gif full size' });
     await fireEvent.click(secondPreview);

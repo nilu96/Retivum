@@ -488,6 +488,11 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .composer-attachment-menu button:hover { background: var(--surface-hover); }
 .message-composer > p { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: .7rem; }
 .message-attachments { display: flex; flex-direction: column; gap: 8px; margin-block-start: 8px; }
+.message-attachments.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.message-attachments.gallery > .message-attachment:not(.image) { grid-column: 1 / -1; }
+.message-attachments.gallery > .message-attachment.image .message-file-copy { padding-inline-end: 0; }
+.message-attachments.gallery > .message-attachment.image .message-attachment-image-button { width: 100%; aspect-ratio: 4 / 3; }
+.message-attachments.gallery > .message-attachment.image .message-attachment-image-button img { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: cover; }
 .message-attachment { position: relative; display: flex; min-width: 0; flex-direction: column; gap: 7px; padding: 9px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-1) 76%, transparent); }
 .message-attachment.image { padding: 5px; }
 .message-attachment-image-button { display: block; max-width: 100%; align-self: flex-start; padding: 0; overflow: hidden; border: 0; border-radius: 7px; outline: 0; background: transparent; cursor: pointer; }

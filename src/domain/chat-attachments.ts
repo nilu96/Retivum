@@ -4,9 +4,34 @@ export const MAX_CHAT_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const MAX_CHAT_ATTACHMENTS = 16;
 
 const renderableImages = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif']);
+const attachmentTypeOrder: Record<ChatAttachment['kind'], number> = {
+  image: 0,
+  audio: 1,
+  file: 2,
+};
 
 export function isRenderableChatImage(mimeType: string): boolean {
   return renderableImages.has(mimeType.toLowerCase());
+}
+
+export function chatAttachmentDisplayType(attachment: ChatAttachment): ChatAttachment['kind'] {
+  const mimeType = attachment.mimeType.toLowerCase().split(';', 1)[0].trim();
+  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  return attachment.kind === 'audio' ? 'audio' : attachment.kind === 'image' ? 'image' : 'file';
+}
+
+export function sortChatAttachmentsForDisplay(
+  attachments: readonly ChatAttachment[],
+): ChatAttachment[] {
+  return attachments
+    .map((attachment, index) => ({ attachment, index }))
+    .sort((left, right) => (
+      attachmentTypeOrder[chatAttachmentDisplayType(left.attachment)]
+      - attachmentTypeOrder[chatAttachmentDisplayType(right.attachment)]
+      || left.index - right.index
+    ))
+    .map(({ attachment }) => attachment);
 }
 
 export function normalizeChatAttachments(attachments: ChatAttachment[] | undefined): ChatAttachment[] {
