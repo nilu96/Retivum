@@ -97,8 +97,9 @@
     return $chatContacts.length ? 'contacts' : 'announces';
   }
 
-  let selectedScope = $state<ChatScope | undefined>(
-    $chatDirectoryReady ? preferredChatScope() : undefined,
+  let initialScopePending = $state(!$chatDirectoryReady);
+  let selectedScope = $state<ChatScope>(
+    $chatDirectoryReady ? preferredChatScope() : 'chats',
   );
   let query = $state('');
   let selectedDestination = $state<string | undefined>();
@@ -196,7 +197,7 @@
 
   const lxmfDestinations = $derived(destinationsByFullName($knownDestinations, 'lxmf.delivery'));
   const conversations = $derived(chatConversationSummaries($chatMessages, lxmfDestinations, $chatContacts));
-  const scope = $derived<ChatScope>(selectedScope ?? 'announces');
+  const scope = $derived<ChatScope>(selectedScope);
   const blockedDestinationHashes = $derived(new Set($blockedChatDestinations.map((item) => item.destinationHash)));
   const normalizedQuery = $derived(query.trim().toLowerCase());
   const visibleConversations = $derived(conversations.filter((conversation) => [
@@ -255,7 +256,8 @@
   const dateFormatter = $derived(createDateFormatter($locale));
 
   $effect(() => {
-    if (selectedScope !== undefined || !$chatDirectoryReady) return;
+    if (!initialScopePending || !$chatDirectoryReady) return;
+    initialScopePending = false;
     selectedScope = preferredChatScope();
   });
 
@@ -1089,6 +1091,7 @@
           aria-selected={scope === item.id}
           class:active={scope === item.id}
           onclick={() => {
+            initialScopePending = false;
             selectedScope = item.id;
             query = '';
           }}

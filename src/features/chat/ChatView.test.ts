@@ -160,10 +160,11 @@ describe('ChatView', () => {
     expect(screen.getByText('Existing conversation')).toBeInTheDocument();
   });
 
-  it('selects contacts when they finish loading after the view opens', async () => {
+  it('starts on chats, then selects contacts when an empty chat directory finishes loading', async () => {
     chatDirectoryReady.set(false);
     render(ChatView);
-    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: 'No conversations yet' })).toBeInTheDocument();
 
     const destinationHash = '4'.repeat(32);
     chatContacts.set([{
@@ -180,6 +181,70 @@ describe('ChatView', () => {
       expect(screen.getByRole('tab', { name: 'Contacts' })).toHaveAttribute('aria-selected', 'true');
     });
     expect(screen.getByText('Loaded contact')).toBeInTheDocument();
+  });
+
+  it('stays on chats when conversations finish loading after the view opens', async () => {
+    const destinationHash = '4'.repeat(32);
+    chatDirectoryReady.set(false);
+    setChatDestinations([{
+      destinationHash: '7'.repeat(32),
+      displayName: 'Visible announce',
+      heardAt: '2026-07-16T09:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByText('Visible announce')).not.toBeInTheDocument();
+
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Loaded conversation',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatMessages.set([{
+      id: 'identity:loaded-conversation',
+      identityId: 'identity',
+      messageId: 'loaded-conversation',
+      sourceHash: destinationHash,
+      destinationHash: '3'.repeat(32),
+      title: '',
+      content: 'Loaded message',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    chatDirectoryReady.set(true);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+    });
+    expect(screen.getByText('Loaded message')).toBeInTheDocument();
+    expect(screen.queryByText('Visible announce')).not.toBeInTheDocument();
+  });
+
+  it('falls back from chats to announces when the loaded directory has no conversations or contacts', async () => {
+    chatDirectoryReady.set(false);
+    render(ChatView);
+
+    expect(screen.getByRole('tab', { name: 'Chats' })).toHaveAttribute('aria-selected', 'true');
+
+    chatDirectoryReady.set(true);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+    });
+  });
+
+  it('keeps an explicit scope choice made while the chat directory is loading', async () => {
+    chatDirectoryReady.set(false);
+    render(ChatView);
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+
+    chatDirectoryReady.set(true);
+    await tick();
+
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('does not switch from contacts when the first chat starts while the view is open', async () => {
