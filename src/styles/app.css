@@ -345,6 +345,9 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 @media (hover: hover) and (pointer: fine) {
   button.tool-card:hover { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
 }
+@media (hover: none) and (pointer: coarse) {
+  button.tool-card:active { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
+}
 .tool-icon { display: grid; width: 46px; height: 46px; place-items: center; border-radius: 12px; color: var(--accent); background: var(--accent-soft); }
 .tool-copy { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
 .tool-copy h2 { margin: 0; font-size: .95rem; }
