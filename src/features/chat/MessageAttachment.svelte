@@ -1,7 +1,10 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import type { ChatAttachment } from '../../domain/chat';
-  import { formatChatByteSize } from '../../domain/chat-attachments';
+  import {
+    formatChatByteSize,
+    isRenderableChatImage,
+  } from '../../domain/chat-attachments';
   import { saveChatFile } from '../../infrastructure/platform/file-save';
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
@@ -19,8 +22,9 @@
   let viewerOpen = $state(false);
   let previewButton = $state<HTMLButtonElement>();
   let closeButton = $state<HTMLButtonElement>();
+  const imageAttachment = $derived(isRenderableChatImage(attachment.mimeType));
   const attachmentIcon = $derived(
-    attachment.mimeType.startsWith('image/')
+    imageAttachment
       ? 'image'
       : attachment.mimeType.startsWith('audio/') ? 'microphone' : 'file',
   );
@@ -59,12 +63,18 @@
     if (saving) return;
     saving = true;
     try {
-      if (!await saveChatFile(attachment.name, attachment.mimeType, attachment.data, attachment.kind, {
-        save: $t('chat.attachment.saveImageAction'),
-        share: $t('chat.attachment.shareImageAction'),
-        cancel: $t('common.cancel'),
-        shareTitle: $t('chat.attachment.shareImageTitle'),
-      })) {
+      if (!await saveChatFile(
+        attachment.name,
+        attachment.mimeType,
+        attachment.data,
+        imageAttachment ? 'image' : attachment.kind,
+        {
+          save: $t('chat.attachment.saveImageAction'),
+          share: $t('chat.attachment.shareImageAction'),
+          cancel: $t('common.cancel'),
+          shareTitle: $t('chat.attachment.shareImageTitle'),
+        },
+      )) {
         toast.error('chat.attachment.saveError');
       }
     } finally {
@@ -78,12 +88,12 @@
 
 </script>
 
-<div class="message-attachment" class:image={attachment.kind === 'image'}>
+<div class="message-attachment" class:image={imageAttachment}>
   <div class="message-file-copy" data-attachment-icon={attachmentIcon}>
     <Icon name={attachmentIcon} size={19} />
     <span><strong>{attachment.name}</strong><small>{formatChatByteSize(attachment.data.byteLength)}</small></span>
   </div>
-  {#if attachment.kind === 'image'}
+  {#if imageAttachment}
     <button
       bind:this={previewButton}
       type="button"
@@ -109,7 +119,7 @@
   ><Icon name="download" size={15} /><span>{$t('chat.attachment.saveAction')}</span></button>
 </div>
 
-{#if viewerOpen && attachment.kind === 'image'}
+{#if viewerOpen && imageAttachment}
   <div
     class="message-image-viewer"
     role="dialog"

@@ -31,8 +31,12 @@ const nativeAttachmentMocks = vi.hoisted(() => ({
   chooseNativePhotos: vi.fn<() => Promise<File[]>>(),
   takeNativePhoto: vi.fn<() => Promise<File[]>>(),
 }));
+const fileSaveMocks = vi.hoisted(() => ({
+  saveChatFile: vi.fn(),
+}));
 
 vi.mock('../../infrastructure/platform/native-attachment-selection', () => nativeAttachmentMocks);
+vi.mock('../../infrastructure/platform/file-save', () => fileSaveMocks);
 
 function setChatDestinations(records: Array<{
   [key: string]: unknown;
@@ -82,6 +86,7 @@ describe('ChatView', () => {
     nativeAttachmentMocks.chooseNativeFiles.mockReset().mockResolvedValue([]);
     nativeAttachmentMocks.chooseNativePhotos.mockReset().mockResolvedValue([]);
     nativeAttachmentMocks.takeNativePhoto.mockReset().mockResolvedValue([]);
+    fileSaveMocks.saveChatFile.mockReset().mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -1759,7 +1764,7 @@ describe('ChatView', () => {
     })]);
   });
 
-  it('uses the image icon for every image in the draft', async () => {
+  it('uses image preview and save behavior for every image attachment', async () => {
     const destinationHash = '4'.repeat(32);
     setChatDestinations([{
       id: `identity:${destinationHash}`,
@@ -1823,6 +1828,27 @@ describe('ChatView', () => {
     expect(Array.from(document.querySelectorAll('.message-file-copy')).map(
       (element) => element.getAttribute('data-attachment-icon'),
     )).toEqual(['image', 'image']);
+
+    const secondPreview = screen.getByRole('button', { name: 'View second.gif full size' });
+    await fireEvent.click(secondPreview);
+    const viewer = await screen.findByRole('dialog', { name: 'Image preview: second.gif' });
+    expect(viewer).toBeInTheDocument();
+    await fireEvent.keyDown(viewer, { key: 'Escape' });
+    await waitFor(() => expect(secondPreview).toHaveFocus());
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Save second.gif' }));
+    await waitFor(() => expect(fileSaveMocks.saveChatFile).toHaveBeenCalledWith(
+      'second.gif',
+      'image/gif',
+      new Uint8Array([2]),
+      'image',
+      {
+        save: 'Save image',
+        share: 'Share…',
+        cancel: 'Cancel',
+        shareTitle: 'Share image',
+      },
+    ));
   });
 
   it('prompts once and keeps a smaller downscaled image attachment', async () => {
