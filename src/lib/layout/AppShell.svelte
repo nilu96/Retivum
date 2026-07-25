@@ -58,6 +58,8 @@
   let mobileDragButton: HTMLButtonElement | undefined;
   let mobileStatusButton: HTMLButtonElement | undefined;
   let appShellElement: HTMLDivElement | undefined;
+  let mainContentElement: HTMLElement | undefined;
+  let scrollResetRoute: AppRoute | undefined;
   let mobileDragLatest: { x: number; y: number } | undefined;
   let mobileDragGrabOffset: { x: number; y: number } | undefined;
   let mobileDragOriginalSide: 'left' | 'right' = 'right';
@@ -70,6 +72,23 @@
       ? createLxmaAddress($deliveryDestinationHash, $activeIdentity.publicKeyHex)
       : undefined,
   );
+
+  $effect(() => {
+    const routeToReset = current;
+    if (scrollResetRoute === routeToReset) return;
+    scrollResetRoute = routeToReset;
+    void tick().then(() => {
+      if (current !== routeToReset) return;
+      if (mainContentElement) {
+        mainContentElement.scrollTop = 0;
+        mainContentElement.scrollLeft = 0;
+      }
+      document.documentElement.scrollTop = 0;
+      document.documentElement.scrollLeft = 0;
+      document.body.scrollTop = 0;
+      document.body.scrollLeft = 0;
+    });
+  });
 
   function navigationLabel(item: (typeof navigation)[number]): string {
     if (item.route !== 'chat' || $unreadChatMessageCount === 0) return $t(item.label);
@@ -362,7 +381,7 @@
     </button>
   </aside>
 
-  <main id="main-content" tabindex="-1">
+  <main id="main-content" tabindex="-1" bind:this={mainContentElement}>
     {@render children()}
   </main>
 

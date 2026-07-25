@@ -50,6 +50,28 @@ describe('AppShell Chat unread indicator', () => {
     expect(settingsButtons.every((button) => !button.classList.contains('active'))).toBe(true);
   });
 
+  it('resets desktop and mobile scroll positions when the route changes', async () => {
+    const { rerender } = render(AppShell, { current: 'tools', children: emptyChildren });
+    const main = document.getElementById('main-content') as HTMLElement;
+    main.scrollTop = 240;
+    main.scrollLeft = 20;
+    document.documentElement.scrollTop = 240;
+    document.documentElement.scrollLeft = 20;
+    document.body.scrollTop = 240;
+    document.body.scrollLeft = 20;
+
+    await rerender({ current: 'path-management', children: emptyChildren });
+
+    await waitFor(() => {
+      expect(main.scrollTop).toBe(0);
+      expect(main.scrollLeft).toBe(0);
+      expect(document.documentElement.scrollTop).toBe(0);
+      expect(document.documentElement.scrollLeft).toBe(0);
+      expect(document.body.scrollTop).toBe(0);
+      expect(document.body.scrollLeft).toBe(0);
+    });
+  });
+
   it('shows the live network state beside the mobile announce action', async () => {
     render(AppShell, { current: 'chat', children: emptyChildren });
 
