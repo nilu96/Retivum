@@ -514,6 +514,55 @@ describe('ChatView', () => {
     await waitFor(() => expect(feed.scrollTop).toBe(1300));
   });
 
+  it('scrolls once when an inbound message transfer appears in the open conversation', async () => {
+    const sourceHash = 'a'.repeat(32);
+    let feedHeight = 500;
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    chatMessages.set([{
+      id: 'identity:transfer-scroll-message',
+      identityId: 'identity',
+      messageId: 'transfer-scroll-message',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Message before transfer',
+      direction: 'incoming',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message before transfer/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(500));
+    feed.scrollTop = 0;
+    feedHeight = 1300;
+
+    chatInboundTransfers.set([{
+      id: 'incoming-transfer-scroll',
+      destinationHash: sourceHash,
+      progress: 0.1,
+      dataSize: 4096,
+      transferSize: 4352,
+    }]);
+
+    expect(await screen.findByText('Receiving LXMF message')).toBeInTheDocument();
+    await waitFor(() => expect(feed.scrollTop).toBe(1300));
+
+    await fireEvent.pointerDown(feed);
+    feed.scrollTop = 100;
+    feedHeight = 1400;
+    chatInboundTransfers.set([{
+      id: 'incoming-transfer-scroll',
+      destinationHash: sourceHash,
+      progress: 0.5,
+      dataSize: 4096,
+      transferSize: 4352,
+    }]);
+    await tick();
+
+    expect(feed.scrollTop).toBe(100);
+  });
+
   it('keeps the conversation at the bottom while image attachments finish layout', async () => {
     const sourceHash = 'b'.repeat(32);
     let feedHeight = 500;

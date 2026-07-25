@@ -138,6 +138,8 @@
   let openedUnreadMessageIds = $state<string[]>([]);
   let observedIncomingDestination = $state<string | undefined>();
   let observedIncomingMessageId = $state<string | undefined>();
+  let observedInboundTransferDestination: string | undefined;
+  let observedInboundTransferIds = new Set<string>();
   let messageActions = $state<{
     message: ChatMessage;
     x: number;
@@ -296,6 +298,19 @@
     observedIncomingMessageId = latestIncomingId;
     openedUnreadMessageIds = [latestIncomingId];
     void scrollToLatestMessage();
+  });
+
+  $effect(() => {
+    const destination = selectedDestination;
+    const transferIds = new Set(selectedInboundTransfers.map((transfer) => transfer.id));
+    if (observedInboundTransferDestination !== destination) {
+      observedInboundTransferDestination = destination;
+      observedInboundTransferIds = transferIds;
+      return;
+    }
+    const hasNewTransfer = [...transferIds].some((id) => !observedInboundTransferIds.has(id));
+    observedInboundTransferIds = transferIds;
+    if (destination && hasNewTransfer) void scrollToLatestMessage();
   });
 
   $effect(() => {
