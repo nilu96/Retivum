@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1684,7 +1684,7 @@ describe('ChatView', () => {
     expect(screen.getByText('Arrived after mount')).toBeInTheDocument();
   });
 
-  it('prefills a contact name from the selected announce and saves a custom name', async () => {
+  it('opens add contact from the conversation header name and prefills the announce label', async () => {
     const destinationHash = '1'.repeat(32);
     setChatDestinations([{
       id: `identity:${destinationHash}`,
@@ -1700,13 +1700,102 @@ describe('ChatView', () => {
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     await fireEvent.click(screen.getByRole('button', { name: /Announced Alice/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Add contact' }));
+    const headerContact = screen.getByRole('button', { name: 'Add Announced Alice as contact' });
+    await fireEvent.click(within(headerContact).getByText('Announced Alice'));
 
     const name = screen.getByRole('textbox', { name: /^Contact name/ });
     expect(name).toHaveValue('Announced Alice');
     await fireEvent.input(name, { target: { value: 'My Alice' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(saveContact).toHaveBeenCalledWith(destinationHash, 'My Alice');
+  });
+
+  it('opens edit contact from the conversation header destination hash', async () => {
+    const destinationHash = '6'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Saved Alice',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatMessages.set([{
+      id: 'identity:saved-alice-message',
+      identityId: 'identity',
+      messageId: 'saved-alice-message',
+      sourceHash: destinationHash,
+      destinationHash: '7'.repeat(32),
+      title: '',
+      content: 'Message from saved Alice',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message from saved Alice/ }));
+    const headerContact = screen.getByRole('button', { name: 'Edit contact Saved Alice' });
+    await fireEvent.click(within(headerContact).getByText(destinationHash));
+
+    expect(screen.getByRole('heading', { name: 'Edit contact' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /^Contact name/ })).toHaveValue('Saved Alice');
+  });
+
+  it('opens shared chat actions from conversation header context gestures', async () => {
+    const destinationHash = '8'.repeat(32);
+    chatContacts.set([{
+      id: `identity:${destinationHash}`,
+      identityId: 'identity',
+      destinationHash,
+      name: 'Context Alice',
+      createdAt: '2026-07-16T10:00:00.000Z',
+      updatedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatMessages.set([{
+      id: 'identity:context-alice-message',
+      identityId: 'identity',
+      messageId: 'context-alice-message',
+      sourceHash: destinationHash,
+      destinationHash: '9'.repeat(32),
+      title: '',
+      content: 'Message from context Alice',
+      direction: 'incoming',
+      status: 'delivered',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Message from context Alice/ }));
+    const headerContact = screen.getByRole('button', { name: 'Edit contact Context Alice' });
+
+    await fireEvent.contextMenu(headerContact, { clientX: 70, clientY: 90 });
+    expect(screen.getByRole('menu', { name: 'Chat actions' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Copy destination hash' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Edit contact' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Close chat actions' }));
+
+    vi.useFakeTimers();
+    try {
+      await fireEvent.pointerDown(headerContact, {
+        pointerType: 'touch',
+        pointerId: 5,
+        button: 0,
+        clientX: 80,
+        clientY: 120,
+      });
+      await vi.advanceTimersByTimeAsync(550);
+      expect(screen.getByRole('menu', { name: 'Chat actions' })).toBeInTheDocument();
+      await fireEvent.pointerUp(headerContact, {
+        pointerType: 'touch',
+        pointerId: 5,
+        button: 0,
+      });
+      await fireEvent.click(headerContact, { detail: 1 });
+      expect(screen.queryByRole('heading', { name: 'Edit contact' })).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('deletes a contact from the Contacts list', async () => {

@@ -1301,10 +1301,31 @@
           aria-label={$t('common.back')}
           onclick={closeConversation}
         ><Icon name="arrow-right" size={19} /></button>
-        <div class="conversation-peer">
+        <button
+          class="conversation-peer"
+          type="button"
+          aria-haspopup="menu"
+          title={$t(selectedContact ? 'chat.contact.edit' : 'chat.contact.add')}
+          aria-label={$t(
+            selectedContact ? 'chat.contact.editNamed' : 'chat.contact.addNamed',
+            { name: selectedName ?? shortHash(selectedDestination) },
+          )}
+          onclick={() => { contactEditorDestination = selectedDestination; }}
+          use:contextMenuTrigger={{
+            onopen: (x, y, method) => openChatActions(
+              destinationActionTarget(
+                selectedDestination!,
+                selectedName ?? shortHash(selectedDestination!),
+              ),
+              x,
+              y,
+              method,
+            ),
+          }}
+        >
           <strong>{selectedName ?? shortHash(selectedDestination)}</strong>
           <code>{selectedDestination}</code>
-        </div>
+        </button>
         <button
           class="icon-button conversation-contact-button"
           title={$t(selectedContact ? 'chat.contact.edit' : 'chat.contact.add')}

@@ -193,6 +193,8 @@
   "chat.contact.removeAction": "Remove contact",
   "chat.contact.addTitle": "Add contact",
   "chat.contact.editTitle": "Edit contact",
+  "chat.contact.addNamed": "Add {name} as contact",
+  "chat.contact.editNamed": "Edit contact {name}",
   "chat.contact.description": "Choose the local name shown for this LXMF destination.",
   "chat.contact.destination": "LXMF destination",
   "chat.contact.name": "Contact name",
