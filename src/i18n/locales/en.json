@@ -384,7 +384,7 @@
   "settings.lxmf.method.opportunistic": "Opportunistic",
   "settings.lxmf.method.propagated": "Propagated",
   "settings.lxmf.method.direct.help": "Establish a link and deliver directly to the recipient.",
-  "settings.lxmf.method.opportunistic.help": "Send as a single, standalone packet.",
+  "settings.lxmf.method.opportunistic.help": "Send messages as a single, standalone packets.",
   "settings.lxmf.method.propagated.help": "Send directly through a propagation node without first trying another delivery method.",
   "settings.lxmf.propagationEnabled": "Use propagation node",
   "settings.lxmf.propagation.status.active": "Active. The preferred node is used when reachable; otherwise Retivum selects the best announced node it knows.",
