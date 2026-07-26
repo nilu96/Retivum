@@ -479,9 +479,11 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .composer-attachment-control > .icon-button { width: 42px; height: 42px; }
 .composer-attachment-button.recording { position: relative; isolation: isolate; overflow: hidden; border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
 .composer-attachment-button.recording::before,
-.composer-attachment-button.recording::after { content: ''; position: absolute; z-index: 0; top: 50%; left: 50%; pointer-events: none; border-radius: 50%; background: var(--danger); transform-origin: center; transition: transform 70ms linear, opacity 70ms linear; }
-.composer-attachment-button.recording::before { width: 56px; height: 56px; opacity: var(--recording-pulse-opacity-outer, .04); transform: translate(-50%, -50%) scale(var(--recording-pulse-scale-outer, .28)); }
-.composer-attachment-button.recording::after { width: 40px; height: 40px; opacity: var(--recording-pulse-opacity, .08); transform: translate(-50%, -50%) scale(var(--recording-pulse-scale, .32)); }
+.composer-attachment-button.recording::after,
+.composer-attachment-button.recording > .recording-pulse-inner { content: ''; position: absolute; z-index: 0; top: 50%; left: 50%; pointer-events: none; border-radius: 50%; background: var(--danger); transform-origin: center; transition: transform 70ms linear, opacity 70ms linear; }
+.composer-attachment-button.recording::before { width: 56px; height: 56px; opacity: var(--recording-pulse-opacity-outer, .04); transform: translate(-50%, -50%) scale(var(--recording-pulse-scale, .32)); }
+.composer-attachment-button.recording::after { width: 40px; height: 40px; opacity: var(--recording-pulse-opacity-middle, .055); transform: translate(-50%, -50%) scale(var(--recording-pulse-scale, .32)); }
+.composer-attachment-button.recording > .recording-pulse-inner { width: 24px; height: 24px; opacity: var(--recording-pulse-opacity, .08); transform: translate(-50%, -50%) scale(var(--recording-pulse-scale, .32)); }
 .composer-attachment-button.recording > svg { position: relative; z-index: 1; }
 .composer-attachments { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .composer-attachments > span { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; padding: 5px 6px 5px 9px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-muted); background: var(--surface-2); font-size: .68rem; }

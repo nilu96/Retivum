@@ -2267,6 +2267,9 @@ describe('ChatView', () => {
     const destinationHash = 'c'.repeat(32);
     const stopTrack = vi.fn();
     const stopRecording = vi.fn();
+    const getUserMedia = vi.fn().mockResolvedValue({
+      getTracks: () => [{ stop: stopTrack }],
+    });
 
     class MockFile extends Blob {
       readonly name: string;
@@ -2307,11 +2310,7 @@ describe('ChatView', () => {
     vi.stubGlobal('MediaRecorder', MockMediaRecorder);
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
-      value: {
-        getUserMedia: vi.fn().mockResolvedValue({
-          getTracks: () => [{ stop: stopTrack }],
-        }),
-      },
+      value: { getUserMedia },
     });
     chatMessages.set([{
       id: 'identity:recording-message',
@@ -2329,7 +2328,17 @@ describe('ChatView', () => {
     await fireEvent.click(conversation);
     await fireEvent.click(screen.getByRole('button', { name: 'Add attachment' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Record audio message' }));
-    expect(await screen.findByRole('button', { name: 'Stop recording' })).toBeInTheDocument();
+    const stopRecordingButton = await screen.findByRole('button', { name: 'Stop recording' });
+    expect(stopRecordingButton).toBeInTheDocument();
+    expect(stopRecordingButton.querySelector('.recording-pulse-inner')).toBeInTheDocument();
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        channelCount: { ideal: 1 },
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: true,
+      },
+    });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     expect(stopRecording).toHaveBeenCalledOnce();

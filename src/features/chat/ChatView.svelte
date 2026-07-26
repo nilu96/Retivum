@@ -72,6 +72,7 @@
   import ChatDeleteConfirmation from './ChatDeleteConfirmation.svelte';
   import NewConversationEditor from './NewConversationEditor.svelte';
   import MessageAttachment from './MessageAttachment.svelte';
+  import { recordingPulseLevel } from './recording-level';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { liveActivity, toast } from '../../lib/notifications/toasts';
 
@@ -971,15 +972,15 @@
           squaredAmplitude += normalized * normalized;
         }
         const rms = Math.sqrt(squaredAmplitude / samples.length);
-        const currentLevel = Math.min(1, Math.max(0, (rms - 0.02) * 5));
+        const currentLevel = recordingPulseLevel(rms);
         smoothedRecordingLevel = Math.max(currentLevel, smoothedRecordingLevel * 0.82);
         attachmentMenuButton?.style.setProperty(
           '--recording-pulse-scale',
           String(0.32 + smoothedRecordingLevel * 0.78),
         );
         attachmentMenuButton?.style.setProperty(
-          '--recording-pulse-scale-outer',
-          String(0.28 + smoothedRecordingLevel * 1.05),
+          '--recording-pulse-opacity-middle',
+          String(0.055 + smoothedRecordingLevel * 0.075),
         );
         attachmentMenuButton?.style.setProperty(
           '--recording-pulse-opacity',
@@ -1010,8 +1011,8 @@
     smoothedRecordingLevel = 0;
     for (const property of [
       '--recording-pulse-scale',
-      '--recording-pulse-scale-outer',
       '--recording-pulse-opacity',
+      '--recording-pulse-opacity-middle',
       '--recording-pulse-opacity-outer',
     ]) attachmentMenuButton?.style.removeProperty(property);
   }
@@ -1031,7 +1032,14 @@
     if (!destinationHash) return;
     recordingDestination = destinationHash;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: { ideal: 1 },
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: true,
+        },
+      });
       if (recordingDestination !== destinationHash || selectedDestination !== destinationHash) {
         stream.getTracks().forEach((track) => track.stop());
         return;
@@ -1551,7 +1559,10 @@
             aria-label={$t(recording ? 'chat.attachment.stopRecording' : 'chat.attachment.add')}
             onclick={() => recording ? toggleRecording() : attachmentMenuOpen = !attachmentMenuOpen
             }
-          ><Icon name={recording ? 'stop' : 'paperclip'} size={18} /></button>
+          >
+            {#if recording}<span class="recording-pulse-inner" aria-hidden="true"></span>{/if}
+            <Icon name={recording ? 'stop' : 'paperclip'} size={18} />
+          </button>
         </div>
         <label>
           <span class="sr-only">{$t('chat.composer.label')}</span>
