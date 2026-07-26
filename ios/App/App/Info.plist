@@ -40,6 +40,8 @@
 	<string>Retivum uses the microphone when you record an audio message.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Retivum saves received images to your photo library when you request it.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Retivum uses photo library access so you can choose photos to attach and send in chat messages.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
