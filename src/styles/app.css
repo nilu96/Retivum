@@ -1318,8 +1318,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .provisioning-address { grid-template-columns: auto minmax(0, 1fr); }
   .provisioning-address > .button { grid-column: 1 / -1; width: 100%; }
   .provisioning-workspace { height: auto; min-height: 0; grid-template-columns: 1fr; }
-  .provisioning-directory { height: 100%; max-height: none; }
-  .provisioning-directory-content { min-height: 0; max-height: none; }
+  .provisioning-directory { height: auto; max-height: none; overflow: visible; }
+  .provisioning-directory-content { min-height: 0; max-height: none; overflow: visible; }
   .provisioning-editor-card { min-height: 390px; }
   .provisioning-field-grid { grid-template-columns: 1fr; }
   .provisioning-actions { align-items: stretch; flex-direction: column-reverse; }
