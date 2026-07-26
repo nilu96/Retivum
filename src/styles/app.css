@@ -655,7 +655,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .provisioning-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
 .provisioning-workspace { display: grid; height: clamp(430px, calc(100dvh - 250px), 680px); min-height: 430px; grid-template-columns: minmax(0, 1fr); }
 .provisioning-directory { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
-.provisioning-directory-content { display: grid; min-height: 0; align-content: start; gap: 20px; padding: 14px; overflow: auto; overscroll-behavior: contain; }
+.provisioning-directory-content { display: grid; min-height: 0; align-content: start; gap: 20px; padding: 14px; overflow: auto; }
+.provisioning-directory-content.empty { place-content: center; }
 .provisioning-directory-content > .empty-state { align-self: center; margin: auto; }
 .provisioning-directory-section { display: grid; gap: 8px; }
 .provisioning-directory-section > h2 { margin: 0 4px; color: var(--text-muted); font-size: .69rem; letter-spacing: .035em; text-transform: uppercase; }

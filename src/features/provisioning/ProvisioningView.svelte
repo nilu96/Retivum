@@ -500,7 +500,11 @@
             placeholder={$t('provisioning.search.placeholder')}
           />
         </label>
-        <div id="provisioning-destination-results" class="provisioning-directory-content">
+        <div
+          id="provisioning-destination-results"
+          class="provisioning-directory-content"
+          class:empty={!bookmarkedNodes.length && !announcedNodes.length}
+        >
         {#if bookmarkedNodes.length}
           <section class="provisioning-directory-section">
             <h2>{$t('provisioning.bookmarks.title')}</h2>
