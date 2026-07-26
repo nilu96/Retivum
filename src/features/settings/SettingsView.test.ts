@@ -1,15 +1,17 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../../package.json';
 import {
   blockedChatDestinations,
   chatContacts,
   knownDestinations,
+  reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import SettingsView from './SettingsView.svelte';
 
 describe('SettingsView blocked destinations', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     knownDestinations.set([]);
     chatContacts.set([]);
     blockedChatDestinations.set(Array.from({ length: 4 }, (_, index) => {
@@ -37,6 +39,46 @@ describe('SettingsView blocked destinations', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: 'Hide' }));
     expect(screen.queryByText('4'.repeat(32))).not.toBeInTheDocument();
+  });
+
+  it('adds one or more blocked destination hashes from the settings dialog', async () => {
+    const blockDestination = vi.spyOn(reticulumRuntime, 'blockChatDestination').mockResolvedValue(true);
+    render(SettingsView);
+    const firstHash = 'a'.repeat(32);
+    const secondHash = 'b'.repeat(32);
+
+    const addButton = screen.getByRole('button', { name: 'Add destinations' });
+    expect(addButton).toHaveClass('compact', 'blocked-destination-add-button');
+    await fireEvent.click(addButton);
+    expect(screen.getByRole('heading', { name: 'Add blocked destinations' })).toBeInTheDocument();
+    await fireEvent.input(screen.getByRole('textbox', { name: /Destination hashes/ }), {
+      target: { value: `${firstHash}\n${secondHash}` },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Block destinations' }));
+
+    await waitFor(() => {
+      expect(blockDestination).toHaveBeenNthCalledWith(1, firstHash);
+      expect(blockDestination).toHaveBeenNthCalledWith(2, secondHash);
+    });
+    expect(screen.queryByRole('heading', { name: 'Add blocked destinations' })).not.toBeInTheDocument();
+  });
+
+  it('stops a blocked-destination batch on failure and leaves the dialog open', async () => {
+    const blockDestination = vi.spyOn(reticulumRuntime, 'blockChatDestination')
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    render(SettingsView);
+    const hashes = ['c', 'd', 'e'].map((character) => character.repeat(32));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add destinations' }));
+    await fireEvent.input(screen.getByRole('textbox', { name: /Destination hashes/ }), {
+      target: { value: hashes.join('\n') },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Block destinations' }));
+
+    await waitFor(() => expect(blockDestination).toHaveBeenCalledTimes(2));
+    expect(blockDestination).not.toHaveBeenCalledWith(hashes[2]);
+    expect(screen.getByRole('heading', { name: 'Add blocked destinations' })).toBeInTheDocument();
   });
 
   it('places the experimental network node setting after appearance', () => {

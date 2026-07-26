@@ -715,6 +715,11 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .blocked-destination-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .blocked-destination-copy strong { overflow: hidden; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
 .blocked-destination-copy code { overflow: hidden; color: var(--text-subtle); font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
+.blocked-destination-add-button { border-color: color-mix(in srgb, var(--danger) 38%, var(--border)); color: var(--danger); background: var(--danger-soft); }
+.blocked-destination-add-button:hover:not(:disabled) { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.blocked-destinations-editor-input { width: 100%; min-height: 150px; padding: 10px 11px; resize: vertical; border: 1px solid var(--border); border-radius: 9px; outline: 0; color: var(--text); background: var(--surface-2); font: .72rem/1.55 "SFMono-Regular", Consolas, monospace; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.blocked-destinations-editor-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.blocked-destinations-editor-input[aria-invalid='true'] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
 .blocked-destination-toggle { display: flex; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 6px 12px; border: 0; color: var(--text-muted); background: transparent; font-size: .73rem; font-weight: 650; text-align: center; }
 .blocked-destination-toggle:hover { color: var(--text); }
 .blocked-destination-toggle svg { flex: none; transition: rotate .15s ease; }

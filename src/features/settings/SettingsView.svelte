@@ -39,6 +39,7 @@
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import WebSocketInterfaceEditor from './WebSocketInterfaceEditor.svelte';
+  import BlockedDestinationsEditor from './BlockedDestinationsEditor.svelte';
   import IdentityDeleteConfirmation from './IdentityDeleteConfirmation.svelte';
   import IdentityNameEditor from './IdentityNameEditor.svelte';
   import InterfaceTypePicker from './InterfaceTypePicker.svelte';
@@ -63,6 +64,8 @@
   let identityBusyId = $state<string | undefined>();
   let interfaceBusyId = $state<string | undefined>();
   let blockedDestinationBusyHash = $state<string | undefined>();
+  let blockedDestinationEditorOpen = $state(false);
+  let blockedDestinationsAdding = $state(false);
   let blockedDestinationsExpanded = $state(false);
   let importInput = $state<HTMLInputElement>();
   let propagationNodeDraft = $state('');
@@ -367,6 +370,28 @@
       toast.error('chat.unblock.error');
     } finally {
       blockedDestinationBusyHash = undefined;
+    }
+  }
+
+  async function blockDestinations(destinationHashes: string[]): Promise<boolean> {
+    if (blockedDestinationsAdding || blockedDestinationBusyHash) return false;
+    blockedDestinationsAdding = true;
+    try {
+      for (const destinationHash of destinationHashes) {
+        if (!await reticulumRuntime.blockChatDestination(destinationHash)) return false;
+      }
+      blockedDestinationsExpanded = true;
+      toast.success(
+        destinationHashes.length === 1
+          ? 'settings.blocked.addSuccess.one'
+          : 'settings.blocked.addSuccess.many',
+        { count: destinationHashes.length },
+      );
+      return true;
+    } catch {
+      return false;
+    } finally {
+      blockedDestinationsAdding = false;
     }
   }
 </script>
@@ -766,6 +791,12 @@
           <h2>{$t('settings.blocked.title')}</h2>
           <p>{$t('settings.blocked.description')}</p>
         </div>
+        <button
+          class="button compact blocked-destination-add-button"
+          type="button"
+          disabled={blockedDestinationsAdding || blockedDestinationBusyHash !== undefined}
+          onclick={() => { blockedDestinationEditorOpen = true; }}
+        ><Icon name="plus" size={16} />{$t('settings.blocked.add')}</button>
       </header>
       {#if blockedDestinationEntries.length === 0}
         <p class="blocked-destinations-empty">{$t('settings.blocked.empty')}</p>
@@ -780,7 +811,7 @@
               </div>
               <button
                 class="button secondary compact"
-                disabled={blockedDestinationBusyHash !== undefined}
+                disabled={blockedDestinationBusyHash !== undefined || blockedDestinationsAdding}
                 onclick={() => unblockDestination(blocked.destinationHash)}
               >{$t('chat.unblock.action')}</button>
             </article>
@@ -876,6 +907,13 @@
     </section>
   </div>
 </div>
+
+{#if blockedDestinationEditorOpen}
+  <BlockedDestinationsEditor
+    oncancel={() => { blockedDestinationEditorOpen = false; }}
+    onsave={blockDestinations}
+  />
+{/if}
 
 {#if identityNameEditorOpen && $activeIdentity}
   <IdentityNameEditor
