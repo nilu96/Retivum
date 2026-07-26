@@ -899,7 +899,17 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .button.danger { border-color: var(--danger); color: var(--danger-ink); background: var(--danger); }
 .button.danger:hover:not(:disabled) { filter: brightness(.92); }
 .bookmark-editor-address { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: .74rem; font-weight: 650; }
-.bookmark-editor-address code { padding: 10px 11px; overflow: hidden; border-radius: 9px; color: var(--text-subtle); background: var(--surface-2); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.bookmark-editor-address > code { padding: 10px 11px; overflow: hidden; border-radius: 9px; color: var(--text-subtle); background: var(--surface-2); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.contact-editor-destination-copy { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 0; border-radius: 9px; color: var(--text-subtle); background: var(--surface-2); text-align: start; }
+.contact-editor-destination-copy code { min-width: 0; overflow: hidden; color: inherit; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.contact-editor-destination-copy svg { flex: none; }
+@media (hover: hover) and (pointer: fine) {
+  .contact-editor-destination-copy:hover { background: var(--surface-hover); }
+}
+@media (hover: none) and (pointer: coarse) {
+  .contact-editor-destination-copy { -webkit-tap-highlight-color: transparent; }
+  .contact-editor-destination-copy:active { background: var(--surface-hover); }
+}
 .bookmark-identify-option { padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); cursor: pointer; }
 .bookmark-identify-option span { min-width: 0; }
 .identity-address-content { display: grid; min-width: 0; gap: 14px; padding: 8px 22px 22px; }

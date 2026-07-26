@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from '../../i18n';
   import { lockBodyScroll } from '../../lib/actions/bodyScrollLock';
+  import { copyText } from '../../lib/clipboard';
   import Icon from '../../lib/components/Icon.svelte';
   import { toast } from '../../lib/notifications/toasts';
 
@@ -22,6 +23,11 @@
   let saving = $state(false);
 
   $effect.pre(() => { name = currentName; });
+
+  async function copyDestination(): Promise<void> {
+    if (await copyText(address)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -51,7 +57,13 @@
     <form onsubmit={submit}>
       <div class="bookmark-editor-address">
         <span>{$t('chat.contact.destination')}</span>
-        <code>{address}</code>
+        <button
+          class="contact-editor-destination-copy"
+          type="button"
+          title={$t('chat.destination.actions.copyHash')}
+          aria-label={$t('chat.destination.actions.copyHash')}
+          onclick={copyDestination}
+        ><code>{address}</code><Icon name="copy" size={17} /></button>
       </div>
       <label class="field">
         <span>{$t('chat.contact.name')}</span>
