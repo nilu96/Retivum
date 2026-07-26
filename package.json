@@ -45,6 +45,7 @@
     "postinstall": "node scripts/prepare-capacitor-udp-socket.mjs"
   },
   "dependencies": {
+    "@capacitor-community/bluetooth-le": "8.2.0",
     "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/android": "8.4.2",
     "@capacitor/app": "^8.1.1",
@@ -55,7 +56,6 @@
     "@capacitor/screen-orientation": "8.0.1",
     "@capacitor/share": "^8.0.1",
     "@capawesome/capacitor-file-picker": "^8.0.3",
-    "@capgo/capacitor-bluetooth-low-energy": "8.2.0",
     "@devioarts/capacitor-tcpclient": "0.2.1",
     "@zxing/browser": "^0.2.1",
     "capacitor-udp-socket": "7.0.0",

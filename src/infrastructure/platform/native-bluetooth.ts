@@ -1,22 +1,21 @@
 import { Capacitor } from '@capacitor/core';
-import { BluetoothLowEnergy } from '@capgo/capacitor-bluetooth-low-energy';
+import { BleClient } from '@capacitor-community/bluetooth-le';
 
 let initialization: Promise<void> | undefined;
-const discoveredDeviceIds = new Set<string>();
 
 export function initializeNativeBluetooth(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return Promise.resolve();
-  initialization ??= BluetoothLowEnergy.initialize({ mode: 'central' }).catch((error) => {
+  initialization ??= BleClient.initialize({ androidNeverForLocation: true }).catch((error) => {
     initialization = undefined;
+    const message = error instanceof Error ? error.message : String(error);
+    if (/permission|denied|unauthorized/i.test(message)) throw new Error('RNODE_BLE_PERMISSION_DENIED');
+    if (/unsupported|not supported/i.test(message)) throw new Error('RNODE_BLE_UNAVAILABLE');
     throw error;
   });
   return initialization;
 }
 
-export function rememberNativeBluetoothDevice(deviceId: string): void {
-  discoveredDeviceIds.add(deviceId);
-}
-
-export function nativeBluetoothDeviceIsDiscovered(deviceId: string): boolean {
-  return discoveredDeviceIds.has(deviceId);
+export async function prepareNativeBluetoothDevice(deviceId: string): Promise<void> {
+  const devices = await BleClient.getDevices([deviceId]);
+  if (!devices.some((device) => device.deviceId === deviceId)) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
 }

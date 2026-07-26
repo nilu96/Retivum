@@ -1,7 +1,6 @@
-import { BluetoothLowEnergy, type BleDevice } from '@capgo/capacitor-bluetooth-low-energy';
-import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { BleClient, type BleDevice, type ScanResult } from '@capacitor-community/bluetooth-le';
 import { writable } from 'svelte/store';
-import { initializeNativeBluetooth, rememberNativeBluetoothDevice } from './native-bluetooth';
+import { initializeNativeBluetooth } from './native-bluetooth';
 
 const RNODE_NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const SCAN_TIMEOUT_MS = 30_000;
@@ -14,10 +13,9 @@ export interface NativeBluetoothSelectionRequest {
 
 interface PendingSelection {
   requestId: string;
-  devices: Map<string, BleDevice>;
+  devices: Map<string, ScanResult>;
   resolve: (device: BleDevice) => void;
   reject: (error: Error) => void;
-  listener?: PluginListenerHandle;
   timeout?: ReturnType<typeof setTimeout>;
 }
 
@@ -27,13 +25,7 @@ let pending: PendingSelection | undefined;
 export async function selectNativeRNodeDevice(): Promise<BleDevice> {
   if (pending) throw new Error('RNODE_BLE_SELECTION_IN_PROGRESS');
   await initializeNativeBluetooth();
-  const permissions = await BluetoothLowEnergy.requestPermissions();
-  if (permissions.bluetooth === 'denied'
-    || (Capacitor.getPlatform() === 'android' && permissions.location === 'denied')) {
-    throw new Error('RNODE_BLE_PERMISSION_DENIED');
-  }
-  if (!(await BluetoothLowEnergy.isAvailable()).available) throw new Error('RNODE_BLE_UNAVAILABLE');
-  if (!(await waitForBluetoothEnabled())) throw new Error('RNODE_BLE_DISABLED');
+  if (!await waitForBluetoothEnabled()) throw new Error('RNODE_BLE_DISABLED');
 
   const requestId = crypto.randomUUID();
   const result = new Promise<BleDevice>((resolve, reject) => {
@@ -42,16 +34,13 @@ export async function selectNativeRNodeDevice(): Promise<BleDevice> {
   nativeBluetoothSelection.set({ requestId, devices: [], scanning: true });
 
   try {
-    pending!.listener = await BluetoothLowEnergy.addListener('deviceScanned', ({ device }) => {
-      if (!pending || pending.requestId !== requestId) return;
-      rememberNativeBluetoothDevice(device.deviceId);
-      pending.devices.set(device.deviceId, device);
-      publish(pending, true);
-    });
-    await BluetoothLowEnergy.startScan({
+    await BleClient.requestLEScan({
       services: [RNODE_NUS_SERVICE],
-      timeout: SCAN_TIMEOUT_MS,
       allowDuplicates: false,
+    }, (scanResult) => {
+      if (!pending || pending.requestId !== requestId) return;
+      pending.devices.set(scanResult.device.deviceId, scanResult);
+      publish(pending, true);
     });
     pending!.timeout = setTimeout(() => {
       if (!pending || pending.requestId !== requestId) return;
@@ -68,7 +57,7 @@ export async function selectNativeRNodeDevice(): Promise<BleDevice> {
 export async function answerNativeBluetoothSelection(requestId: string, deviceId?: string): Promise<void> {
   if (!pending || pending.requestId !== requestId) return;
   const current = pending;
-  const device = deviceId ? current.devices.get(deviceId) : undefined;
+  const device = deviceId ? current.devices.get(deviceId)?.device : undefined;
   await finishSelection();
   if (device) current.resolve(device);
   else current.reject(new Error('RNODE_BLE_SELECTION_CANCELLED'));
@@ -78,10 +67,10 @@ function publish(selection: PendingSelection, scanning: boolean): void {
   nativeBluetoothSelection.set({
     requestId: selection.requestId,
     scanning,
-    devices: Array.from(selection.devices.values(), (device) => ({
-      id: device.deviceId,
-      name: device.name || 'RNode',
-      detail: typeof device.rssi === 'number' ? `${device.rssi} dBm` : undefined,
+    devices: Array.from(selection.devices.values(), (result) => ({
+      id: result.device.deviceId,
+      name: result.localName || result.device.name || 'RNode',
+      detail: typeof result.rssi === 'number' ? `${result.rssi} dBm` : undefined,
     })),
   });
 }
@@ -92,14 +81,13 @@ async function finishSelection(): Promise<void> {
   nativeBluetoothSelection.set(undefined);
   if (!current) return;
   if (current.timeout) clearTimeout(current.timeout);
-  await BluetoothLowEnergy.stopScan().catch(() => undefined);
-  await current.listener?.remove().catch(() => undefined);
+  await BleClient.stopLEScan().catch(() => undefined);
 }
 
 async function waitForBluetoothEnabled(): Promise<boolean> {
   const deadline = Date.now() + 3_000;
   do {
-    if ((await BluetoothLowEnergy.isEnabled()).enabled) return true;
+    if (await BleClient.isEnabled()) return true;
     await new Promise((resolve) => setTimeout(resolve, 150));
   } while (Date.now() < deadline);
   return false;

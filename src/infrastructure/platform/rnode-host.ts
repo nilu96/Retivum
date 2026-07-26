@@ -149,10 +149,10 @@ export class RNodeHost {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     this.clearTimers();
-    try {
-      await this.connection.write(concat([frame(CMD_RADIO_STATE, [RADIO_STATE_OFF]), frame(CMD_LEAVE, [0xff])]));
-    } catch { /* best effort */ }
-    await this.closeConnection();
+    await this.closeConnection(concat([
+      frame(CMD_RADIO_STATE, [RADIO_STATE_OFF]),
+      frame(CMD_LEAVE, [0xff]),
+    ]));
   }
 
   private async detect(): Promise<void> {
@@ -319,9 +319,9 @@ export class RNodeHost {
     }, delay);
   }
 
-  private async closeConnection(): Promise<void> {
+  private async closeConnection(finalData?: Uint8Array): Promise<void> {
     this.clearTimers();
-    await this.connection.close().catch(() => undefined);
+    await this.connection.close(finalData).catch(() => undefined);
   }
 
   private clearTimers(): void {

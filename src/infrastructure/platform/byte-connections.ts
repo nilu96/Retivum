@@ -1,30 +1,21 @@
 import type { RNodeInterfaceConfig, TcpInterfaceConfig } from '../../domain/settings';
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
-import { BluetoothLowEnergy } from '@capgo/capacitor-bluetooth-low-energy';
+import { BleClient } from '@capacitor-community/bluetooth-le';
 import { TCPClient, type TCPConnection } from '@devioarts/capacitor-tcpclient';
 import { resolveBluetoothDevice } from './bluetooth-devices';
-import {
-  initializeNativeBluetooth,
-  nativeBluetoothDeviceIsDiscovered,
-  rememberNativeBluetoothDevice,
-} from './native-bluetooth';
+import { initializeNativeBluetooth, prepareNativeBluetoothDevice } from './native-bluetooth';
 
 const RNODE_NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const RNODE_NUS_WRITE = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
 const RNODE_NUS_NOTIFY = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
-// The native plugin keys pending callbacks with the UUID strings supplied by
-// JavaScript. CoreBluetooth completes them with uppercase CBUUID strings, so
-// native operations must use the same representation or their promises never
-// resolve even though the peripheral is connected.
-const RNODE_NUS_SERVICE_NATIVE = RNODE_NUS_SERVICE.toUpperCase();
-const RNODE_NUS_WRITE_NATIVE = RNODE_NUS_WRITE.toUpperCase();
-const RNODE_NUS_NOTIFY_NATIVE = RNODE_NUS_NOTIFY.toUpperCase();
 const BLE_CONNECT_ATTEMPTS = 5;
 const BLE_RETRY_DELAY_MS = 3_500;
 const BLE_POST_CONNECT_SETTLE_MS = 750;
 const BLE_PAIRING_TIMEOUT_MS = 45_000;
 const BLE_POST_PAIRING_GRACE_MS = 3_500;
 const BLE_STAGE_TIMEOUT_MS = 15_000;
+const BLE_SHUTDOWN_WRITE_TIMEOUT_MS = 1_000;
+const BLE_SHUTDOWN_DELIVERY_GRACE_MS = 150;
 const BLE_WRITE_CHUNK_SIZE = 20;
 // iOS may hold the first local TCP connection while the user answers the
 // Local Network permission sheet. The plugin's three-second default expires
@@ -34,7 +25,7 @@ const TCP_CONNECT_TIMEOUT_MS = 30_000;
 export interface ByteConnection {
   open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void>;
   write(data: Uint8Array): Promise<void>;
-  close(): Promise<void>;
+  close(finalData?: Uint8Array): Promise<void>;
 }
 
 export function createRNodeByteConnection(
@@ -116,8 +107,15 @@ class SerialByteConnection implements ByteConnection {
     await this.writer.write(data);
   }
 
-  async close(): Promise<void> {
+  async close(finalData?: Uint8Array): Promise<void> {
     this.closing = true;
+    if (finalData?.byteLength && this.writer) {
+      await bleStage(
+        'send RNode shutdown',
+        () => this.writer!.write(finalData),
+        BLE_SHUTDOWN_WRITE_TIMEOUT_MS,
+      ).catch(() => undefined);
+    }
     try { await this.reader?.cancel(); } catch { /* already closed */ }
     try { this.reader?.releaseLock(); } catch { /* stale lock */ }
     try { this.writer?.releaseLock(); } catch { /* stale lock */ }
@@ -141,7 +139,6 @@ class SerialByteConnection implements ByteConnection {
 }
 
 class NativeBluetoothByteConnection implements ByteConnection {
-  private listeners: PluginListenerHandle[] = [];
   private subscribed = false;
   private connected = false;
   private opening = false;
@@ -161,24 +158,17 @@ class NativeBluetoothByteConnection implements ByteConnection {
     await initializeNativeBluetooth();
     this.closing = false;
     this.opening = true;
-    this.listeners.push(await BluetoothLowEnergy.addListener('deviceDisconnected', (event) => {
-      if (event.deviceId !== deviceId) return;
+    const onDisconnect = () => {
       this.connected = false;
       if (!this.closing && this.opening) {
         this.resolveOpeningDisconnect?.();
         return;
       }
       if (!this.closing && !this.opening) onClosed();
-    }));
-    this.listeners.push(await BluetoothLowEnergy.addListener('characteristicChanged', (event) => {
-      if (event.deviceId !== deviceId
-        || normalizeUuid(event.service) !== RNODE_NUS_SERVICE
-        || normalizeUuid(event.characteristic) !== RNODE_NUS_NOTIFY) return;
-      if (event.value.length) onData(Uint8Array.from(event.value));
-    }));
+    };
 
     try {
-      await this.ensureDiscovered(deviceId);
+      await prepareNativeBluetoothDevice(deviceId);
       await this.ensureAndroidBond(deviceId);
       let lastError: unknown;
       for (let attempt = 1; attempt <= BLE_CONNECT_ATTEMPTS; attempt += 1) {
@@ -188,7 +178,7 @@ class NativeBluetoothByteConnection implements ByteConnection {
             this.resolveOpeningDisconnect = () => resolve(false);
           });
           const ready = await Promise.race([
-            this.openGatt(deviceId).then(() => true as const),
+            this.openGatt(deviceId, onData, onDisconnect).then(() => true as const),
             disconnected,
           ]);
           if (!ready) {
@@ -229,66 +219,46 @@ class NativeBluetoothByteConnection implements ByteConnection {
   }
 
   async write(data: Uint8Array): Promise<void> {
+    await this.writeChunks(data);
+  }
+
+  private async writeChunks(data: Uint8Array, timeoutMs?: number): Promise<void> {
     const deviceId = this.config.connection.deviceId;
     if (!deviceId || !this.connected) throw new Error('RNODE_BLE_NOT_OPEN');
     for (let offset = 0; offset < data.byteLength; offset += BLE_WRITE_CHUNK_SIZE) {
-      await BluetoothLowEnergy.writeCharacteristic({
+      const chunk = data.slice(offset, offset + BLE_WRITE_CHUNK_SIZE);
+      await BleClient.writeWithoutResponse(
         deviceId,
-        service: RNODE_NUS_SERVICE_NATIVE,
-        characteristic: RNODE_NUS_WRITE_NATIVE,
-        value: Array.from(data.slice(offset, offset + BLE_WRITE_CHUNK_SIZE)),
-        type: 'withoutResponse',
-      });
+        RNODE_NUS_SERVICE,
+        RNODE_NUS_WRITE,
+        new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength),
+        timeoutMs === undefined ? undefined : { timeout: timeoutMs },
+      );
     }
   }
 
-  async close(): Promise<void> {
+  async close(finalData?: Uint8Array): Promise<void> {
     this.closing = true;
     this.opening = false;
     const deviceId = this.config.connection.deviceId;
-    if (deviceId) await this.disconnect(deviceId);
-    for (const listener of this.listeners) await listener.remove().catch(() => undefined);
-    this.listeners = [];
-  }
-
-  private async ensureDiscovered(deviceId: string): Promise<void> {
-    if (nativeBluetoothDeviceIsDiscovered(deviceId)) return;
-    const listener = await BluetoothLowEnergy.addListener('deviceScanned', ({ device }) => {
-      rememberNativeBluetoothDevice(device.deviceId);
-    });
-    try {
-      await BluetoothLowEnergy.startScan({ services: [RNODE_NUS_SERVICE], timeout: 10_000, allowDuplicates: false });
-      const deadline = Date.now() + 10_000;
-      while (!nativeBluetoothDeviceIsDiscovered(deviceId) && Date.now() < deadline) await sleep(100);
-      if (!nativeBluetoothDeviceIsDiscovered(deviceId)) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
-    } finally {
-      await BluetoothLowEnergy.stopScan().catch(() => undefined);
-      await listener.remove().catch(() => undefined);
+    if (!deviceId) return;
+    if (finalData?.byteLength && this.connected) {
+      const delivered = await this.writeChunks(finalData, BLE_SHUTDOWN_WRITE_TIMEOUT_MS)
+        .then(() => true, () => false);
+      if (delivered) await sleep(BLE_SHUTDOWN_DELIVERY_GRACE_MS);
     }
+    await this.disconnect(deviceId);
   }
 
   private async ensureAndroidBond(deviceId: string): Promise<void> {
     if (Capacitor.getPlatform() !== 'android') return;
-    const { bonded } = await BluetoothLowEnergy.isBonded({ deviceId });
-    if (bonded) return;
-
-    // The Android plugin resolves createBond() when bonding starts, not when
-    // the system PIN dialog has completed. Wait for BOND_BONDED before opening
-    // GATT or the connection races the user's passkey entry.
-    await BluetoothLowEnergy.createBond({ deviceId });
-    const deadline = Date.now() + BLE_PAIRING_TIMEOUT_MS;
-    while (Date.now() < deadline) {
-      if ((await BluetoothLowEnergy.isBonded({ deviceId })).bonded) {
-        await sleep(BLE_POST_PAIRING_GRACE_MS);
-        return;
-      }
-      await sleep(250);
-    }
-    throw new Error('RNODE_BLE_PAIRING_TIMEOUT');
+    if (await BleClient.isBonded(deviceId)) return;
+    await BleClient.createBond(deviceId, { timeout: BLE_PAIRING_TIMEOUT_MS });
+    await sleep(BLE_POST_PAIRING_GRACE_MS);
   }
 
   private async validateNus(deviceId: string): Promise<void> {
-    const { services } = await BluetoothLowEnergy.getServices({ deviceId });
+    const services = await BleClient.getServices(deviceId);
     const service = services.find((entry) => normalizeUuid(entry.uuid) === RNODE_NUS_SERVICE);
     if (!service) throw new Error('get NUS service: requested service was not found');
     if (!service.characteristics.some((entry) => normalizeUuid(entry.uuid) === RNODE_NUS_WRITE)) {
@@ -299,11 +269,14 @@ class NativeBluetoothByteConnection implements ByteConnection {
     }
   }
 
-  private async openGatt(deviceId: string): Promise<void> {
-    await bleStage('connect', () => BluetoothLowEnergy.connect({ deviceId }));
+  private async openGatt(
+    deviceId: string,
+    onData: (data: Uint8Array) => void,
+    onDisconnect: () => void,
+  ): Promise<void> {
+    await bleStage('connect', () => BleClient.connect(deviceId, onDisconnect, { timeout: BLE_STAGE_TIMEOUT_MS }));
     this.connected = true;
     await sleep(BLE_POST_CONNECT_SETTLE_MS);
-    await bleStage('discover NUS service', () => BluetoothLowEnergy.discoverServices({ deviceId }));
     await this.validateNus(deviceId);
     // Follow the same setup order as Web Bluetooth: enable the protected TX
     // notifications before sending any KISS data. Do not force a
@@ -314,25 +287,33 @@ class NativeBluetoothByteConnection implements ByteConnection {
     // the PIN again. Once notifications are ready, RNodeHost sends the normal
     // KISS detect frame through write-without-response.
     this.securedAccessStarted = true;
-    await bleStage('start TX notifications', () => BluetoothLowEnergy.startCharacteristicNotifications({
+    await bleStage('start TX notifications', () => BleClient.startNotifications(
       deviceId,
-      service: RNODE_NUS_SERVICE_NATIVE,
-      characteristic: RNODE_NUS_NOTIFY_NATIVE,
-    }), BLE_PAIRING_TIMEOUT_MS);
+      RNODE_NUS_SERVICE,
+      RNODE_NUS_NOTIFY,
+      (value) => {
+        if (value.byteLength) onData(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+      },
+      { timeout: BLE_PAIRING_TIMEOUT_MS },
+    ), BLE_PAIRING_TIMEOUT_MS);
     this.subscribed = true;
   }
 
   private async disconnect(deviceId: string): Promise<void> {
-    if (this.subscribed) {
-      await BluetoothLowEnergy.stopCharacteristicNotifications({
-        deviceId,
-        service: RNODE_NUS_SERVICE_NATIVE,
-        characteristic: RNODE_NUS_NOTIFY_NATIVE,
-      }).catch(() => undefined);
-    }
+    const wasSubscribed = this.subscribed;
     this.subscribed = false;
-    await BluetoothLowEnergy.disconnect({ deviceId }).catch(() => undefined);
+    // Explicit shutdown must start with the physical disconnect. Both native
+    // implementations stop notifications as part of disconnecting, while a
+    // separate stopNotifications call can wait on a stale GATT operation and
+    // prevent disable/delete from ever reaching the disconnect request.
+    await BleClient.disconnect(deviceId).catch(() => undefined);
     this.connected = false;
+    // BleClient removes its JavaScript notification listener before forwarding
+    // this call to native. The peripheral is already disconnected, so ignore
+    // the expected native "device not found/not connected" result.
+    if (wasSubscribed) {
+      await BleClient.stopNotifications(deviceId, RNODE_NUS_SERVICE, RNODE_NUS_NOTIFY).catch(() => undefined);
+    }
   }
 }
 
@@ -379,7 +360,6 @@ class BluetoothByteConnection implements ByteConnection {
     this.disconnectListener = disconnectListener;
     this.device.addEventListener('gattserverdisconnected', this.disconnectListener);
     try {
-      await this.ensureAndroidBond();
       let lastError: unknown;
       for (let attempt = 1; attempt <= BLE_CONNECT_ATTEMPTS; attempt += 1) {
         try {
@@ -416,19 +396,20 @@ class BluetoothByteConnection implements ByteConnection {
     }
   }
 
-  async close(): Promise<void> {
+  async close(finalData?: Uint8Array): Promise<void> {
     this.closing = true;
     this.opening = false;
+    if (finalData?.byteLength && this.writeCharacteristic) {
+      const delivered = await bleStage(
+        'send RNode shutdown',
+        () => this.write(finalData),
+        BLE_SHUTDOWN_WRITE_TIMEOUT_MS,
+      ).then(() => true, () => false);
+      if (delivered) await sleep(BLE_SHUTDOWN_DELIVERY_GRACE_MS);
+    }
     await this.closeGatt();
     if (this.device && this.disconnectListener) this.device.removeEventListener('gattserverdisconnected', this.disconnectListener);
     this.disconnectListener = undefined;
-  }
-
-  private async ensureAndroidBond(): Promise<void> {
-    if (Capacitor.getPlatform() !== 'android' || !this.device) return;
-    await BluetoothLowEnergy.requestPermissions();
-    const { bonded } = await BluetoothLowEnergy.isBonded({ deviceId: this.device.id });
-    if (!bonded) await BluetoothLowEnergy.createBond({ deviceId: this.device.id });
   }
 
   private async openGatt(onData: (data: Uint8Array) => void): Promise<void> {

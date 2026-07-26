@@ -13,6 +13,7 @@ const DETECT_RESP = 0x46;
 class FakeRNodeConnection implements ByteConnection {
   openCount = 0;
   closeCount = 0;
+  finalCloseData?: Uint8Array;
   failNextDataWrite = false;
   closeWithFailedWrite = false;
   private onData?: (data: Uint8Array) => void;
@@ -37,8 +38,9 @@ class FakeRNodeConnection implements ByteConnection {
     }
   }
 
-  async close(): Promise<void> {
+  async close(finalData?: Uint8Array): Promise<void> {
     this.closeCount += 1;
+    this.finalCloseData = finalData;
   }
 
   private emit(...chunks: Uint8Array[]): void {
@@ -96,6 +98,23 @@ describe('RNode telemetry', () => {
 });
 
 describe('RNode connection recovery', () => {
+  it('delegates the final radio-off and leave frames to transport close', async () => {
+    const connection = new FakeRNodeConnection();
+    const host = new RNodeHost(createRNodeInterfaceDraft('ble', 'closed-rnode'), {
+      onPacket: () => undefined,
+      onState: () => undefined,
+      log: () => undefined,
+    }, connection);
+
+    await host.close();
+
+    expect(connection.closeCount).toBe(1);
+    expect(connection.finalCloseData).toEqual(Uint8Array.of(
+      0xc0, CMD_RADIO_STATE, 0x00, 0xc0,
+      0xc0, 0x0a, 0xff, 0xc0,
+    ));
+  });
+
   it('does not finish an obsolete connection after the host is closed', async () => {
     vi.useFakeTimers();
     const connection = new FakeRNodeConnection();
