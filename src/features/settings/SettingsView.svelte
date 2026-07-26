@@ -46,6 +46,7 @@
   import RNodeInterfaceEditor from './RNodeInterfaceEditor.svelte';
   import TcpInterfaceEditor from './TcpInterfaceEditor.svelte';
   import UdpInterfaceEditor from './UdpInterfaceEditor.svelte';
+  import { copyText } from '../../lib/clipboard';
   import { toast } from '../../lib/notifications/toasts';
 
   const repository = new BrowserSettingsRepository();
@@ -287,6 +288,11 @@
         : false;
   }
 
+  async function copyIdentityHash(identityHash: string): Promise<void> {
+    if (await copyText(identityHash)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
   async function activateManagedIdentity(identity: IdentitySummary): Promise<void> {
     identityBusyId = identity.id;
     try {
@@ -440,7 +446,12 @@
                     <span class="badge success identity-active-mobile">{$t('status.active')}</span>
                   {/if}
                 </div>
-                <code>{identity.identityHashHex}</code>
+                <button
+                  class="identity-copy-target"
+                  type="button"
+                  aria-label={$t('settings.identity.copyHash', { name: identity.displayName })}
+                  onclick={() => { void copyIdentityHash(identity.identityHashHex); }}
+                ><code>{identity.identityHashHex}</code></button>
               </div>
               {#if identity.id === $activeIdentity?.id}
                 <span class="badge success identity-active-desktop">{$t('status.active')}</span>

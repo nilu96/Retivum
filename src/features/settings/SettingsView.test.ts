@@ -1,17 +1,24 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../../package.json';
 import {
+  activeIdentity,
   blockedChatDestinations,
   chatContacts,
+  identities,
   knownDestinations,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
+import { clearToasts, toasts } from '../../lib/notifications/toasts';
 import SettingsView from './SettingsView.svelte';
 
 describe('SettingsView blocked destinations', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    clearToasts();
+    identities.set([]);
+    activeIdentity.set(undefined);
     knownDestinations.set([]);
     chatContacts.set([]);
     blockedChatDestinations.set(Array.from({ length: 4 }, (_, index) => {
@@ -23,6 +30,37 @@ describe('SettingsView blocked destinations', () => {
         blockedAt: `2026-07-16T10:0${index}:00.000Z`,
       };
     }));
+  });
+
+  it('copies an identity hash only from its hash and shows the copied toast', async () => {
+    const identityHash = 'a'.repeat(32);
+    identities.set([{
+      id: 'identity-1',
+      displayName: 'Alice',
+      identityHashHex: identityHash,
+      publicKeyHex: 'b'.repeat(128),
+    }]);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+
+    try {
+      render(SettingsView);
+      const copyTargets = screen.getAllByRole('button', { name: 'Copy identity hash for Alice' });
+      expect(copyTargets).toHaveLength(1);
+      expect(screen.getByText('Alice')).not.toHaveAttribute('role', 'button');
+
+      await fireEvent.click(copyTargets[0]);
+      await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(identityHash));
+      expect(get(toasts).at(-1)).toMatchObject({ kind: 'success', messageKey: 'common.copied' });
+      expect(writeText).toHaveBeenCalledTimes(1);
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
   });
 
   it('shows two blocked destinations until the list is expanded', async () => {
