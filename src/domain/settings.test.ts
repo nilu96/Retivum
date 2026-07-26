@@ -111,7 +111,8 @@ describe('platform interface configuration', () => {
   it('normalizes and validates RNode radio and device settings', () => {
     const draft = createRNodeInterfaceDraft('ble', 'rnode-1');
     expect(draft.radio).toMatchObject({
-      frequency: 869_525_000,
+      frequency: 869_462_500,
+      bandwidth: 62_500,
       txPower: 21,
       spreadingFactor: 8,
       dutyCycle: 10,

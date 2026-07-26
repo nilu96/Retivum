@@ -55,8 +55,8 @@ export async function authorizeNativeRNodeDevice(deviceId: string): Promise<void
     reannounceOnReconnect: false,
     connection: { type: 'ble', deviceId },
     radio: {
-      frequency: 869_525_000,
-      bandwidth: 125_000,
+      frequency: 869_462_500,
+      bandwidth: 62_500,
       txPower: 21,
       spreadingFactor: 8,
       codingRate: 5,
