@@ -623,6 +623,11 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .settings-heading-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .settings-card-actions { display: flex; gap: 8px; }
 .interface-type-picker { position: relative; }
+@media (min-width: 700px) {
+  .settings-card-header > .button,
+  .settings-card-header > .settings-card-actions,
+  .settings-card-header > .interface-type-picker { align-self: start; margin-block-start: 2px; }
+}
 .interface-add-button > span { flex: 1; }
 .interface-add-button svg:last-child { margin-inline-start: 3px; transition: rotate .15s ease; }
 .interface-add-button[aria-expanded='true'] svg:last-child { rotate: 180deg; }
