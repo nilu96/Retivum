@@ -1700,6 +1700,7 @@ describe('ChatView', () => {
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     await fireEvent.click(screen.getByRole('button', { name: /Announced Alice/ }));
+    expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
     const composer = screen.getByRole('textbox', { name: 'Message' });
     composer.focus();
     expect(composer).toHaveFocus();

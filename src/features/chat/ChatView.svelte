@@ -1334,12 +1334,6 @@
           <code>{selectedDestination}</code>
         </button>
         <button
-          class="icon-button conversation-contact-button"
-          title={$t(selectedContact ? 'chat.contact.edit' : 'chat.contact.add')}
-          aria-label={$t(selectedContact ? 'chat.contact.edit' : 'chat.contact.add')}
-          onclick={() => openContactEditor(selectedDestination!)}
-        ><Icon name={selectedContact ? 'edit' : 'identity'} size={17} /></button>
-        <button
           class="icon-button conversation-block-button"
           class:danger={!selectedDestinationBlocked}
           class:blocked={selectedDestinationBlocked}
