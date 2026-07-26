@@ -65,12 +65,45 @@ describe('applyThemePreference', () => {
     expect(setNativeBackdropColor).toHaveBeenLastCalledWith(themeBackground);
   });
 
+  it.each([
+    ['dark', '#040705', '#0b0f0c'],
+    ['light', '#202321', '#f3f6f3'],
+  ] as const)('matches the %s image-viewer backdrop in native safe areas', (
+    theme,
+    overlayBackground,
+    themeBackground,
+  ) => {
+    applyThemePreference(theme);
+
+    setOverlayBackdropVisible(true, 'imageViewer');
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', overlayBackground);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith(overlayBackground);
+
+    setOverlayBackdropVisible(false, 'imageViewer');
+    expect(document.querySelector('meta[name="theme-color"]')).toHaveAttribute('content', themeBackground);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith(themeBackground);
+  });
+
   it('keeps the native backdrop dimmed until the last overlapping overlay closes', () => {
     applyThemePreference('light');
 
     setOverlayBackdropVisible(true);
     setOverlayBackdropVisible(true);
     setOverlayBackdropVisible(false);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#464a47');
+
+    setOverlayBackdropVisible(false);
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#f3f6f3');
+  });
+
+  it('uses the darker image backdrop while different overlay kinds overlap', () => {
+    applyThemePreference('light');
+
+    setOverlayBackdropVisible(true);
+    setOverlayBackdropVisible(true, 'imageViewer');
+    expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#202321');
+
+    setOverlayBackdropVisible(false, 'imageViewer');
     expect(setNativeBackdropColor).toHaveBeenLastCalledWith('#464a47');
 
     setOverlayBackdropVisible(false);

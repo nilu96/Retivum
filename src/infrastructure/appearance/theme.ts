@@ -6,14 +6,28 @@ const themeBackgrounds = {
   light: '#f3f6f3',
 } as const;
 
-const overlayBackgrounds = {
-  dark: '#050906',
-  light: '#464a47',
+export type OverlayBackdropKind = 'modal' | 'imageViewer';
+
+const overlayBackgrounds: Record<
+  OverlayBackdropKind,
+  Record<keyof typeof themeBackgrounds, string>
+> = {
+  modal: {
+    dark: '#050906',
+    light: '#464a47',
+  },
+  imageViewer: {
+    dark: '#040705',
+    light: '#202321',
+  },
 } as const;
 
 let activeTheme: ThemePreference = 'system';
 let systemThemeQuery: MediaQueryList | undefined;
-let overlayCount = 0;
+const overlayCounts: Record<OverlayBackdropKind, number> = {
+  modal: 0,
+  imageViewer: 0,
+};
 
 function resolvedTheme(theme: ThemePreference): keyof typeof themeBackgrounds {
   if (theme !== 'system') return theme;
@@ -22,7 +36,11 @@ function resolvedTheme(theme: ThemePreference): keyof typeof themeBackgrounds {
 
 function applyResolvedThemeBackground(): void {
   const theme = resolvedTheme(activeTheme);
-  const background = overlayCount > 0 ? overlayBackgrounds[theme] : themeBackgrounds[theme];
+  const background = overlayCounts.imageViewer > 0
+    ? overlayBackgrounds.imageViewer[theme]
+    : overlayCounts.modal > 0
+      ? overlayBackgrounds.modal[theme]
+      : themeBackgrounds[theme];
   document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
     ?.setAttribute('content', background);
   setNativeBackdropColor(background);
@@ -43,7 +61,10 @@ export function applyThemePreference(theme: ThemePreference): void {
   applyResolvedThemeBackground();
 }
 
-export function setOverlayBackdropVisible(visible: boolean): void {
-  overlayCount = Math.max(0, overlayCount + (visible ? 1 : -1));
+export function setOverlayBackdropVisible(
+  visible: boolean,
+  kind: OverlayBackdropKind = 'modal',
+): void {
+  overlayCounts[kind] = Math.max(0, overlayCounts[kind] + (visible ? 1 : -1));
   applyResolvedThemeBackground();
 }

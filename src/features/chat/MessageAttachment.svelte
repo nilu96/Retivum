@@ -8,6 +8,7 @@
   } from '../../domain/chat-attachments';
   import { saveChatFile } from '../../infrastructure/platform/file-save';
   import { t } from '../../i18n';
+  import { lockBodyScroll } from '../../lib/actions/bodyScrollLock';
   import Icon from '../../lib/components/Icon.svelte';
   import { toast } from '../../lib/notifications/toasts';
 
@@ -31,13 +32,6 @@
     const url = URL.createObjectURL(new Blob([attachment.data as BlobPart], { type: attachment.mimeType }));
     objectUrl = url;
     return () => URL.revokeObjectURL(url);
-  });
-
-  $effect(() => {
-    if (!viewerOpen) return;
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previousOverflow; };
   });
 
   function openViewer(): void {
@@ -126,6 +120,7 @@
     aria-label={$t('chat.attachment.imageViewer', { name: attachment.name })}
     onkeydown={viewerKeydown}
     onpointerdown={(event) => event.stopPropagation()}
+    use:lockBodyScroll={'imageViewer'}
   >
     <button
       type="button"

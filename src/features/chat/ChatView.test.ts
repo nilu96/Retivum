@@ -612,6 +612,9 @@ describe('ChatView', () => {
 
   it('opens image attachments in a large accessible viewer', async () => {
     const sourceHash = 'c'.repeat(32);
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(max-width: 699px)',
+    })));
     chatMessages.set([{
       id: 'identity:preview-image',
       identityId: 'identity',
@@ -640,10 +643,12 @@ describe('ChatView', () => {
     const closeButton = viewer.querySelector<HTMLButtonElement>('.message-image-viewer-close');
     expect(viewer).toBeInTheDocument();
     expect(closeButton).not.toBeNull();
+    expect(document.documentElement).toHaveClass('overlay-open');
     if (closeButton) await waitFor(() => expect(closeButton).toHaveFocus());
 
     await fireEvent.keyDown(viewer, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: 'Image preview: landscape.png' })).not.toBeInTheDocument();
+    expect(document.documentElement).not.toHaveClass('overlay-open');
     await waitFor(() => expect(previewButton).toHaveFocus());
   });
 
