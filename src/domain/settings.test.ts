@@ -112,7 +112,7 @@ describe('platform interface configuration', () => {
     const draft = createRNodeInterfaceDraft('ble', 'rnode-1');
     expect(draft.radio).toMatchObject({
       frequency: 869_462_500,
-      bandwidth: 62_500,
+      bandwidth: 125_000,
       txPower: 21,
       spreadingFactor: 8,
       dutyCycle: 10,
