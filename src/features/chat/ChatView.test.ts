@@ -1700,9 +1700,13 @@ describe('ChatView', () => {
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     await fireEvent.click(screen.getByRole('button', { name: /Announced Alice/ }));
+    const composer = screen.getByRole('textbox', { name: 'Message' });
+    composer.focus();
+    expect(composer).toHaveFocus();
     const headerContact = screen.getByRole('button', { name: 'Add Announced Alice as contact' });
     await fireEvent.click(within(headerContact).getByText('Announced Alice'));
 
+    expect(composer).not.toHaveFocus();
     const name = screen.getByRole('textbox', { name: /^Contact name/ });
     expect(name).toHaveValue('Announced Alice');
     await fireEvent.input(name, { target: { value: 'My Alice' } });

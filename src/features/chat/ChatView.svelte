@@ -706,6 +706,7 @@
   }
 
   function openContactEditor(destinationHash: string): void {
+    composerTextarea?.blur();
     closeChatActions();
     contactEditorDestination = destinationHash;
   }
@@ -1238,9 +1239,7 @@
               <div class="bookmark-actions">
                 <button
                   aria-label={$t('chat.contact.edit')}
-                  onclick={() => {
-                    contactEditorDestination = contact.destinationHash;
-                  }}
+                  onclick={() => openContactEditor(contact.destinationHash)}
                 >
                   <Icon name="edit" size={14} />{$t('chat.contact.edit')}
                 </button>
@@ -1318,7 +1317,7 @@
             selectedContact ? 'chat.contact.editNamed' : 'chat.contact.addNamed',
             { name: selectedName ?? shortHash(selectedDestination) },
           )}
-          onclick={() => { contactEditorDestination = selectedDestination; }}
+          onclick={() => openContactEditor(selectedDestination!)}
           use:contextMenuTrigger={{
             onopen: (x, y, method) => openChatActions(
               destinationActionTarget(
@@ -1338,7 +1337,7 @@
           class="icon-button conversation-contact-button"
           title={$t(selectedContact ? 'chat.contact.edit' : 'chat.contact.add')}
           aria-label={$t(selectedContact ? 'chat.contact.edit' : 'chat.contact.add')}
-          onclick={() => { contactEditorDestination = selectedDestination; }}
+          onclick={() => openContactEditor(selectedDestination!)}
         ><Icon name={selectedContact ? 'edit' : 'identity'} size={17} /></button>
         <button
           class="icon-button conversation-block-button"
