@@ -1,6 +1,10 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { blockedChatDestinations, chatMessages } from './chat-state';
+import {
+  blockedChatDestinations,
+  chatMessages,
+  onIncomingChatMessage,
+} from './chat-state';
 import {
   activeIdentity,
   chatInboundTransfers,
@@ -736,6 +740,38 @@ describe('ReticulumRuntimeController chat deletion', () => {
       expect(persist).not.toHaveBeenCalled();
     } finally {
       internals.worker = originalWorker;
+    }
+  });
+
+  it('emits one foreground event for a newly received message and ignores a duplicate', async () => {
+    const sourceHash = 'e'.repeat(32);
+    const received = vi.fn();
+    const unsubscribe = onIncomingChatMessage(received);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    vi.spyOn(internals.chatRepository, 'saveMessage').mockResolvedValue();
+    const event = {
+      type: 'chatMessageReceived',
+      identityId: 'identity-1',
+      messageId: 'new-inbound',
+      sourceHash,
+      destinationHash: 'a'.repeat(32),
+      title: '',
+      content: 'New message',
+      receivedAt: '2026-07-26T10:01:00.000Z',
+    };
+
+    try {
+      await internals.handleEvent(event);
+      await internals.handleEvent(event);
+
+      expect(received).toHaveBeenCalledOnce();
+      expect(received).toHaveBeenCalledWith(expect.objectContaining({
+        id: 'identity-1:new-inbound',
+        sourceHash,
+        direction: 'incoming',
+      }));
+    } finally {
+      unsubscribe();
     }
   });
 

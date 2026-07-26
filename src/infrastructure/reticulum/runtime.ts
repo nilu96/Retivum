@@ -80,6 +80,7 @@ import {
   blockedChatDestinations,
   chatContacts,
   chatMessages,
+  emitIncomingChatMessage,
   forgetUnreadChatMessages,
   markChatMessagesRead,
   noteUnreadChatMessage,
@@ -1375,7 +1376,10 @@ class ReticulumRuntimeController {
       };
       const isNewMessage = !get(chatMessages).some((item) => item.id === message.id);
       chatMessages.update((items) => upsertChatMessage(items, message));
-      if (isNewMessage) noteUnreadChatMessage(message.sourceHash, message.id);
+      if (isNewMessage) {
+        noteUnreadChatMessage(message.sourceHash, message.id);
+        emitIncomingChatMessage(message);
+      }
       try {
         await this.chatRepository.saveMessage(message);
         appendLocalLog('debug', 'persistence', 'CHAT_MESSAGE_PERSISTED', { messageId: message.messageId });

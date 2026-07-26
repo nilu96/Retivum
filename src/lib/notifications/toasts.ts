@@ -10,6 +10,7 @@ export interface ToastNotification {
   messageKey: MessageKey;
   parameters?: MessageParameters;
   oncancel?: () => void;
+  onactivate?: () => void;
   dismissing?: boolean;
 }
 
@@ -40,6 +41,16 @@ export function dismissToast(id: number): void {
   toasts.update((items) => items.filter((item) => item.id !== id));
 }
 
+export function dismissToastsByMessageKey(messageKey: MessageKey): void {
+  toasts.update((items) => items.filter((item) => {
+    if (item.messageKey !== messageKey) return true;
+    const timer = timers.get(item.id);
+    if (timer) clearTimeout(timer);
+    timers.delete(item.id);
+    return false;
+  }));
+}
+
 export function clearToasts(): void {
   for (const timer of timers.values()) clearTimeout(timer);
   timers.clear();
@@ -51,9 +62,19 @@ function showToast(
   messageKey: MessageKey,
   parameters?: MessageParameters,
   durationMs = defaultDuration[kind],
+  onactivate?: () => void,
 ): number {
   const id = nextId++;
-  toasts.update((items) => dismissExcessTransientToasts([...items, { id, kind, messageKey, parameters }]));
+  toasts.update((items) => dismissExcessTransientToasts([
+    ...items,
+    {
+      id,
+      kind,
+      messageKey,
+      parameters,
+      ...(onactivate ? { onactivate } : {}),
+    },
+  ]));
   scheduleDismissal(id, durationMs);
   return id;
 }
@@ -143,6 +164,12 @@ export const toast = {
   info: (messageKey: MessageKey, parameters?: MessageParameters, durationMs?: number) => (
     showToast('info', messageKey, parameters, durationMs)
   ),
+  infoAction: (
+    messageKey: MessageKey,
+    parameters: MessageParameters | undefined,
+    onactivate: () => void,
+    durationMs?: number,
+  ) => showToast('info', messageKey, parameters, durationMs, onactivate),
 };
 
 export const liveActivity = {

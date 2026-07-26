@@ -200,13 +200,14 @@ describe('LXMF delivery preferences', () => {
       locale: 'en',
       lxmf: { defaultDeliveryMethod: 'propagated', propagationNodeHash: hash },
     })).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: 9,
       lxmf: { defaultDeliveryMethod: 'propagated', propagationEnabled: true, propagationNodeHash: hash },
     });
   });
 
-  it('normalizes chat image handling and message retention preferences', () => {
+  it('normalizes chat notification, image handling, and message retention preferences', () => {
     expect(normalizeAppPreferences({ schemaVersion: 7 }).chat).toEqual({
+      inAppNotificationMode: 'all',
       imageDownscalingMode: 'ask',
       imageDownscalingMaxLongEdge: 1_500,
       messageRetentionDays: 0,
@@ -221,6 +222,7 @@ describe('LXMF delivery preferences', () => {
         messageRetentionDays: 2,
       },
     }).chat).toEqual({
+      inAppNotificationMode: 'all',
       imageDownscalingMode: 'never',
       imageDownscalingMaxLongEdge: 320,
       messageRetentionDays: 2,
@@ -231,6 +233,7 @@ describe('LXMF delivery preferences', () => {
         messageRetentionDays: 3,
       },
     }).chat).toEqual({
+      inAppNotificationMode: 'all',
       imageDownscalingMode: 'ask',
       imageDownscalingMaxLongEdge: 8_192,
       messageRetentionDays: 3,
@@ -238,6 +241,15 @@ describe('LXMF delivery preferences', () => {
     expect(normalizeAppPreferences({
       chat: { messageRetentionDays: 365 },
     }).chat.messageRetentionDays).toBe(0);
+    expect(normalizeAppPreferences({
+      chat: { inAppNotificationMode: 'contacts' },
+    }).chat.inAppNotificationMode).toBe('contacts');
+    expect(normalizeAppPreferences({
+      chat: { inAppNotificationMode: 'never' },
+    }).chat.inAppNotificationMode).toBe('never');
+    expect(normalizeAppPreferences({
+      chat: { inAppNotificationMode: 'unsupported' },
+    }).chat.inAppNotificationMode).toBe('all');
   });
 
   it('defaults inbound stamp enforcement to zero and accepts Python-compatible costs', () => {

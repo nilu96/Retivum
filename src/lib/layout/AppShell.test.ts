@@ -1,8 +1,22 @@
 import { createRawSnippet } from 'svelte';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { markChatMessagesRead, noteUnreadChatMessage } from '../../infrastructure/reticulum/chat-state';
-import { reticulumRuntime, runtimeStatus } from '../../infrastructure/reticulum/runtime';
+import { navigationLayer } from '../../app/router';
+import { defaultAppPreferences } from '../../domain/settings';
+import {
+  emitIncomingChatMessage,
+  markChatMessagesRead,
+  noteUnreadChatMessage,
+} from '../../infrastructure/reticulum/chat-state';
+import {
+  appPreferences,
+  chatContacts,
+  knownDestinations,
+  reticulumRuntime,
+  runtimeStatus,
+} from '../../infrastructure/reticulum/runtime';
+import { clearToasts, toasts } from '../notifications/toasts';
 import AppShell from './AppShell.svelte';
 
 const emptyChildren = createRawSnippet(() => ({ render: () => '<div>Content</div>' }));
@@ -14,6 +28,11 @@ describe('AppShell Chat unread indicator', () => {
   beforeEach(() => {
     markChatMessagesRead();
     runtimeStatus.set('offline');
+    appPreferences.set(structuredClone(defaultAppPreferences));
+    chatContacts.set([]);
+    knownDestinations.set([]);
+    navigationLayer.set(undefined);
+    clearToasts();
     vi.restoreAllMocks();
   });
 
@@ -344,4 +363,87 @@ describe('AppShell Chat unread indicator', () => {
       expect(screen.queryByText('1')).not.toBeInTheDocument();
     });
   });
+
+  it('shows a foreground notification for a new message outside the open conversation', () => {
+    const destinationHash = 'a'.repeat(32);
+    knownDestinations.set([{
+      destinationHash,
+      fullDestinationName: 'lxmf.delivery',
+      displayName: 'Announced Alice',
+    }]);
+    render(AppShell, { current: 'tools', children: emptyChildren });
+
+    emitIncomingChatMessage(incomingMessage(destinationHash, 'all-destinations'));
+
+    expect(get(toasts).at(-1)).toMatchObject({
+      kind: 'info',
+      messageKey: 'chat.notification.messageReceived',
+      parameters: { name: 'Announced Alice' },
+      onactivate: expect.any(Function),
+    });
+  });
+
+  it('limits foreground notifications to contacts when configured', () => {
+    const contactHash = 'b'.repeat(32);
+    const unknownHash = 'c'.repeat(32);
+    const preferences = structuredClone(defaultAppPreferences);
+    preferences.chat.inAppNotificationMode = 'contacts';
+    appPreferences.set(preferences);
+    chatContacts.set([{
+      id: `identity:${contactHash}`,
+      identityId: 'identity',
+      destinationHash: contactHash,
+      name: 'Local Bob',
+      createdAt: '2026-07-26T10:00:00.000Z',
+      updatedAt: '2026-07-26T10:00:00.000Z',
+    }]);
+    render(AppShell, { current: 'settings', children: emptyChildren });
+
+    emitIncomingChatMessage(incomingMessage(unknownHash, 'unknown'));
+    expect(get(toasts)).toEqual([]);
+
+    emitIncomingChatMessage(incomingMessage(contactHash, 'contact'));
+    expect(get(toasts).at(-1)).toMatchObject({
+      messageKey: 'chat.notification.messageReceived',
+      parameters: { name: 'Local Bob' },
+    });
+  });
+
+  it('suppresses notifications for the open conversation, disabled mode, and background app', () => {
+    const destinationHash = 'd'.repeat(32);
+    navigationLayer.set({ kind: 'chatConversation', destinationHash });
+    const rendered = render(AppShell, { current: 'chat', children: emptyChildren });
+
+    emitIncomingChatMessage(incomingMessage(destinationHash, 'open'));
+    expect(get(toasts)).toEqual([]);
+
+    const preferences = structuredClone(defaultAppPreferences);
+    preferences.chat.inAppNotificationMode = 'never';
+    appPreferences.set(preferences);
+    emitIncomingChatMessage(incomingMessage('e'.repeat(32), 'disabled'));
+    expect(get(toasts)).toEqual([]);
+
+    preferences.chat.inAppNotificationMode = 'all';
+    appPreferences.set(preferences);
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    emitIncomingChatMessage(incomingMessage('f'.repeat(32), 'background'));
+    expect(get(toasts)).toEqual([]);
+
+    rendered.unmount();
+  });
 });
+
+function incomingMessage(sourceHash: string, messageId: string) {
+  return {
+    id: `identity:${messageId}`,
+    identityId: 'identity',
+    messageId,
+    sourceHash,
+    destinationHash: '0'.repeat(32),
+    title: '',
+    content: 'Hello',
+    direction: 'incoming' as const,
+    status: 'delivered' as const,
+    receivedAt: '2026-07-26T10:00:00.000Z',
+  };
+}

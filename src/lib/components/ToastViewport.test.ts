@@ -1,6 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clearToasts, liveActivity, toast } from '../notifications/toasts';
+import {
+  clearToasts,
+  dismissToastsByMessageKey,
+  liveActivity,
+  toast,
+} from '../notifications/toasts';
 import ToastViewport from './ToastViewport.svelte';
 
 describe('ToastViewport', () => {
@@ -26,6 +31,29 @@ describe('ToastViewport', () => {
     toast.success('chat.propagationSync.complete.many', { count: 3 });
 
     expect(await screen.findByRole('status')).toHaveTextContent('Sync complete. 3 new messages.');
+  });
+
+  it('activates a message notification and dismisses only its notification siblings', async () => {
+    const activate = vi.fn();
+    render(ToastViewport);
+
+    toast.info('chat.attachment.imageDownscale.originalKept', {
+      name: 'photo.jpg',
+      originalSize: '2.0 MB',
+      resultSize: '2.2 MB',
+    });
+    toast.infoAction('chat.notification.messageReceived', { name: 'Alice' }, () => {
+      dismissToastsByMessageKey('chat.notification.messageReceived');
+      activate();
+    });
+    toast.infoAction('chat.notification.messageReceived', { name: 'Bob' }, vi.fn());
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'New message from Alice' }));
+
+    expect(activate).toHaveBeenCalledOnce();
+    expect(screen.queryByText('New message from Alice')).not.toBeInTheDocument();
+    expect(screen.queryByText('New message from Bob')).not.toBeInTheDocument();
+    expect(screen.getByText(/The downscaled “photo.jpg”/)).toBeInTheDocument();
   });
 
   it('keeps a live activity visible and non-dismissible until it finishes', async () => {

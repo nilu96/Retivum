@@ -1,19 +1,30 @@
 <script lang="ts">
-  import { onDestroy, tick, type Snippet } from 'svelte';
+  import { onDestroy, onMount, tick, type Snippet } from 'svelte';
   import type { AppRoute } from '../../app/router';
-  import { navigateToSettingsSection, navigateTopLevel } from '../../app/router';
+  import {
+    navigateToSettingsSection,
+    navigateTopLevel,
+    navigationLayer,
+    openChatConversationFromNotification,
+  } from '../../app/router';
   import { t, type MessageKey } from '../../i18n';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import { createLxmaAddress } from '../../domain/lxmf';
   import {
     activeIdentity,
+    appPreferences,
+    chatContacts,
     deliveryDestinationHash,
+    knownDestinations,
     reticulumRuntime,
     runtimeStatus,
   } from '../../infrastructure/reticulum/runtime';
-  import { unreadChatMessageCount } from '../../infrastructure/reticulum/chat-state';
+  import {
+    onIncomingChatMessage,
+    unreadChatMessageCount,
+  } from '../../infrastructure/reticulum/chat-state';
   import IdentityAddressDialog from '../../features/identity/IdentityAddressDialog.svelte';
-  import { toast } from '../notifications/toasts';
+  import { dismissToastsByMessageKey, toast } from '../notifications/toasts';
 
   let { current, children }: { current: AppRoute; children: Snippet } = $props();
 
@@ -72,6 +83,31 @@
       ? createLxmaAddress($deliveryDestinationHash, $activeIdentity.publicKeyHex)
       : undefined,
   );
+
+  onMount(() => onIncomingChatMessage((message) => {
+    const notificationMode = $appPreferences.chat.inAppNotificationMode;
+    if (notificationMode === 'never' || document.visibilityState !== 'visible') return;
+    if (current === 'chat' && $navigationLayer?.destinationHash === message.sourceHash) return;
+
+    const contact = $chatContacts.find((candidate) => (
+      candidate.destinationHash === message.sourceHash
+    ));
+    if (notificationMode === 'contacts' && !contact) return;
+
+    const announcedName = $knownDestinations.find((candidate) => (
+      candidate.destinationHash === message.sourceHash
+      && candidate.fullDestinationName === 'lxmf.delivery'
+    ))?.displayName;
+    const abbreviatedHash = `${message.sourceHash.slice(0, 8)}…${message.sourceHash.slice(-4)}`;
+    toast.infoAction(
+      'chat.notification.messageReceived',
+      { name: contact?.name ?? announcedName ?? abbreviatedHash },
+      () => {
+        dismissToastsByMessageKey('chat.notification.messageReceived');
+        openChatConversationFromNotification(message.sourceHash);
+      },
+    );
+  }));
 
   $effect(() => {
     const routeToReset = current;

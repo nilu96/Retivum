@@ -15,6 +15,7 @@
     propagationIsActive,
     type AppPreferences,
     type ImageDownscalingMode,
+    type InAppNotificationMode,
     type InterfaceConfig,
     type InterfaceType,
     type LxmfDeliveryMethod,
@@ -772,6 +773,21 @@
             }}
           />
           <small>{$t('settings.chat.imageDownscaling.maxEdge.help')}</small>
+        </label>
+        <label class="field chat-notification-mode">
+          <span>{$t('settings.chat.notifications')}</span>
+          <select
+            value={preferences.chat.inAppNotificationMode}
+            onchange={(event) => {
+              preferences.chat.inAppNotificationMode = event.currentTarget.value as InAppNotificationMode;
+              void persistPreferences();
+            }}
+          >
+            <option value="all">{$t('settings.chat.notifications.all')}</option>
+            <option value="contacts">{$t('settings.chat.notifications.contacts')}</option>
+            <option value="never">{$t('settings.chat.notifications.never')}</option>
+          </select>
+          <small>{$t('settings.chat.notifications.help')}</small>
         </label>
         <label class="field chat-message-retention">
           <span>{$t('settings.chat.messageRetention')}</span>

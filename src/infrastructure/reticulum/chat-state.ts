@@ -20,6 +20,24 @@ export const unreadChatMessageCount = derived(
   (messages) => Object.values(messages).reduce((total, messageIds) => total + messageIds.length, 0),
 );
 
+type IncomingChatMessageListener = (message: ChatMessage) => void;
+const incomingChatMessageListeners = new Set<IncomingChatMessageListener>();
+
+export function onIncomingChatMessage(listener: IncomingChatMessageListener): () => void {
+  incomingChatMessageListeners.add(listener);
+  return () => incomingChatMessageListeners.delete(listener);
+}
+
+export function emitIncomingChatMessage(message: ChatMessage): void {
+  for (const listener of incomingChatMessageListeners) {
+    try {
+      listener(message);
+    } catch {
+      // Foreground notification listeners must not disrupt message handling.
+    }
+  }
+}
+
 export function noteUnreadChatMessage(destinationHash: string, messageId: string): void {
   unreadChatMessageIds.update((messages) => {
     const current = messages[destinationHash] ?? [];

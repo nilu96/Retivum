@@ -195,6 +195,11 @@ export function openChatConversation(destinationHash: string): void {
   navigationLayer.set(state.layer);
 }
 
+export function openChatConversationFromNotification(destinationHash: string): void {
+  replaceWithTopLevelRoute('chat');
+  openChatConversation(destinationHash);
+}
+
 export function closeNavigationLayer(kind: AppNavigationLayer['kind']): boolean {
   const currentRoute = routeFromHash(window.location.hash);
   const state = managedNavigationState();

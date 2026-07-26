@@ -8,6 +8,7 @@ export type RNodeConnectionType = 'ble' | 'serial';
 export type InterfaceMode = 'full' | 'pointToPoint' | 'accessPoint' | 'roaming' | 'boundary' | 'gateway';
 export type ImageDownscalingMode = 'ask' | 'automatic' | 'never';
 export type MessageRetentionDays = 0 | 1 | 2 | 3 | 7 | 30 | 90;
+export type InAppNotificationMode = 'all' | 'contacts' | 'never';
 
 export const AUTHORIZED_SERIAL_PORT_ID = 'authorized-serial-port';
 export const DEFAULT_CHAT_IMAGE_LONG_EDGE = 1_500;
@@ -42,13 +43,14 @@ export interface LxmfPreferences {
 }
 
 export interface ChatPreferences {
+  inAppNotificationMode: InAppNotificationMode;
   imageDownscalingMode: ImageDownscalingMode;
   imageDownscalingMaxLongEdge: number;
   messageRetentionDays: MessageRetentionDays;
 }
 
 export interface AppPreferences {
-  schemaVersion: 8;
+  schemaVersion: 9;
   transportEnabled: boolean;
   theme: ThemePreference;
   locale: 'system' | 'en';
@@ -135,11 +137,12 @@ export const rnodeBandwidths = [
 ] as const;
 
 export const defaultAppPreferences: AppPreferences = {
-  schemaVersion: 8,
+  schemaVersion: 9,
   transportEnabled: false,
   theme: 'system',
   locale: 'system',
   chat: {
+    inAppNotificationMode: 'all',
     imageDownscalingMode: 'ask',
     imageDownscalingMaxLongEdge: DEFAULT_CHAT_IMAGE_LONG_EDGE,
     messageRetentionDays: 0,
@@ -193,6 +196,7 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
     theme?: unknown;
     locale?: unknown;
     chat?: {
+      inAppNotificationMode?: unknown;
       imageDownscalingMode?: unknown;
       imageDownscalingMaxLongEdge?: unknown;
       messageRetentionDays?: unknown;
@@ -214,11 +218,12 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
     : undefined;
   const legacyAutomaticImageDownscaling = source.automaticImageDownscaling === true;
   return {
-    schemaVersion: 8,
+    schemaVersion: 9,
     transportEnabled: source.transportEnabled === true,
     theme: source.theme === 'dark' || source.theme === 'light' ? source.theme : 'system',
     locale: source.locale === 'en' ? 'en' : 'system',
     chat: {
+      inAppNotificationMode: normalizeInAppNotificationMode(source.chat?.inAppNotificationMode),
       imageDownscalingMode: normalizeImageDownscalingMode(
         source.chat?.imageDownscalingMode,
         legacyAutomaticImageDownscaling,
@@ -241,6 +246,10 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
       ),
     },
   };
+}
+
+export function normalizeInAppNotificationMode(value: unknown): InAppNotificationMode {
+  return value === 'contacts' || value === 'never' ? value : 'all';
 }
 
 export function normalizeImageDownscalingMode(

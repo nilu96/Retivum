@@ -7,6 +7,7 @@ import {
   navigateTopLevel,
   navigationLayer,
   openChatConversation,
+  openChatConversationFromNotification,
   route,
   startRouter,
 } from './router';
@@ -98,6 +99,27 @@ describe('app router history', () => {
         kind: 'chatConversation',
         destinationHash: secondDestination,
       });
+    });
+  });
+
+  it('opens a notification conversation over the Chat overview', async () => {
+    const destinationHash = 'c'.repeat(32);
+    navigate('tools');
+    navigate('probe');
+
+    openChatConversationFromNotification(destinationHash);
+
+    expect(get(route)).toBe('chat');
+    expect(get(navigationLayer)).toEqual({
+      kind: 'chatConversation',
+      destinationHash,
+    });
+
+    window.history.back();
+    await vi.waitFor(() => {
+      expect(get(route)).toBe('chat');
+      expect(get(navigationLayer)).toBeUndefined();
+      expect(window.location.hash).toBe('#/chat');
     });
   });
 });

@@ -85,6 +85,8 @@
 .toast-notification.error .toast-icon { color: var(--danger); background: var(--danger-soft); }
 .toast-notification.activity .toast-icon { color: var(--accent-strong); background: var(--accent-soft); }
 .toast-notification.activity .toast-icon svg { animation: toast-activity-spin .9s linear infinite; }
+.toast-activate { display: grid; min-width: 0; padding: 0; grid-column: 1 / 3; grid-template-columns: 32px minmax(0, 1fr); align-items: center; gap: 10px; border: 0; border-radius: 9px; outline: 0; color: inherit; background: transparent; font: inherit; text-align: start; cursor: pointer; }
+.toast-activate:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
 .toast-activity-space { width: 32px; height: 32px; }
 .toast-dismiss { display: grid; width: 32px; height: 32px; padding: 0; place-items: center; border: 0; border-radius: 8px; color: var(--text-muted); background: transparent; cursor: pointer; }
 .toast-dismiss:hover { color: var(--text); background: var(--surface-hover); }
@@ -845,10 +847,11 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .chat-settings-grid {
     grid-template-areas:
       'image-mode max-edge'
-      'retention retention';
+      'notifications retention';
   }
   .chat-image-downscaling-mode { grid-area: image-mode; }
   .chat-image-max-edge { grid-area: max-edge; }
+  .chat-notification-mode { grid-area: notifications; }
   .chat-message-retention { grid-area: retention; }
   .lxmf-settings-grid {
     grid-template-areas:

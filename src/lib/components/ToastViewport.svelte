@@ -22,10 +22,27 @@
         ondismiss: () => dismissToast(notification.id),
       }}
     >
-      <span class="toast-icon">
-        <Icon name={notification.kind === 'success' ? 'check' : notification.kind === 'activity' ? 'sync' : 'info'} size={18} />
-      </span>
-      <p>{$t(notification.messageKey, notification.parameters)}</p>
+      {#if notification.onactivate}
+        <button
+          class="toast-activate"
+          type="button"
+          onclick={() => {
+            const activate = notification.onactivate;
+            dismissToast(notification.id);
+            activate?.();
+          }}
+        >
+          <span class="toast-icon">
+            <Icon name={notification.kind === 'success' ? 'check' : notification.kind === 'activity' ? 'sync' : 'info'} size={18} />
+          </span>
+          <p>{$t(notification.messageKey, notification.parameters)}</p>
+        </button>
+      {:else}
+        <span class="toast-icon">
+          <Icon name={notification.kind === 'success' ? 'check' : notification.kind === 'activity' ? 'sync' : 'info'} size={18} />
+        </span>
+        <p>{$t(notification.messageKey, notification.parameters)}</p>
+      {/if}
       {#if notification.kind !== 'activity'}
         <button
           class="toast-dismiss"
