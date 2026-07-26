@@ -14,7 +14,7 @@ const native = Capacitor.isNativePlatform();
 const platform = Capacitor.getPlatform();
 const mobile = native && ['android', 'ios'].includes(platform);
 configureNativeViewport(native, platform);
-await lockNativeScreenOrientation(native);
+await lockNativeScreenOrientation(native, platform);
 await keepMobileDisplayAwakeWhileForeground(mobile);
 
 async function applyInitialTheme(): Promise<void> {

@@ -11,14 +11,19 @@ import { lockNativeScreenOrientation } from './screen-orientation';
 describe('native screen orientation', () => {
   beforeEach(() => lock.mockReset());
 
-  it('locks native builds to primary portrait', async () => {
+  it('locks non-iOS native builds to primary portrait', async () => {
     lock.mockResolvedValue(undefined);
-    await lockNativeScreenOrientation(true);
+    await lockNativeScreenOrientation(true, 'android');
     expect(lock).toHaveBeenCalledWith({ orientation: 'portrait-primary' });
   });
 
+  it('relies on device-specific manifest orientations on iOS', async () => {
+    await lockNativeScreenOrientation(true, 'ios');
+    expect(lock).not.toHaveBeenCalled();
+  });
+
   it('does not invoke a native plugin in a browser', async () => {
-    await lockNativeScreenOrientation(false);
+    await lockNativeScreenOrientation(false, 'web');
     expect(lock).not.toHaveBeenCalled();
   });
 });
