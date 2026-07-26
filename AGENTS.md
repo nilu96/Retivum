@@ -164,6 +164,7 @@ These notes describe code behavior that is useful while modifying the implementa
 ## Change rules
 
 - Preserve unrelated user changes. The worktree may already be dirty.
+- Write commits with a brief description for small changes. For complex or larger changes, include a detailed description that explains the purpose and important implementation details.
 - Update persistent schema versions and normalization/migration paths together. Test both new and legacy records.
 - Keep runtime status separate from persisted interface configuration.
 - Keep application interface IDs stable across worker/node rebuilds; never expose runtime indexes to UI or storage.
