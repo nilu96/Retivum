@@ -484,10 +484,11 @@ describe('ChatView', () => {
     expect(composer).toHaveFocus();
   });
 
-  it('scrolls to a newly received message in the open conversation', async () => {
+  it('keeps the reading position and counts newly received messages below it', async () => {
     const sourceHash = 'a'.repeat(32);
     let feedHeight = 500;
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
     const firstMessage = {
       id: 'identity:first-incoming',
       identityId: 'identity',
@@ -507,22 +508,95 @@ describe('ChatView', () => {
     await waitFor(() => expect(feed.scrollTop).toBe(500));
     feed.scrollTop = 0;
     feedHeight = 1300;
+    await fireEvent.scroll(feed);
 
-    chatMessages.set([firstMessage, {
+    const newIncoming = {
       ...firstMessage,
       id: 'identity:new-incoming',
       messageId: 'new-incoming',
       content: 'New incoming',
       receivedAt: '2026-07-16T10:01:00.000Z',
-    }]);
+    };
+    const secondNewIncoming = {
+      ...firstMessage,
+      id: 'identity:second-new-incoming',
+      messageId: 'second-new-incoming',
+      content: 'Second new incoming',
+      receivedAt: '2026-07-16T10:02:00.000Z',
+    };
+    chatMessages.set([firstMessage, newIncoming]);
 
+    await screen.findByRole('button', {
+      name: 'Scroll to latest message, 1 unread message',
+    });
+    expect(screen.getAllByText('New incoming')
+      .find((element) => element.tagName === 'P')
+      ?.closest('.message-bubble')).toHaveTextContent('New');
+
+    chatMessages.set([firstMessage, newIncoming, secondNewIncoming]);
+
+    const scrollButton = await screen.findByRole('button', {
+      name: 'Scroll to latest message, 2 unread messages',
+    });
+    expect(feed.scrollTop).toBe(0);
+    expect(scrollButton).toHaveTextContent('2');
+    expect(screen.getAllByText('New incoming')
+      .find((element) => element.tagName === 'P')
+      ?.closest('.message-bubble')).toHaveTextContent('New');
+    expect(screen.getAllByText('Second new incoming')
+      .find((element) => element.tagName === 'P')
+      ?.closest('.message-bubble')).toHaveTextContent('New');
+
+    await fireEvent.click(scrollButton);
     await waitFor(() => expect(feed.scrollTop).toBe(1300));
+    expect(screen.queryByRole('button', {
+      name: 'Scroll to latest message, 2 unread messages',
+    })).not.toBeInTheDocument();
   });
 
-  it('scrolls once when an inbound message transfer appears in the open conversation', async () => {
+  it('continues following incoming messages while the conversation is at the bottom', async () => {
     const sourceHash = 'a'.repeat(32);
     let feedHeight = 500;
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    const firstMessage = {
+      id: 'identity:follow-first-incoming',
+      identityId: 'identity',
+      messageId: 'follow-first-incoming',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Follow first incoming',
+      direction: 'incoming' as const,
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    };
+    chatMessages.set([firstMessage]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Follow first incoming/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(500));
+    feedHeight = 1300;
+
+    chatMessages.set([firstMessage, {
+      ...firstMessage,
+      id: 'identity:follow-new-incoming',
+      messageId: 'follow-new-incoming',
+      content: 'Follow new incoming',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }]);
+
+    await waitFor(() => expect(feed.scrollTop).toBe(1300));
+    expect(screen.queryByRole('button', {
+      name: /unread message/,
+    })).not.toBeInTheDocument();
+  });
+
+  it('keeps the reading position when an inbound message transfer appears', async () => {
+    const sourceHash = 'a'.repeat(32);
+    let feedHeight = 500;
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
     chatMessages.set([{
       id: 'identity:transfer-scroll-message',
       identityId: 'identity',
@@ -541,6 +615,7 @@ describe('ChatView', () => {
     await waitFor(() => expect(feed.scrollTop).toBe(500));
     feed.scrollTop = 0;
     feedHeight = 1300;
+    await fireEvent.scroll(feed);
 
     chatInboundTransfers.set([{
       id: 'incoming-transfer-scroll',
@@ -551,7 +626,8 @@ describe('ChatView', () => {
     }]);
 
     expect(await screen.findByText('Receiving LXMF message')).toBeInTheDocument();
-    await waitFor(() => expect(feed.scrollTop).toBe(1300));
+    await screen.findByRole('button', { name: 'Scroll to latest message' });
+    expect(feed.scrollTop).toBe(0);
 
     await fireEvent.pointerDown(feed);
     feed.scrollTop = 100;
@@ -1455,6 +1531,45 @@ describe('ChatView', () => {
     expect(receivedMessage?.closest('.message-bubble')).toHaveTextContent('New');
     expect(screen.getByText('First unread').closest('.message-bubble')).not.toHaveTextContent('New');
     expect(screen.getByText('Second unread').closest('.message-bubble')).not.toHaveTextContent('New');
+  });
+
+  it('counts multiple messages arriving together in the conversation-list indicator', async () => {
+    const sourceHash = '6'.repeat(32);
+    const firstMessage = {
+      id: 'identity:batch-existing',
+      identityId: 'identity',
+      messageId: 'batch-existing',
+      sourceHash,
+      destinationHash: '5'.repeat(32),
+      title: '',
+      content: 'Existing read message',
+      direction: 'incoming' as const,
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    };
+    chatMessages.set([firstMessage]);
+    render(ChatView);
+
+    expect(screen.queryByLabelText('2 unread messages')).not.toBeInTheDocument();
+
+    chatMessages.set([firstMessage, {
+      ...firstMessage,
+      id: 'identity:batch-unread-1',
+      messageId: 'batch-unread-1',
+      content: 'First batch arrival',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }, {
+      ...firstMessage,
+      id: 'identity:batch-unread-2',
+      messageId: 'batch-unread-2',
+      content: 'Second batch arrival',
+      receivedAt: '2026-07-16T10:02:00.000Z',
+    }]);
+    noteUnreadChatMessage(sourceHash, 'identity:batch-unread-1');
+    noteUnreadChatMessage(sourceHash, 'identity:batch-unread-2');
+
+    const unreadIndicator = await screen.findByLabelText('2 unread messages');
+    expect(screen.getByRole('button', { name: /Second batch arrival/ }))
+      .toContainElement(unreadIndicator);
   });
 
   it('clears open-chat unread markers after sending a new message', async () => {

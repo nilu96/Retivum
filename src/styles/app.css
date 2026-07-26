@@ -433,6 +433,7 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .message-feed-content { display: flex; width: 100%; min-height: 100%; flex-direction: column; align-items: flex-start; gap: 10px; }
 .message-scroll-latest { position: absolute; z-index: 3; inset-inline-end: 20px; inset-block-end: 14px; width: 42px; height: 42px; color: var(--accent-strong); background: color-mix(in srgb, var(--surface-1) 92%, transparent); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
 .message-scroll-latest:hover { background: var(--surface-hover); }
+.message-scroll-unread-badge { position: absolute; display: grid; min-width: 20px; height: 20px; place-items: center; padding-inline: 5px; border: 2px solid var(--surface-1); border-radius: 999px; inset-block-start: -7px; inset-inline-end: -7px; color: var(--accent-ink); background: var(--accent); font-size: .58rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; pointer-events: none; }
 .message-bubble { position: relative; width: min(560px, 86%); padding: 12px 14px; border: 1px solid var(--message-incoming-border); border-radius: 4px 14px 14px; background: var(--message-incoming); box-shadow: 0 5px 18px rgba(0, 0, 0, .05); }
 .message-bubble:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .message-bubble.outgoing { align-self: flex-end; border-color: var(--message-outgoing-border); border-radius: 14px 4px 14px 14px; background: var(--message-outgoing); }

@@ -133,12 +133,14 @@
   let messageFeedContent = $state<HTMLDivElement>();
   let messageFeedScrollable = $state(false);
   let messageFeedAtBottom = $state(true);
+  let unreadMessagesBelow = $state(0);
   let followLatestMessageLayout = false;
+  let followIncomingMessages = true;
   let deletingContactId = $state<string | undefined>();
   let propagationSyncRequested = $state(false);
   let openedUnreadMessageIds = $state<string[]>([]);
   let observedIncomingDestination = $state<string | undefined>();
-  let observedIncomingMessageId = $state<string | undefined>();
+  let observedIncomingMessageIds = new Set<string>();
   let observedInboundTransferDestination: string | undefined;
   let observedInboundTransferIds = new Set<string>();
   let messageActions = $state<{
@@ -287,18 +289,30 @@
 
   $effect(() => {
     const destination = selectedDestination;
-    const latestIncomingId = selectedMessages
+    const incomingMessageIds = selectedMessages
       .filter((message) => chatMessageDirection(message) === 'incoming')
-      .at(-1)?.id;
+      .map((message) => message.id);
     if (observedIncomingDestination !== destination) {
       observedIncomingDestination = destination;
-      observedIncomingMessageId = latestIncomingId;
+      observedIncomingMessageIds = new Set(incomingMessageIds);
+      unreadMessagesBelow = 0;
       return;
     }
-    if (!destination || !latestIncomingId || latestIncomingId === observedIncomingMessageId) return;
-    observedIncomingMessageId = latestIncomingId;
-    openedUnreadMessageIds = [latestIncomingId];
-    void scrollToLatestMessage();
+    const newIncomingMessageIds = incomingMessageIds.filter(
+      (messageId) => !observedIncomingMessageIds.has(messageId),
+    );
+    observedIncomingMessageIds = new Set(incomingMessageIds);
+    if (!destination || newIncomingMessageIds.length === 0) return;
+    if (followIncomingMessages) {
+      openedUnreadMessageIds = newIncomingMessageIds;
+      void scrollToLatestMessage();
+    } else {
+      openedUnreadMessageIds = unreadMessagesBelow === 0
+        ? newIncomingMessageIds
+        : [...new Set([...openedUnreadMessageIds, ...newIncomingMessageIds])];
+      unreadMessagesBelow += newIncomingMessageIds.length;
+      stopFollowingLatestMessageLayout();
+    }
   });
 
   $effect(() => {
@@ -311,7 +325,10 @@
     }
     const hasNewTransfer = [...transferIds].some((id) => !observedInboundTransferIds.has(id));
     observedInboundTransferIds = transferIds;
-    if (destination && hasNewTransfer) void scrollToLatestMessage();
+    if (destination && hasNewTransfer) {
+      if (followIncomingMessages) void scrollToLatestMessage();
+      else stopFollowingLatestMessageLayout();
+    }
   });
 
   $effect(() => {
@@ -378,6 +395,8 @@
 
   async function scrollToLatestMessage(followAttachmentLayout = true): Promise<void> {
     if (followAttachmentLayout) followLatestMessageLayout = true;
+    followIncomingMessages = true;
+    unreadMessagesBelow = 0;
     await tick();
     if (messageFeed) messageFeed.scrollTop = messageFeed.scrollHeight;
     await updateMessageFeedOverflow();
@@ -392,6 +411,11 @@
     followLatestMessageLayout = false;
   }
 
+  function messageFeedScrolled(): void {
+    updateMessageFeedScrollState();
+    followIncomingMessages = messageFeedAtBottom;
+  }
+
   async function updateMessageFeedOverflow(): Promise<void> {
     await tick();
     updateMessageFeedScrollState();
@@ -401,11 +425,13 @@
     if (!selectedDestination || !messageFeed) {
       messageFeedScrollable = false;
       messageFeedAtBottom = true;
+      followIncomingMessages = true;
       return;
     }
     const remainingScroll = messageFeed.scrollHeight - messageFeed.clientHeight - messageFeed.scrollTop;
     messageFeedScrollable = messageFeed.scrollHeight > messageFeed.clientHeight + 1;
     messageFeedAtBottom = !messageFeedScrollable || remainingScroll <= 2;
+    if (messageFeedAtBottom) unreadMessagesBelow = 0;
   }
 
   function storeConversationDraft(
@@ -466,6 +492,8 @@
     stopConversationRecording(selectedDestination);
     storeSelectedConversationDraft();
     openedUnreadMessageIds = [];
+    unreadMessagesBelow = 0;
+    followIncomingMessages = true;
     selectedDestination = undefined;
     composerContent = '';
     composerAttachments = [];
@@ -1307,7 +1335,7 @@
         bind:this={messageFeed}
         role="log"
         aria-label={$t('chat.messages.received')}
-        onscroll={updateMessageFeedScrollState}
+        onscroll={messageFeedScrolled}
         onwheel={stopFollowingLatestMessageLayout}
         ontouchmove={stopFollowingLatestMessageLayout}
         onpointerdown={stopFollowingLatestMessageLayout}
@@ -1413,13 +1441,28 @@
         </div>
       </div>
       {#if messageFeedScrollable && !messageFeedAtBottom}
+        {@const scrollLatestLabel = unreadMessagesBelow > 0
+          ? $t(
+            unreadMessagesBelow === 1
+              ? 'chat.messages.scrollToLatestWithUnread.one'
+              : 'chat.messages.scrollToLatestWithUnread.many',
+            { count: unreadMessagesBelow },
+          )
+          : $t('chat.messages.scrollToLatest')}
         <button
           class="icon-button message-scroll-latest"
           type="button"
-          title={$t('chat.messages.scrollToLatest')}
-          aria-label={$t('chat.messages.scrollToLatest')}
+          title={scrollLatestLabel}
+          aria-label={scrollLatestLabel}
           onclick={() => { void scrollToLatestMessage(); }}
-        ><Icon name="chevron-down" size={20} /></button>
+        >
+          <Icon name="chevron-down" size={20} />
+          {#if unreadMessagesBelow > 0}
+            <span class="message-scroll-unread-badge" aria-hidden="true">
+              {unreadBadge(unreadMessagesBelow)}
+            </span>
+          {/if}
+        </button>
       {/if}
       </div>
       <form class="message-composer" onsubmit={sendMessage}>

@@ -98,6 +98,8 @@
   "path.blocked": "Blocked destination",
   "chat.messages.received": "Conversation messages",
   "chat.messages.scrollToLatest": "Scroll to latest message",
+  "chat.messages.scrollToLatestWithUnread.one": "Scroll to latest message, 1 unread message",
+  "chat.messages.scrollToLatestWithUnread.many": "Scroll to latest message, {count} unread messages",
   "chat.message.new": "New",
   "chat.message.verification.valid": "Valid",
   "chat.message.verification.invalid": "Invalid",
