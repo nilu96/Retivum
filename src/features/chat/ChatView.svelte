@@ -343,7 +343,9 @@
     const content = messageFeedContent;
     if (!content || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      if (followLatestMessageLayout) void scrollToLatestMessage(false);
+      if (followLatestMessageLayout) {
+        void scrollToLatestMessage({ followAttachmentLayout: false });
+      }
       else void updateMessageFeedOverflow();
     });
     observer.observe(content);
@@ -394,18 +396,53 @@
     return count > 99 ? '99+' : String(count);
   }
 
-  async function scrollToLatestMessage(followAttachmentLayout = true): Promise<void> {
+  function firstOpenedUnreadMessageElement(): HTMLElement | undefined {
+    const firstUnreadMessage = selectedMessages.find(
+      (message) => openedUnreadMessageIds.includes(message.id),
+    );
+    if (!firstUnreadMessage || !messageFeedContent) return undefined;
+    return [...messageFeedContent.querySelectorAll<HTMLElement>('[data-message-id]')]
+      .find((element) => element.dataset.messageId === firstUnreadMessage.id);
+  }
+
+  async function scrollToLatestMessage(options: {
+    followAttachmentLayout?: boolean;
+    keepFirstUnreadVisible?: boolean;
+  } = {}): Promise<void> {
+    const {
+      followAttachmentLayout = true,
+      keepFirstUnreadVisible = false,
+    } = options;
     if (followAttachmentLayout) followLatestMessageLayout = true;
     followIncomingMessages = true;
     unreadMessagesBelow = 0;
     await tick();
-    if (messageFeed) messageFeed.scrollTop = messageFeed.scrollHeight;
+    if (messageFeed) {
+      let targetScrollTop = messageFeed.scrollHeight;
+      if (keepFirstUnreadVisible) {
+        const firstUnreadMessage = firstOpenedUnreadMessageElement();
+        if (firstUnreadMessage) {
+          const feedBounds = messageFeed.getBoundingClientRect();
+          const unreadBounds = firstUnreadMessage.getBoundingClientRect();
+          const unreadTop = messageFeed.scrollTop + unreadBounds.top - feedBounds.top;
+          const bottomViewportTop = Math.max(0, messageFeed.scrollHeight - messageFeed.clientHeight);
+          if (unreadTop < bottomViewportTop) {
+            targetScrollTop = Math.max(0, unreadTop);
+            followLatestMessageLayout = false;
+          }
+        }
+      }
+      messageFeed.scrollTop = targetScrollTop;
+    }
     await updateMessageFeedOverflow();
+    followIncomingMessages = messageFeedAtBottom;
   }
 
   function attachmentLayoutReady(messageId: string): void {
     if (!followLatestMessageLayout || !selectedMessages.some((message) => message.id === messageId)) return;
-    requestAnimationFrame(() => { void scrollToLatestMessage(false); });
+    requestAnimationFrame(() => {
+      void scrollToLatestMessage({ followAttachmentLayout: false });
+    });
   }
 
   function stopFollowingLatestMessageLayout(): void {
@@ -486,7 +523,7 @@
       selectedDestination = destinationHash;
       restoreConversationDraft(destinationHash);
     }
-    await scrollToLatestMessage();
+    await scrollToLatestMessage({ keepFirstUnreadVisible: true });
   }
 
   function closeConversationState(): void {
@@ -1369,6 +1406,7 @@
             {@const isOpenedUnread = openedUnreadMessageIds.includes(message.id)}
             <div
               class="message-bubble"
+              data-message-id={message.id}
               class:outgoing={chatMessageDirection(message) === 'outgoing'}
               class:incoming={chatMessageDirection(message) === 'incoming'}
               class:has-new={isOpenedUnread}
@@ -1476,7 +1514,9 @@
           type="button"
           title={scrollLatestLabel}
           aria-label={scrollLatestLabel}
-          onclick={() => { void scrollToLatestMessage(); }}
+          onclick={() => {
+            void scrollToLatestMessage({ keepFirstUnreadVisible: unreadMessagesBelow > 0 });
+          }}
         >
           <Icon name="chevron-down" size={20} />
           {#if unreadMessagesBelow > 0}

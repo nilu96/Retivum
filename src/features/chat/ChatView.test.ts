@@ -60,6 +60,20 @@ function setChatDestinations(records: Array<{
   })));
 }
 
+function elementBounds(top: number, height = 0): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    top,
+    left: 0,
+    right: 0,
+    bottom: top + height,
+    width: 0,
+    height,
+    toJSON: () => ({}),
+  };
+}
+
 describe('ChatView', () => {
   let stopRouter: (() => void) | undefined;
 
@@ -447,6 +461,60 @@ describe('ChatView', () => {
     await waitFor(() => expect(feed.scrollTop).toBe(1200));
   });
 
+  it('keeps the first unread message visible when opening a conversation with a large unread section', async () => {
+    const sourceHash = '9'.repeat(32);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1400);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return elementBounds(
+        this.dataset.messageId === 'identity:first-opened-unread' ? 260 : 0,
+        this.dataset.messageId === 'identity:first-opened-unread' ? 80 : 0,
+      );
+    });
+    chatMessages.set([{
+      id: 'identity:opened-read',
+      identityId: 'identity',
+      messageId: 'opened-read',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Read before opening',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: 'identity:first-opened-unread',
+      identityId: 'identity',
+      messageId: 'first-opened-unread',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'First unread on open',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    }, {
+      id: 'identity:last-opened-unread',
+      identityId: 'identity',
+      messageId: 'last-opened-unread',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Last unread on open',
+      receivedAt: '2026-07-16T10:02:00.000Z',
+    }]);
+    noteUnreadChatMessage(sourceHash, 'identity:first-opened-unread');
+    noteUnreadChatMessage(sourceHash, 'identity:last-opened-unread');
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Last unread on open/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+
+    await waitFor(() => expect(feed.scrollTop).toBe(260));
+    expect(screen.getByText('First unread on open').closest('.message-bubble')).toHaveTextContent('New');
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Scroll to latest message' }));
+    await waitFor(() => expect(feed.scrollTop).toBe(1400));
+  });
+
   it('offers to scroll to the latest message when the open conversation is not at the bottom', async () => {
     const sourceHash = '9'.repeat(32);
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1200);
@@ -489,6 +557,14 @@ describe('ChatView', () => {
     let feedHeight = 500;
     vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => feedHeight);
     vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return elementBounds(
+        this.dataset.messageId === 'identity:new-incoming' ? 300 : 0,
+        this.dataset.messageId === 'identity:new-incoming' ? 80 : 0,
+      );
+    });
     const firstMessage = {
       id: 'identity:first-incoming',
       identityId: 'identity',
@@ -548,10 +624,13 @@ describe('ChatView', () => {
       ?.closest('.message-bubble')).toHaveTextContent('New');
 
     await fireEvent.click(scrollButton);
-    await waitFor(() => expect(feed.scrollTop).toBe(1300));
+    await waitFor(() => expect(feed.scrollTop).toBe(300));
     expect(screen.queryByRole('button', {
       name: 'Scroll to latest message, 2 unread messages',
     })).not.toBeInTheDocument();
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Scroll to latest message' }));
+    await waitFor(() => expect(feed.scrollTop).toBe(1300));
   });
 
   it('continues following incoming messages while the conversation is at the bottom', async () => {
@@ -817,6 +896,7 @@ describe('ChatView', () => {
 
   it('retries a failed outbound message from its context menu', async () => {
     const destinationHash = '4'.repeat(32);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1200);
     chatMessages.set([{
       id: 'identity:failed-message',
       identityId: 'identity',
@@ -833,6 +913,9 @@ describe('ChatView', () => {
     render(ChatView);
 
     await fireEvent.click(screen.getByRole('button', { name: /Please retry this/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(1200));
+    feed.scrollTop = 100;
     await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Please retry this'), {
       clientX: 100,
       clientY: 100,
@@ -840,6 +923,7 @@ describe('ChatView', () => {
     await fireEvent.click(screen.getByRole('menuitem', { name: 'Retry sending' }));
 
     expect(retry).toHaveBeenCalledWith('failed-message');
+    await waitFor(() => expect(feed.scrollTop).toBe(1200));
   });
 
   it('keeps the composer focused when dismissing or choosing a message action', async () => {
@@ -1574,6 +1658,16 @@ describe('ChatView', () => {
 
   it('clears open-chat unread markers after sending a new message', async () => {
     const sourceHash = '7'.repeat(32);
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(1200);
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return elementBounds(
+        this.dataset.messageId === 'identity:send-marker' ? 900 : 0,
+        this.dataset.messageId === 'identity:send-marker' ? 80 : 0,
+      );
+    });
     chatMessages.set([{
       id: 'identity:send-marker',
       identityId: 'identity',
@@ -1589,7 +1683,10 @@ describe('ChatView', () => {
     render(ChatView);
 
     await fireEvent.click(screen.getByRole('button', { name: /Unread before reply/ }));
+    const feed = screen.getByRole('log', { name: 'Conversation messages' });
+    await waitFor(() => expect(feed.scrollTop).toBe(1200));
     expect(screen.getByText('New')).toBeInTheDocument();
+    feed.scrollTop = 100;
 
     await fireEvent.input(screen.getByRole('textbox', { name: 'Message' }), {
       target: { value: 'Reply' },
@@ -1597,6 +1694,7 @@ describe('ChatView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Send message' }));
 
     await waitFor(() => expect(screen.queryByText('New')).not.toBeInTheDocument());
+    expect(feed.scrollTop).toBe(1200);
   });
 
   it('does not restore unread markers after the conversation is closed', async () => {
