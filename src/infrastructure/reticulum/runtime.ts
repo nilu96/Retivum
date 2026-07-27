@@ -118,6 +118,7 @@ export const deliveryDestinationHash = writable<string | undefined>();
 export const runtimeErrorCode = writable<string | undefined>();
 export const propagationSyncActive = writable(false);
 export const nomadBookmarks = writable<NomadBookmark[]>([]);
+export const nomadDirectoryReady = writable(false);
 export const provisioningBookmarks = writable<ProvisioningBookmark[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
 export const pathTableEntries = writable<PathTableEntry[]>([]);
@@ -215,6 +216,7 @@ class ReticulumRuntimeController {
     if (this.started) return;
     this.started = true;
     runtimeStatus.set('starting');
+    nomadDirectoryReady.set(false);
     chatDirectoryReady.set(false);
 
     try {
@@ -1214,6 +1216,7 @@ class ReticulumRuntimeController {
   }
 
   stop(): void {
+    nomadDirectoryReady.set(false);
     chatDirectoryReady.set(false);
     if (this.messageRetentionTimer !== undefined) {
       window.clearInterval(this.messageRetentionTimer);
@@ -1778,10 +1781,17 @@ class ReticulumRuntimeController {
   }
 
   private async loadNomadDirectory(identityId: string): Promise<void> {
-    if (this.loadedNomadIdentityId === identityId) return;
+    if (this.loadedNomadIdentityId === identityId) {
+      nomadDirectoryReady.set(true);
+      return;
+    }
+    nomadDirectoryReady.set(false);
     const bookmarks = await this.nomadRepository.loadBookmarks(identityId);
+    const activeIdentityId = get(activeIdentity)?.id;
+    if (activeIdentityId && activeIdentityId !== identityId) return;
     this.loadedNomadIdentityId = identityId;
     nomadBookmarks.set(bookmarks);
+    nomadDirectoryReady.set(true);
   }
 
   private async loadChatDirectory(identityId: string): Promise<void> {

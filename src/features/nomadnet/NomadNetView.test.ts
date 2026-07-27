@@ -7,6 +7,7 @@ import {
   interfaceStatuses,
   knownDestinations,
   nomadBookmarks,
+  nomadDirectoryReady,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import NomadNetView from './NomadNetView.svelte';
@@ -46,6 +47,7 @@ describe('NomadNetView', () => {
     activeIdentity.set(undefined);
     setNomadDestinations([]);
     nomadBookmarks.set([]);
+    nomadDirectoryReady.set(true);
     destinationPathStatuses.set({});
     interfaceStatuses.set({});
   });
@@ -528,6 +530,7 @@ describe('NomadNetView', () => {
   });
 
   it('selects bookmarks when they finish loading after the view opens', async () => {
+    nomadDirectoryReady.set(false);
     render(NomadNetView);
     expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
 
@@ -536,13 +539,35 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash: '1'.repeat(32),
       path: '/page/index.mu',
+      label: 'Loaded bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
+    nomadDirectoryReady.set(true);
 
     await waitFor(() => {
       expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'true');
     });
     expect(screen.getByPlaceholderText('Search bookmarks')).toBeInTheDocument();
+  });
+
+  it('keeps an explicit scope choice made while bookmarks are loading', async () => {
+    nomadDirectoryReady.set(false);
+    render(NomadNetView);
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+
+    nomadBookmarks.set([{
+      id: 'identity:late-bookmark',
+      identityId: 'identity',
+      destinationHash: '1'.repeat(32),
+      path: '/page/index.mu',
+      label: 'Loaded bookmark',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    nomadDirectoryReady.set(true);
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+    });
   });
 
   it('shows the interface-required hint only while every interface is disconnected', async () => {
@@ -802,6 +827,8 @@ describe('NomadNetView', () => {
       'Forest Node',
       false,
     ));
+    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
     expect(screen.queryByRole('heading', { name: 'Add bookmark' })).not.toBeInTheDocument();
 
     const removeCurrent = await screen.findByRole('button', { name: 'Remove current bookmark' });

@@ -21,6 +21,7 @@
     interfaceStatuses,
     knownDestinations,
     nomadBookmarks,
+    nomadDirectoryReady,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
@@ -57,7 +58,14 @@
 
   let { active = true }: { active?: boolean } = $props();
   let address = $state('');
-  let selectedScope = $state<NomadDirectoryScope>();
+  function preferredNomadScope(): NomadDirectoryScope {
+    return $nomadBookmarks.length ? 'bookmarks' : 'announces';
+  }
+
+  let initialScopePending = $state(!$nomadDirectoryReady);
+  let selectedScope = $state<NomadDirectoryScope>(
+    $nomadDirectoryReady ? preferredNomadScope() : 'announces',
+  );
   let query = $state('');
   let directoryExpanded = $state(true);
   let loadedPage = $state<LoadedNomadPage>();
@@ -156,9 +164,7 @@
       ].some((value) => value?.toLowerCase().includes(normalizedQuery)),
     ),
   );
-  const scope = $derived<NomadDirectoryScope>(
-    selectedScope ?? ($nomadBookmarks.length ? 'bookmarks' : 'announces'),
-  );
+  const scope = $derived<NomadDirectoryScope>(selectedScope);
   const visibleDestinationCount = $derived(
     scope === 'announces' ? filteredAnnounces.length : filteredBookmarks.length,
   );
@@ -171,6 +177,12 @@
       ? undefined
       : $t('nomadnet.offlineHint'),
   );
+
+  $effect(() => {
+    if (!initialScopePending || !$nomadDirectoryReady) return;
+    initialScopePending = false;
+    selectedScope = preferredNomadScope();
+  });
 
   onMount(() => {
     const mobileQuery = window.matchMedia?.('(max-width: 699px)');
@@ -365,6 +377,7 @@
     if (scope !== nextScope || query) {
       beginMobileToolbarViewportPreservation();
     }
+    initialScopePending = false;
     selectedScope = nextScope;
     query = '';
   }
