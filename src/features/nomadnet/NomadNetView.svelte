@@ -78,6 +78,7 @@
   const mobilePanelScrollEndInset = 16;
   const mobileToolbarTransitionDurationMs = 220;
   const mobileToolbarViewportPreservationClass = 'nomad-toolbar-preserving-viewport';
+  let bookmarkEditorOpening = $state(false);
   let bookmarkEditor = $state<{
     address: string;
     currentName: string;
@@ -451,6 +452,10 @@
       mobileToolbarStickyBoundaryY = undefined;
       return;
     }
+    // Mobile overlays lock the body with fixed positioning. Ignore the
+    // resulting synthetic geometry changes so they cannot reset the sticky
+    // boundary and make an already-stuck toolbar look newly stuck.
+    if (document.documentElement.classList.contains('overlay-open')) return;
     const stickyTop = Number.parseFloat(getComputedStyle(mobileBrowserElement).top);
     const resolvedStickyTop = Number.isFinite(stickyTop) ? stickyTop : 0;
     const toolbarTop = mobileBrowserElement.getBoundingClientRect().top;
@@ -908,24 +913,60 @@
     goHome();
   }
 
-  function bookmarkCurrent(): void {
-    if (!parsedAddress) return;
-    if (currentBookmark) {
-      editBookmark(currentBookmark);
+  async function collapseMobileDirectoryBeforeBookmarkEditor(): Promise<void> {
+    if (!mobileViewport || !directoryExpanded) return;
+    const waitForViewportCompensation = mobileToolbarStuck;
+    setDirectoryExpanded(false);
+    await tick();
+    if (reducedMotion) {
+      if (waitForViewportCompensation && preservingMobileToolbarViewport) {
+        if (mobileToolbarViewportTimer !== undefined) {
+          window.clearTimeout(mobileToolbarViewportTimer);
+          mobileToolbarViewportTimer = undefined;
+        }
+        finishMobileToolbarViewportPreservation();
+      }
       return;
     }
-    if (!$activeIdentity) return;
-    bookmarkEditor = {
+    await new Promise<void>((resolve) => {
+      window.setTimeout(
+        resolve,
+        mobileToolbarTransitionDurationMs + (waitForViewportCompensation ? 80 : 0),
+      );
+    });
+  }
+
+  async function bookmarkCurrent(): Promise<void> {
+    const targetAddress = parsedAddress;
+    const targetBookmark = currentBookmark;
+    if (!targetAddress || bookmarkEditorOpening) return;
+    if (!targetBookmark && !$activeIdentity) return;
+    const nextEditor = targetBookmark ? undefined : {
       address: formatNomadAddress(
-        parsedAddress.destinationHash,
-        parsedAddress.path,
-        parsedAddress.requestData,
+        targetAddress.destinationHash,
+        targetAddress.path,
+        targetAddress.requestData,
       ),
       currentName: $knownDestinations.find((destination) => (
-        destination.destinationHash === parsedAddress.destinationHash
+        destination.destinationHash === targetAddress.destinationHash
       ))?.displayName ?? '',
       currentIdentifyBeforeLoad: false,
     };
+    const openEditor = (): void => {
+      if (targetBookmark) editBookmark(targetBookmark);
+      else bookmarkEditor = nextEditor;
+    };
+    if (!mobileViewport || !directoryExpanded) {
+      openEditor();
+      return;
+    }
+    bookmarkEditorOpening = true;
+    try {
+      await collapseMobileDirectoryBeforeBookmarkEditor();
+      openEditor();
+    } finally {
+      bookmarkEditorOpening = false;
+    }
   }
 
   function editBookmark(bookmark: NomadBookmark): void {
@@ -935,6 +976,14 @@
       currentIdentifyBeforeLoad: bookmark.identifyBeforeLoad === true,
       bookmarkId: bookmark.id,
     };
+  }
+
+  function closeBookmarkEditor(): void {
+    bookmarkEditor = undefined;
+    if (!mobileViewport) return;
+    void tick().then(() => {
+      window.requestAnimationFrame(updateMobileToolbarStuck);
+    });
   }
 
   async function saveBookmark(name: string, identifyBeforeLoad: boolean): Promise<boolean> {
@@ -983,7 +1032,7 @@
           class:bookmarked={Boolean(currentBookmark)}
           aria-label={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
           title={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
-          disabled={!parsedAddress || (!currentBookmark && !$activeIdentity)}
+          disabled={bookmarkEditorOpening || !parsedAddress || (!currentBookmark && !$activeIdentity)}
           onclick={bookmarkCurrent}
         ><Icon name={currentBookmark ? 'bookmark-filled' : 'bookmark'} size={19} /></button>
       </div>
@@ -1038,7 +1087,7 @@
           type="button"
           aria-label={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
           title={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
-          disabled={!parsedAddress || (!currentBookmark && !$activeIdentity)}
+          disabled={bookmarkEditorOpening || !parsedAddress || (!currentBookmark && !$activeIdentity)}
           onclick={bookmarkCurrent}
         ><Icon name={currentBookmark ? 'bookmark-filled' : 'bookmark'} size={19} /></button>
         <button
@@ -1277,7 +1326,7 @@
     currentName={bookmarkEditor.currentName}
     currentIdentifyBeforeLoad={bookmarkEditor.currentIdentifyBeforeLoad}
     mode={bookmarkEditor.bookmarkId ? 'edit' : 'add'}
-    oncancel={() => { bookmarkEditor = undefined; }}
+    oncancel={closeBookmarkEditor}
     onsave={saveBookmark}
   />
 {/if}

@@ -723,6 +723,31 @@ describe('NomadNetView', () => {
     expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
   });
 
+  it('collapses the mobile directory before opening the add-bookmark editor', async () => {
+    useMobileViewport();
+    const destinationHash = 'a'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    render(NomadNetView);
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
+      target: { value: `${destinationHash}:/page/index.mu` },
+    });
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Bookmark current address' }));
+
+    expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+    expect(await screen.findByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
+  });
+
   it('copies an announced destination hash and offers to add it as a bookmark', async () => {
     const destinationHash = 'b'.repeat(32);
     activeIdentity.set({
@@ -949,16 +974,53 @@ describe('NomadNetView', () => {
     render(NomadNetView);
 
     const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    const browser = document.querySelector<HTMLElement>('.nomad-mobile-browser')!;
     await fireEvent.click(screen.getByRole('button', { name: /Mobile bookmark/ }));
     const editCurrent = within(toolbar).getByRole('button', { name: 'Edit current bookmark' });
     expect(editCurrent).toBeEnabled();
     expect(editCurrent).toHaveClass('bookmarked');
     expect(editCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Show bookmarks (1)' }));
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+
+    let scrollY = 120;
+    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
+    vi.spyOn(browser, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: 300,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    await fireEvent.scroll(window);
+    expect(browser).toHaveClass('stuck', 'at-sticky-edge');
+    scrollY = 160;
+    await fireEvent.scroll(window);
+    expect(browser).not.toHaveClass('at-sticky-edge');
+
     await fireEvent.click(editCurrent);
 
-    expect(screen.getByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Show bookmarks (1)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+    expect(await screen.findByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Mobile bookmark');
     expect(screen.getByRole('switch', { name: /Identify before loading/ })).toBeChecked();
+
+    scrollY = 0;
+    await fireEvent.resize(window);
+    expect(browser).toHaveClass('stuck');
+    expect(browser).not.toHaveClass('at-sticky-edge');
+
+    scrollY = 160;
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Edit bookmark' })).not.toBeInTheDocument());
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+    expect(browser).not.toHaveClass('at-sticky-edge');
   });
 
   it('loads announced pages and follows same-destination Micron links', async () => {
