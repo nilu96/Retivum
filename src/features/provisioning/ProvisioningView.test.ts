@@ -188,6 +188,8 @@ describe('ProvisioningView', () => {
     expect(screen.getByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
     const name = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(name).toHaveValue('');
+    expect(name).toBeRequired();
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(name).toHaveAttribute('placeholder', 'My management destination');
     expect(screen.queryByRole('switch')).not.toBeInTheDocument();
     await fireEvent.input(name, { target: { value: '  Workshop router  ' } });

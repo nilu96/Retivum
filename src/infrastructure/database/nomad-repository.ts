@@ -1,4 +1,4 @@
-import type { NomadBookmark } from '../../domain/nomadnet';
+import { sortNomadBookmarks, type NomadBookmark } from '../../domain/nomadnet';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
 export class BrowserNomadRepository {
@@ -11,8 +11,7 @@ export class BrowserNomadRepository {
       );
       await transactionDone(transaction);
       return identityId
-        ? bookmarks.filter((item) => item.identityId === identityId)
-          .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+        ? sortNomadBookmarks(bookmarks.filter((item) => item.identityId === identityId))
         : [];
     } finally {
       database.close();

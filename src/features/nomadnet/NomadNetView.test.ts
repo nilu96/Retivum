@@ -864,11 +864,14 @@ describe('NomadNetView', () => {
     expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
       .toHaveAttribute('aria-expanded', 'true');
     expect(document.documentElement).not.toHaveClass('nomad-toolbar-preserving-viewport');
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Bookmark name' }), {
+      target: { value: 'Mobile page' },
+    });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/page/index.mu`,
-      '',
+      'Mobile page',
       false,
     ));
     expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');

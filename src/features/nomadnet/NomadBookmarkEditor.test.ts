@@ -44,7 +44,7 @@ describe('NomadBookmarkEditor', () => {
     });
   }
 
-  it('saves the edited address and trimmed optional local bookmark name', async () => {
+  it('requires and saves a trimmed local bookmark name', async () => {
     const onsave = vi.fn().mockResolvedValue(true);
     const oncancel = vi.fn();
     const editedAddress = `${'b'.repeat(32)}:/page/edited.mu`;
@@ -59,6 +59,7 @@ describe('NomadBookmarkEditor', () => {
 
     const nameInput = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(nameInput).toHaveValue('Node');
+    expect(nameInput).toBeRequired();
     await fireEvent.input(
       screen.getByRole('textbox', { name: 'NomadNet address' }),
       { target: { value: `  ${editedAddress}  ` } },
@@ -73,5 +74,20 @@ describe('NomadBookmarkEditor', () => {
       true,
     ));
     expect(oncancel).toHaveBeenCalledOnce();
+  });
+
+  it('does not submit an empty bookmark name', async () => {
+    const onsave = vi.fn().mockResolvedValue(true);
+    render(NomadBookmarkEditor, {
+      address: `${'a'.repeat(32)}:/start`,
+      onsave,
+      oncancel: vi.fn(),
+    });
+
+    const save = screen.getByRole('button', { name: 'Save' });
+    expect(save).toBeDisabled();
+    await fireEvent.click(save);
+
+    expect(onsave).not.toHaveBeenCalled();
   });
 });

@@ -8,8 +8,34 @@ import {
   parseProvisioningSchema,
   parseProvisioningState,
   provisioningOperations,
+  sortProvisioningBookmarks,
   type ProvisioningValue,
 } from './provisioning';
+
+describe('sortProvisioningBookmarks', () => {
+  it('sorts by name and then management destination address', () => {
+    const bookmark = (destinationHash: string, label: string) => ({
+      id: destinationHash,
+      destinationHash,
+      label,
+      createdAt: '2026-07-27T10:00:00.000Z',
+      updatedAt: '2026-07-27T10:00:00.000Z',
+    });
+    const alphaLaterAddress = bookmark('c'.repeat(32), 'Alpha');
+    const beta = bookmark('b'.repeat(32), 'Beta');
+    const alphaEarlierAddress = bookmark('a'.repeat(32), 'Alpha');
+
+    expect(sortProvisioningBookmarks([
+      beta,
+      alphaLaterAddress,
+      alphaEarlierAddress,
+    ])).toEqual([
+      alphaEarlierAddress,
+      alphaLaterAddress,
+      beta,
+    ]);
+  });
+});
 
 describe('provisioning protocol', () => {
   it('encodes the firmware envelope with integer map keys and compression negotiation', () => {

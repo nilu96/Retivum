@@ -104,9 +104,24 @@ export interface ProvisioningNode {
 export interface ProvisioningBookmark {
   id: string;
   destinationHash: string;
+  /** Optional only for compatibility with bookmarks persisted before names became required. */
   label?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export function compareProvisioningBookmarks(
+  left: ProvisioningBookmark,
+  right: ProvisioningBookmark,
+): number {
+  return (left.label?.trim() ?? '').localeCompare(right.label?.trim() ?? '')
+    || left.destinationHash.localeCompare(right.destinationHash);
+}
+
+export function sortProvisioningBookmarks(
+  bookmarks: readonly ProvisioningBookmark[],
+): ProvisioningBookmark[] {
+  return [...bookmarks].sort(compareProvisioningBookmarks);
 }
 
 export interface CachedProvisioningSchema {

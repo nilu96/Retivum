@@ -60,6 +60,7 @@
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
+    if (!name.trim()) return;
     saving = true;
     try {
       if (await onsave(bookmarkAddress.trim(), name.trim(), identifyBeforeLoad)) oncancel();
@@ -115,6 +116,7 @@
           maxlength="128"
           placeholder={namePlaceholder}
           autocomplete="off"
+          required
         />
         <small>{nameHelp}</small>
       </label>
@@ -129,7 +131,7 @@
       {/if}
       <footer>
         <button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button>
-        <button class="button primary" type="submit" disabled={saving}>
+        <button class="button primary" type="submit" disabled={saving || !name.trim()}>
           {saving ? $t('common.loading') : $t('common.save')}
         </button>
       </footer>

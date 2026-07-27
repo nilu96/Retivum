@@ -78,6 +78,43 @@ describe('BrowserNomadRepository', () => {
     expect(await repository.loadBookmarks('identity-1')).toEqual([]);
   });
 
+  it('loads bookmarks ordered by name and then Nomad address', async () => {
+    const repository = new BrowserNomadRepository();
+    const bookmarks = [
+      {
+        id: 'identity-1:zulu',
+        identityId: 'identity-1',
+        destinationHash: 'c'.repeat(32),
+        path: '/page/index.mu',
+        label: 'Zulu',
+        createdAt: '2026-07-16T10:01:00.000Z',
+      },
+      {
+        id: 'identity-1:alpha-later',
+        identityId: 'identity-1',
+        destinationHash: 'b'.repeat(32),
+        path: '/page/index.mu',
+        label: 'Alpha',
+        createdAt: '2026-07-16T10:02:00.000Z',
+      },
+      {
+        id: 'identity-1:alpha-earlier',
+        identityId: 'identity-1',
+        destinationHash: 'a'.repeat(32),
+        path: '/page/index.mu',
+        label: 'Alpha',
+        createdAt: '2026-07-16T10:03:00.000Z',
+      },
+    ];
+    for (const bookmark of bookmarks) await repository.saveBookmark(bookmark);
+
+    expect((await repository.loadBookmarks('identity-1')).map((bookmark) => bookmark.id)).toEqual([
+      'identity-1:alpha-earlier',
+      'identity-1:alpha-later',
+      'identity-1:zulu',
+    ]);
+  });
+
   it('atomically replaces a bookmark when its address changes', async () => {
     const repository = new BrowserNomadRepository();
     const previousId = 'identity-1:old-address';

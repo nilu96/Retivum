@@ -75,13 +75,18 @@
       destination.destinationHash,
       destination,
     ]));
-    const bookmarked = $provisioningBookmarks.map((bookmark): ProvisioningNode => ({
-      id: bookmark.id,
-      destinationHash: bookmark.destinationHash,
-      lastAnnouncedAt: destinationsByHash.get(bookmark.destinationHash)?.lastAnnouncedAt,
-      bookmarked: true,
-      label: bookmark.label,
-    }));
+    const bookmarked = $provisioningBookmarks
+      .map((bookmark): ProvisioningNode => ({
+        id: bookmark.id,
+        destinationHash: bookmark.destinationHash,
+        lastAnnouncedAt: destinationsByHash.get(bookmark.destinationHash)?.lastAnnouncedAt,
+        bookmarked: true,
+        label: bookmark.label,
+      }))
+      .sort((left, right) => (
+        (left.label?.trim() ?? '').localeCompare(right.label?.trim() ?? '')
+        || left.destinationHash.localeCompare(right.destinationHash)
+      ));
     const bookmarkedHashes = new Set(bookmarked.map((node) => node.destinationHash));
     const announced = managementDestinations
       .filter((destination) => !bookmarkedHashes.has(destination.destinationHash))
@@ -90,10 +95,11 @@
         destinationHash: destination.destinationHash,
         lastAnnouncedAt: destination.lastAnnouncedAt,
       }));
-    return [...bookmarked, ...announced].sort((left, right) => (
+    announced.sort((left, right) => (
       (right.lastAnnouncedAt ?? '').localeCompare(left.lastAnnouncedAt ?? '')
       || left.destinationHash.localeCompare(right.destinationHash)
     ));
+    return [...bookmarked, ...announced];
   });
   const selectedNode = $derived(
     provisioningNodes.find((node) => node.id === selectedNodeId)

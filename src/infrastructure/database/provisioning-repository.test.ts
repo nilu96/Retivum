@@ -32,11 +32,12 @@ describe('BrowserProvisioningRepository', () => {
     await repository.saveBookmark({
       id: 'newer',
       destinationHash: 'fedcba9876543210fedcba9876543210',
+      label: 'Alpha',
       createdAt: '2026-07-20T10:00:00.000Z',
       updatedAt: '2026-07-20T10:00:00.000Z',
     });
 
-    expect((await repository.loadBookmarks()).map((bookmark) => bookmark.id)).toEqual(['older', 'newer']);
+    expect((await repository.loadBookmarks()).map((bookmark) => bookmark.id)).toEqual(['newer', 'older']);
   });
 
   it('deletes an existing bookmark and reports missing bookmarks', async () => {

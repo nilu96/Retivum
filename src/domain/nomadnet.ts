@@ -53,8 +53,20 @@ export interface NomadBookmark {
   path: string;
   requestData?: NomadRequestData;
   identifyBeforeLoad?: boolean;
+  /** Optional only for compatibility with bookmarks persisted before names became required. */
   label?: string;
   createdAt: string;
+}
+
+export function compareNomadBookmarks(left: NomadBookmark, right: NomadBookmark): number {
+  const leftAddress = formatNomadAddress(left.destinationHash, left.path, left.requestData);
+  const rightAddress = formatNomadAddress(right.destinationHash, right.path, right.requestData);
+  const nameOrder = (left.label?.trim() ?? '').localeCompare(right.label?.trim() ?? '');
+  return nameOrder || leftAddress.localeCompare(rightAddress);
+}
+
+export function sortNomadBookmarks(bookmarks: readonly NomadBookmark[]): NomadBookmark[] {
+  return [...bookmarks].sort(compareNomadBookmarks);
 }
 
 export interface NomadNodeAnnounceData {

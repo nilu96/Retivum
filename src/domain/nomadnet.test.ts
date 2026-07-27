@@ -9,6 +9,7 @@ import {
   nomadRequestPath,
   parseNomadAddress,
   resolveNomadLink,
+  sortNomadBookmarks,
   unpackNomadPageResponse,
 } from './nomadnet';
 
@@ -33,6 +34,36 @@ describe('nomadPageLoadDeadlineMs', () => {
     expect(nomadPageLoadDeadlineMs(2)).toBe(150_000);
     expect(nomadPageLoadDeadlineMs(3)).toBe(210_000);
     expect(nomadPageLoadDeadlineMs(99)).toBe(300_000);
+  });
+});
+
+describe('sortNomadBookmarks', () => {
+  it('sorts by name and then Nomad address', () => {
+    const bookmark = (
+      destinationHash: string,
+      path: string,
+      label?: string,
+    ) => ({
+      id: `${destinationHash}:${path}`,
+      identityId: 'identity-1',
+      destinationHash,
+      path,
+      label,
+      createdAt: '2026-07-27T10:00:00.000Z',
+    });
+    const alphaLaterAddress = bookmark('c'.repeat(32), '/page/index.mu', 'Alpha');
+    const beta = bookmark('b'.repeat(32), '/page/index.mu', 'Beta');
+    const alphaEarlierAddress = bookmark('a'.repeat(32), '/page/index.mu', 'Alpha');
+
+    expect(sortNomadBookmarks([
+      beta,
+      alphaLaterAddress,
+      alphaEarlierAddress,
+    ])).toEqual([
+      alphaEarlierAddress,
+      alphaLaterAddress,
+      beta,
+    ]);
   });
 });
 

@@ -1,7 +1,8 @@
-import type {
-  CachedProvisioningSchema,
-  ProvisioningBookmark,
-  ProvisioningSchema,
+import {
+  sortProvisioningBookmarks,
+  type CachedProvisioningSchema,
+  type ProvisioningBookmark,
+  type ProvisioningSchema,
 } from '../../domain/provisioning';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
@@ -16,7 +17,7 @@ export class BrowserProvisioningRepository {
         transaction.objectStore('provisioningBookmarks').getAll(),
       );
       await transactionDone(transaction);
-      return bookmarks.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+      return sortProvisioningBookmarks(bookmarks);
     } finally {
       database.close();
     }

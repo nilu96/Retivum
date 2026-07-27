@@ -227,7 +227,7 @@
   "nomadnet.bookmark.copyAddress": "Copy bookmark address",
   "nomadnet.bookmark.name": "Bookmark name",
   "nomadnet.bookmark.name.placeholder": "My NomadNet destination",
-  "nomadnet.bookmark.name.help": "The name is stored locally and is not shared over Reticulum.",
+  "nomadnet.bookmark.name.help": "A name is required. It is stored locally and is not shared over Reticulum.",
   "nomadnet.bookmark.identifyBeforeLoad": "Identify before loading",
   "nomadnet.bookmark.identifyBeforeLoad.help": "Share the active identity over the link before requesting this page.",
   "nomadnet.bookmark.edit": "Edit",

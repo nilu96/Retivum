@@ -28,6 +28,7 @@ type RuntimeInternals = {
     saveBookmark(bookmark: unknown): Promise<void>;
   };
   nomadRepository: {
+    saveBookmark(bookmark: unknown): Promise<void>;
     replaceBookmark(previousId: string, bookmark: unknown): Promise<void>;
   };
   knownDestinationRepository: {
@@ -100,6 +101,26 @@ describe('ReticulumRuntimeController chat deletion', () => {
     });
     expect(replaceBookmark).toHaveBeenCalledWith(previousId, updated);
     expect(get(nomadBookmarks)).toEqual([updated]);
+
+    expect(await reticulumRuntime.updateNomadBookmark(
+      `identity-1:${editedAddress}`,
+      editedAddress,
+      '   ',
+      false,
+    )).toBe(false);
+    expect(replaceBookmark).toHaveBeenCalledOnce();
+  });
+
+  it('rejects a Nomad bookmark without a name', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const saveBookmark = vi.spyOn(internals.nomadRepository, 'saveBookmark')
+      .mockResolvedValue(undefined);
+
+    expect(await reticulumRuntime.addNomadBookmark(
+      `${'a'.repeat(32)}:/page/index.mu`,
+      '   ',
+    )).toBe(false);
+    expect(saveBookmark).not.toHaveBeenCalled();
   });
 
   it('stores unified observations from every recognized application in the global directory', async () => {
@@ -604,8 +625,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
       id: destinationHash,
       destinationHash,
       lastAnnouncedAt: '2026-07-21T10:00:00.000Z',
-    }, '   ')).resolves.toBe(true);
-    expect(saveBookmark).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }));
+    }, '   ')).resolves.toBe(false);
+    expect(saveBookmark).toHaveBeenCalledOnce();
   });
 
   it('asks the worker to close every provisioning link', () => {
