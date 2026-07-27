@@ -1078,6 +1078,49 @@ describe('NomadNetView', () => {
       .toHaveAttribute('aria-expanded', 'true');
   });
 
+  it('does not collapse the expanded mobile toolbar while another dialog is in the foreground', async () => {
+    useMobileViewport();
+    const destinationHash = 'd'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    setNomadDestinations([{
+      destinationHash,
+      displayName: 'Dialog test node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    vi.spyOn(reticulumRuntime, 'requestNomadPage').mockResolvedValue({
+      destinationHash,
+      path: '/page/index.mu',
+      requestData: {},
+      content: '> Dialog test page',
+      receivedAt: '2026-07-16T10:01:00.000Z',
+    });
+    render(NomadNetView);
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    await fireEvent.click(screen.getByRole('button', { name: /Dialog test node/ }));
+    expect(await screen.findByText('Dialog test page')).toBeInTheDocument();
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Show announces (1)' }));
+
+    await fireEvent.click(within(toolbar).getByRole('button', {
+      name: 'Share identity with this page',
+    }));
+    const dialog = screen.getByRole('alertdialog');
+    await fireEvent.click(within(dialog).getByRole('heading', { name: 'Share identity?' }));
+
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('loads announced pages and follows same-destination Micron links', async () => {
     const destinationHash = 'f'.repeat(32);
     activeIdentity.set({

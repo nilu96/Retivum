@@ -518,12 +518,18 @@
     setDirectoryExpanded(false);
   }
 
+  function hasForegroundDialog(): boolean {
+    return document.querySelector(
+      '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+    ) !== null;
+  }
+
   function handleViewOutsideClick(event: MouseEvent): void {
     if (
       !active
       || !mobileViewport
       || !directoryExpanded
-      || bookmarkEditor
+      || hasForegroundDialog()
     ) return;
     const toolbar = mobileBrowserElement;
     if (!toolbar || event.composedPath().includes(toolbar)) return;
