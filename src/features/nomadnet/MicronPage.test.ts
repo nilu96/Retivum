@@ -1,8 +1,13 @@
-import { fireEvent, render, screen } from '@testing-library/svelte';
-import { describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import MicronPage from './MicronPage.svelte';
 
 describe('MicronPage', () => {
+  afterEach(() => {
+    document.documentElement.dataset.theme = 'system';
+    vi.unstubAllGlobals();
+  });
+
   it('renders Micron markup and delegates page links without browser navigation', async () => {
     const onlink = vi.fn();
     render(MicronPage, {
@@ -50,5 +55,52 @@ describe('MicronPage', () => {
     await fireEvent.click(link);
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start', behavior: 'smooth' });
     expect(onlink).not.toHaveBeenCalled();
+  });
+
+  it('rerenders loaded Micron colors when the selected theme changes', async () => {
+    document.documentElement.dataset.theme = 'dark';
+    const { container } = render(MicronPage, {
+      markup: 'Theme-aware text',
+      onlink: vi.fn(),
+    });
+    const pageContainer = container.querySelector<HTMLElement>('.micron-page > div');
+
+    expect(pageContainer).toHaveStyle({ color: '#ddd' });
+
+    document.documentElement.dataset.theme = 'light';
+
+    await waitFor(() => {
+      expect(container.querySelector('.micron-page > div')).toHaveStyle({ color: '#222' });
+    });
+  });
+
+  it('rerenders loaded Micron colors when the system appearance changes', async () => {
+    let systemDark = true;
+    let changeListener: (() => void) | undefined;
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      get matches() { return systemDark; },
+      media: '(prefers-color-scheme: dark)',
+      onchange: null,
+      addEventListener: (_event: string, listener: () => void) => { changeListener = listener; },
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    document.documentElement.dataset.theme = 'system';
+    const { container } = render(MicronPage, {
+      markup: 'System theme-aware text',
+      onlink: vi.fn(),
+    });
+    const pageContainer = container.querySelector<HTMLElement>('.micron-page > div');
+
+    expect(pageContainer).toHaveStyle({ color: '#ddd' });
+
+    systemDark = false;
+    changeListener?.();
+
+    await waitFor(() => {
+      expect(container.querySelector('.micron-page > div')).toHaveStyle({ color: '#222' });
+    });
   });
 });

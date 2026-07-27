@@ -12,16 +12,18 @@
   let { markup, onlink }: Props = $props();
   let pageElement: HTMLElement;
 
-  function usesDarkTheme(): boolean {
+  function usesDarkTheme(systemTheme?: MediaQueryList): boolean {
     const preference = document.documentElement.dataset.theme;
     return preference === 'dark'
       || (preference !== 'light'
         && typeof window.matchMedia === 'function'
-        && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        && (systemTheme ?? window.matchMedia('(prefers-color-scheme: dark)')).matches);
   }
 
+  let darkTheme = $state(usesDarkTheme());
+
   function renderMarkup(): void {
-    const parser = new MicronParser(usesDarkTheme(), false);
+    const parser = new MicronParser(darkTheme, false);
     // The parser's fragment path sanitizes raw Micron lines before parsing and
     // therefore mistakes Micron input fields for HTML tags. Its HTML path
     // parses first and sanitizes the generated HTML, preserving those fields.
@@ -96,12 +98,27 @@
 
   $effect(() => {
     markup;
+    darkTheme;
     if (pageElement) renderMarkup();
   });
 
   onMount(() => {
+    const systemTheme = window.matchMedia?.('(prefers-color-scheme: dark)');
+    const updateTheme = () => {
+      darkTheme = usesDarkTheme(systemTheme);
+    };
+    const themeObserver = new MutationObserver(updateTheme);
+    themeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    systemTheme?.addEventListener('change', updateTheme);
     pageElement.addEventListener('click', handleClick);
-    return () => pageElement.removeEventListener('click', handleClick);
+    return () => {
+      themeObserver.disconnect();
+      systemTheme?.removeEventListener('change', updateTheme);
+      pageElement.removeEventListener('click', handleClick);
+    };
   });
 </script>
 
