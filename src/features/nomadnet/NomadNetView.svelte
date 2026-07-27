@@ -535,6 +535,7 @@
       || !mobileViewport
       || !directoryExpanded
       || hasForegroundDialog()
+      || destinationActions
     ) return;
     const toolbar = mobileBrowserElement;
     if (!toolbar || event.composedPath().includes(toolbar)) return;

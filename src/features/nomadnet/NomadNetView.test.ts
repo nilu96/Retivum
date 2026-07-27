@@ -311,6 +311,29 @@ describe('NomadNetView', () => {
       .toHaveAttribute('aria-expanded', 'false');
   });
 
+  it('dismisses an open destination context menu without collapsing the mobile toolbar', async () => {
+    useMobileViewport();
+    const destinationHash = 'f'.repeat(32);
+    setNomadDestinations([{
+      destinationHash,
+      displayName: 'Context menu node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(NomadNetView);
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    const row = screen.getByRole('button', { name: /Context menu node/ });
+    await fireEvent.contextMenu(row, { clientX: 100, clientY: 100 });
+    expect(screen.getByRole('menu', { name: 'NomadNet destination actions' })).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Close destination actions' }));
+
+    expect(screen.queryByRole('menu', { name: 'NomadNet destination actions' }))
+      .not.toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('detects destination overflow before sticky lock and disables it again when content fits', async () => {
     useMobileViewport();
     setNomadDestinations([{
