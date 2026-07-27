@@ -1478,7 +1478,6 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .nomad-directory .scope-tabs { margin-inline: 0; }
   .nomad-directory .search-field { margin: 10px 0 0; }
   .nomad-directory-content { min-height: 0; max-height: none; padding: 12px 0 0; overflow: visible; overscroll-behavior: auto; }
-  .nomad-mobile-browser.expanded.stuck .nomad-browser-panel.scrollable .nomad-directory-content { padding-block-end: var(--nomad-panel-scroll-end-inset); }
   .nomad-canvas { min-height: 390px; grid-column: 1; grid-row: auto; }
   .nomad-canvas.page-loaded { overflow: visible; }
   .settings-header { margin-block-end: 23px; }

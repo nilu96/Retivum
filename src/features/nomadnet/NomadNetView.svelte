@@ -75,7 +75,6 @@
   let navigationSequence = 0;
   const maximumNavigationHistoryEntries = 32;
   const identityReloadDelayMs = 500;
-  const mobilePanelScrollEndInset = 16;
   const mobileToolbarTransitionDurationMs = 220;
   const mobileToolbarViewportPreservationClass = 'nomad-toolbar-preserving-viewport';
   let bookmarkEditorOpening = $state(false);
@@ -504,10 +503,7 @@
       mobilePanelScrollable = false;
       return;
     }
-    const appliedEndInset = mobileToolbarStuck && panel.classList.contains('scrollable')
-      ? mobilePanelScrollEndInset
-      : 0;
-    const scrollable = panel.scrollHeight - appliedEndInset > panel.clientHeight + 1;
+    const scrollable = panel.scrollHeight > panel.clientHeight + 1;
     const wasScrollable = untrack(() => mobilePanelScrollable);
     if (scrollable && !wasScrollable && mobileToolbarStuck) {
       mobileToolbarDocumentLockY = window.scrollY;
@@ -1118,7 +1114,6 @@
       class="nomad-browser-panel"
       class:scrollable={mobilePanelScrollable}
       bind:this={mobilePanelElement}
-      style:--nomad-panel-scroll-end-inset={`${mobilePanelScrollEndInset}px`}
       transition:slide={{ axis: 'y', duration: reducedMotion ? 0 : mobileToolbarTransitionDurationMs }}
     >
       <div class="nomad-browser-panel-content">
