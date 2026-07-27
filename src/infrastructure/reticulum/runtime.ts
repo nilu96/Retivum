@@ -1007,18 +1007,32 @@ class ReticulumRuntimeController {
     nomadBookmarks.update((items) => items.filter((item) => item.id !== id));
   }
 
-  async updateNomadBookmark(id: string, name: string, identifyBeforeLoad: boolean): Promise<boolean> {
+  async updateNomadBookmark(
+    id: string,
+    address: string,
+    name: string,
+    identifyBeforeLoad: boolean,
+  ): Promise<boolean> {
+    const parsed = parseNomadAddress(address);
     const identity = get(activeIdentity);
     const existing = get(nomadBookmarks).find((item) => item.id === id && item.identityId === identity?.id);
-    if (!existing) return false;
+    if (!parsed || !existing || !identity) return false;
+    const nextAddress = formatNomadAddress(parsed.destinationHash, parsed.path, parsed.requestData);
     const updated: NomadBookmark = {
       ...existing,
-      requestData: { ...(existing.requestData ?? {}) },
+      id: `${identity.id}:${nextAddress}`,
+      destinationHash: parsed.destinationHash,
+      path: parsed.path,
+      requestData: { ...parsed.requestData },
       identifyBeforeLoad,
       label: name.trim() || undefined,
     };
-    await this.nomadRepository.saveBookmark(updated);
-    nomadBookmarks.update((items) => items.map((item) => item.id === id ? updated : item));
+    await this.nomadRepository.replaceBookmark(id, updated);
+    nomadBookmarks.update((items) => items.flatMap((item) => {
+      if (item.id === id) return [updated];
+      return item.id === updated.id ? [] : [item];
+    }));
+    this.refreshDestinationPaths([updated.destinationHash]);
     return true;
   }
 

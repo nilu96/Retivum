@@ -30,6 +30,19 @@ export class BrowserNomadRepository {
     }
   }
 
+  async replaceBookmark(previousId: string, bookmark: NomadBookmark): Promise<void> {
+    const database = await openRetivumDatabase();
+    try {
+      const transaction = database.transaction('nomadBookmarks', 'readwrite');
+      const store = transaction.objectStore('nomadBookmarks');
+      store.put(bookmark);
+      if (previousId !== bookmark.id) store.delete(previousId);
+      await transactionDone(transaction);
+    } finally {
+      database.close();
+    }
+  }
+
   async deleteBookmark(id: string): Promise<void> {
     const database = await openRetivumDatabase();
     try {

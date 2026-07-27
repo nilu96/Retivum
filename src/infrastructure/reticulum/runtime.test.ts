@@ -10,6 +10,7 @@ import {
   chatInboundTransfers,
   knownDestinations,
   localDestinationInventory,
+  nomadBookmarks,
   pathTableEntries,
   provisioningBookmarks,
   remoteDestinationInventory,
@@ -25,6 +26,9 @@ type RuntimeInternals = {
   worker?: { postMessage(command: unknown): void };
   provisioningRepository: {
     saveBookmark(bookmark: unknown): Promise<void>;
+  };
+  nomadRepository: {
+    replaceBookmark(previousId: string, bookmark: unknown): Promise<void>;
   };
   knownDestinationRepository: {
     save(record: unknown): Promise<void>;
@@ -52,6 +56,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     chatInboundTransfers.set([]);
     blockedChatDestinations.set([]);
     provisioningBookmarks.set([]);
+    nomadBookmarks.set([]);
     reticulumLogs.set([]);
     remoteDestinationInventory.set([]);
     localDestinationInventory.set([]);
@@ -60,6 +65,41 @@ describe('ReticulumRuntimeController chat deletion', () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     internals.worker = undefined;
     internals.destinationDirectoryReconciled = false;
+  });
+
+  it('replaces a Nomad bookmark identity when its address changes', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const replaceBookmark = vi.spyOn(internals.nomadRepository, 'replaceBookmark')
+      .mockResolvedValue(undefined);
+    const previousId = 'identity-1:bookmark';
+    nomadBookmarks.set([{
+      id: previousId,
+      identityId: 'identity-1',
+      destinationHash: 'a'.repeat(32),
+      path: '/start',
+      label: 'Old name',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const editedAddress = `${'b'.repeat(32)}:/page/edited.mu\`c=heap`;
+
+    expect(await reticulumRuntime.updateNomadBookmark(
+      previousId,
+      editedAddress,
+      '  New name  ',
+      true,
+    )).toBe(true);
+
+    const updated = expect.objectContaining({
+      id: `identity-1:${editedAddress}`,
+      identityId: 'identity-1',
+      destinationHash: 'b'.repeat(32),
+      path: '/page/edited.mu',
+      requestData: { var_c: 'heap' },
+      identifyBeforeLoad: true,
+      label: 'New name',
+    });
+    expect(replaceBookmark).toHaveBeenCalledWith(previousId, updated);
+    expect(get(nomadBookmarks)).toEqual([updated]);
   });
 
   it('stores unified observations from every recognized application in the global directory', async () => {

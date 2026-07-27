@@ -703,7 +703,7 @@
     saveErrorKey="provisioning.bookmark.failed"
     currentName={bookmarkEditor.node.label ?? ''}
     oncancel={() => { bookmarkEditor = undefined; }}
-    onsave={(name) => saveBookmark(name)}
+    onsave={(_address, name) => saveBookmark(name)}
   />
 {/if}
 

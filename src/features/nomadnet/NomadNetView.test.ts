@@ -676,8 +676,9 @@ describe('NomadNetView', () => {
     expect(screen.getByRole('button', { name: /Subpage node/ })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('asks for a name when bookmarking the current address', async () => {
+  it('toggles the current address bookmark without opening an editor', async () => {
     const destinationHash = 'a'.repeat(32);
+    const bookmarkId = 'identity:current-page';
     activeIdentity.set({
       id: 'identity',
       displayName: 'Anonymous',
@@ -696,7 +697,21 @@ describe('NomadNetView', () => {
     destinationPathStatuses.set({
       [destinationHash]: { destinationHash, hasPath: true, hops: 1 },
     });
-    const addBookmark = vi.spyOn(reticulumRuntime, 'addNomadBookmark').mockResolvedValue(true);
+    const addBookmark = vi.spyOn(reticulumRuntime, 'addNomadBookmark').mockImplementation(async () => {
+      nomadBookmarks.set([{
+        id: bookmarkId,
+        identityId: 'identity',
+        destinationHash,
+        path: '/start',
+        requestData: { var_c: 'heap' },
+        label: 'Forest Node',
+        createdAt: '2026-07-16T10:00:00.000Z',
+      }]);
+      return true;
+    });
+    const deleteBookmark = vi.spyOn(reticulumRuntime, 'deleteNomadBookmark').mockImplementation(async () => {
+      nomadBookmarks.set([]);
+    });
     render(NomadNetView);
 
     await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
@@ -706,24 +721,25 @@ describe('NomadNetView', () => {
     expect(addCurrent).not.toHaveClass('primary', 'bookmarked');
     expect(addCurrent.querySelector('path[fill="currentColor"]')).not.toBeInTheDocument();
     await fireEvent.click(addCurrent);
-    const bookmarkName = screen.getByRole('textbox', { name: 'Bookmark name' });
-    expect(bookmarkName).toHaveValue('Forest Node');
-    await fireEvent.input(bookmarkName, {
-      target: { value: '  Community node  ' },
-    });
-    await fireEvent.click(screen.getByRole('switch', { name: /Identify before loading/ }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/start\`c=heap`,
-      'Community node',
-      true,
+      'Forest Node',
+      false,
     ));
-    expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
+    expect(screen.queryByRole('heading', { name: 'Add bookmark' })).not.toBeInTheDocument();
+
+    const removeCurrent = await screen.findByRole('button', { name: 'Remove current bookmark' });
+    expect(removeCurrent).toHaveClass('bookmarked');
+    expect(removeCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
+    await fireEvent.click(removeCurrent);
+
+    await waitFor(() => expect(deleteBookmark).toHaveBeenCalledWith(bookmarkId));
+    expect(await screen.findByRole('button', { name: 'Bookmark current address' }))
+      .not.toHaveClass('bookmarked');
   });
 
-  it('collapses the mobile directory before opening the add-bookmark editor', async () => {
+  it('keeps the mobile directory expanded and preserves its sticky viewport when toggling', async () => {
     useMobileViewport();
     const destinationHash = 'a'.repeat(32);
     activeIdentity.set({
@@ -732,20 +748,54 @@ describe('NomadNetView', () => {
       identityHashHex: 'b'.repeat(32),
       publicKeyHex: 'c'.repeat(128),
     });
-    render(NomadNetView);
+    const addBookmark = vi.spyOn(reticulumRuntime, 'addNomadBookmark').mockImplementation(async () => {
+      nomadBookmarks.set([{
+        id: 'identity:mobile-toggle',
+        identityId: 'identity',
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        createdAt: '2026-07-16T10:00:00.000Z',
+      }]);
+      return true;
+    });
+    const { container } = render(NomadNetView);
 
     const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
     await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
       target: { value: `${destinationHash}:/page/index.mu` },
     });
     expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
       .toHaveAttribute('aria-expanded', 'true');
+    vi.spyOn(browser, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: 300,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
 
     await fireEvent.click(within(toolbar).getByRole('button', { name: 'Bookmark current address' }));
 
-    expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
-      .toHaveAttribute('aria-expanded', 'false');
-    expect(await screen.findByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
+    expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');
+    await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
+      `${destinationHash}:/page/index.mu`,
+      '',
+      false,
+    ));
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('heading', { name: 'Add bookmark' })).not.toBeInTheDocument();
+    await waitFor(() => expect(document.documentElement)
+      .not.toHaveClass('nomad-toolbar-preserving-viewport'));
   });
 
   it('copies an announced destination hash and offers to add it as a bookmark', async () => {
@@ -899,8 +949,9 @@ describe('NomadNetView', () => {
     expect(removeBookmark).toHaveBeenCalledWith('identity:context-menu-bookmark');
   });
 
-  it('renames an existing bookmark', async () => {
+  it('updates the address and name of an existing bookmark', async () => {
     const destinationHash = 'd'.repeat(32);
+    const editedAddress = `${'e'.repeat(32)}:/page/edited.mu\`c=heap`;
     nomadBookmarks.set([{
       id: 'identity:bookmark',
       identityId: 'identity',
@@ -916,14 +967,22 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const input = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(input).toHaveValue('Old name');
+    const addressInput = screen.getByRole('textbox', { name: 'NomadNet address' });
+    expect(addressInput).toHaveValue(`${destinationHash}:/page/index.mu`);
     expect(screen.getByRole('switch', { name: /Identify before loading/ })).not.toBeChecked();
+    await fireEvent.input(addressInput, { target: { value: editedAddress } });
     await fireEvent.input(input, { target: { value: 'New name' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(updateBookmark).toHaveBeenCalledWith('identity:bookmark', 'New name', false));
+    await waitFor(() => expect(updateBookmark).toHaveBeenCalledWith(
+      'identity:bookmark',
+      editedAddress,
+      'New name',
+      false,
+    ));
   });
 
-  it('opens the existing bookmark in the editor from the desktop bookmark action', async () => {
+  it('removes an existing bookmark from the desktop bookmark action', async () => {
     const destinationHash = 'e'.repeat(32);
     activeIdentity.set({
       id: 'identity',
@@ -939,21 +998,22 @@ describe('NomadNetView', () => {
       label: 'Existing bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
+    const deleteBookmark = vi.spyOn(reticulumRuntime, 'deleteNomadBookmark').mockResolvedValue(undefined);
     render(NomadNetView);
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     await fireEvent.click(screen.getByRole('button', { name: /Existing bookmark/ }));
 
-    const editCurrent = screen.getByRole('button', { name: 'Edit current bookmark' });
-    expect(editCurrent).toBeEnabled();
-    expect(editCurrent).toHaveClass('bookmarked');
-    expect(editCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
-    await fireEvent.click(editCurrent);
-    expect(screen.getByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Existing bookmark');
+    const removeCurrent = screen.getByRole('button', { name: 'Remove current bookmark' });
+    expect(removeCurrent).toBeEnabled();
+    expect(removeCurrent).toHaveClass('bookmarked');
+    expect(removeCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
+    await fireEvent.click(removeCurrent);
+    expect(deleteBookmark).toHaveBeenCalledWith('identity:existing');
+    expect(screen.queryByRole('heading', { name: 'Edit bookmark' })).not.toBeInTheDocument();
   });
 
-  it('opens the existing bookmark in the editor from the mobile bookmark action', async () => {
+  it('removes an existing bookmark without collapsing the mobile toolbar', async () => {
     useMobileViewport();
     const destinationHash = 'e'.repeat(32);
     activeIdentity.set({
@@ -971,56 +1031,51 @@ describe('NomadNetView', () => {
       identifyBeforeLoad: true,
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
+    const deleteBookmark = vi.spyOn(reticulumRuntime, 'deleteNomadBookmark').mockResolvedValue(undefined);
     render(NomadNetView);
 
     const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
-    const browser = document.querySelector<HTMLElement>('.nomad-mobile-browser')!;
     await fireEvent.click(screen.getByRole('button', { name: /Mobile bookmark/ }));
-    const editCurrent = within(toolbar).getByRole('button', { name: 'Edit current bookmark' });
-    expect(editCurrent).toBeEnabled();
-    expect(editCurrent).toHaveClass('bookmarked');
-    expect(editCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
     await fireEvent.click(within(toolbar).getByRole('button', { name: 'Show bookmarks (1)' }));
     expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
       .toHaveAttribute('aria-expanded', 'true');
 
-    let scrollY = 120;
-    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
-    vi.spyOn(browser, 'getBoundingClientRect').mockReturnValue({
-      x: 0,
-      y: 0,
-      top: 0,
-      right: 320,
-      bottom: 300,
-      left: 0,
-      width: 320,
-      height: 300,
-      toJSON: () => ({}),
-    });
-    await fireEvent.scroll(window);
-    expect(browser).toHaveClass('stuck', 'at-sticky-edge');
-    scrollY = 160;
-    await fireEvent.scroll(window);
-    expect(browser).not.toHaveClass('at-sticky-edge');
+    const removeCurrent = within(toolbar).getByRole('button', { name: 'Remove current bookmark' });
+    expect(removeCurrent).toHaveClass('bookmarked');
+    await fireEvent.click(removeCurrent);
 
-    await fireEvent.click(editCurrent);
+    expect(deleteBookmark).toHaveBeenCalledWith('identity:existing-mobile');
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+    expect(screen.queryByRole('heading', { name: 'Edit bookmark' })).not.toBeInTheDocument();
+  });
 
-    expect(within(toolbar).getByRole('button', { name: 'Show bookmarks (1)' }))
-      .toHaveAttribute('aria-expanded', 'false');
-    expect(await screen.findByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Mobile bookmark');
-    expect(screen.getByRole('switch', { name: /Identify before loading/ })).toBeChecked();
+  it('does not collapse the expanded mobile toolbar while the bookmark editor handles clicks', async () => {
+    useMobileViewport();
+    nomadBookmarks.set([{
+      id: 'identity:editor-clicks',
+      identityId: 'identity',
+      destinationHash: 'e'.repeat(32),
+      path: '/start',
+      label: 'Editable bookmark',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(NomadNetView);
 
-    scrollY = 0;
-    await fireEvent.resize(window);
-    expect(browser).toHaveClass('stuck');
-    expect(browser).not.toHaveClass('at-sticky-edge');
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
 
-    scrollY = 160;
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    await fireEvent.click(screen.getByRole('textbox', { name: 'NomadNet address' }));
+
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+
     await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Edit bookmark' })).not.toBeInTheDocument());
-    await waitFor(() => expect(browser).toHaveClass('stuck'));
-    expect(browser).not.toHaveClass('at-sticky-edge');
+    expect(screen.queryByRole('heading', { name: 'Edit bookmark' })).not.toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
   });
 
   it('loads announced pages and follows same-destination Micron links', async () => {

@@ -16,6 +16,7 @@
     namePlaceholder,
     nameHelp,
     saveErrorKey,
+    addressEditable = false,
     currentName = '',
     currentIdentifyBeforeLoad = false,
     identifyLabel,
@@ -32,25 +33,28 @@
     namePlaceholder: string;
     nameHelp: string;
     saveErrorKey: MessageKey;
+    addressEditable?: boolean;
     currentName?: string;
     currentIdentifyBeforeLoad?: boolean;
     identifyLabel?: string;
     identifyHelp?: string;
     oncancel: () => void;
-    onsave: (name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
+    onsave: (address: string, name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
   } = $props();
 
+  let bookmarkAddress = $state('');
   let name = $state('');
   let identifyBeforeLoad = $state(false);
   let saving = $state(false);
 
   $effect.pre(() => {
+    bookmarkAddress = address;
     name = currentName;
     identifyBeforeLoad = currentIdentifyBeforeLoad;
   });
 
   async function copyAddress(): Promise<void> {
-    if (await copyText(address)) toast.success('common.copied');
+    if (await copyText(bookmarkAddress)) toast.success('common.copied');
     else toast.error('common.copyFailed');
   }
 
@@ -58,7 +62,7 @@
     event.preventDefault();
     saving = true;
     try {
-      if (await onsave(name.trim(), identifyBeforeLoad)) oncancel();
+      if (await onsave(bookmarkAddress.trim(), name.trim(), identifyBeforeLoad)) oncancel();
       else toast.error(saveErrorKey);
     } catch {
       toast.error(saveErrorKey);
@@ -80,14 +84,28 @@
     </header>
     <form onsubmit={submit}>
       <div class="bookmark-editor-address">
-        <span>{addressLabel}</span>
-        <button
-          class="editor-address-copy"
-          type="button"
-          title={copyAddressLabel}
-          aria-label={copyAddressLabel}
-          onclick={copyAddress}
-        ><code>{address}</code><Icon name="copy" size={17} /></button>
+        <label for="bookmark-editor-address-input">{addressLabel}</label>
+        <div class="bookmark-address-field" class:editable={addressEditable}>
+          {#if addressEditable}
+            <input
+              id="bookmark-editor-address-input"
+              bind:value={bookmarkAddress}
+              maxlength="2048"
+              autocapitalize="none"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          {:else}
+            <code id="bookmark-editor-address-input">{bookmarkAddress}</code>
+          {/if}
+          <button
+            class="bookmark-address-copy"
+            type="button"
+            title={copyAddressLabel}
+            aria-label={copyAddressLabel}
+            onclick={copyAddress}
+          ><Icon name="copy" size={17} /></button>
+        </div>
       </div>
       <label class="field">
         <span>{nameLabel}</span>

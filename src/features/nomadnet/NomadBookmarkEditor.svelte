@@ -15,7 +15,7 @@
     currentIdentifyBeforeLoad?: boolean;
     mode?: 'add' | 'edit';
     oncancel: () => void;
-    onsave: (name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
+    onsave: (address: string, name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
   } = $props();
 
 </script>
@@ -26,6 +26,7 @@
   description={$t('nomadnet.bookmark.editor.description')}
   addressLabel={$t('nomadnet.bookmark.address')}
   copyAddressLabel={$t('nomadnet.bookmark.copyAddress')}
+  addressEditable
   nameLabel={$t('nomadnet.bookmark.name')}
   namePlaceholder={$t('nomadnet.bookmark.name.placeholder')}
   nameHelp={$t('nomadnet.bookmark.name.help')}

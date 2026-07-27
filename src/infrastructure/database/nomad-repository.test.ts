@@ -78,6 +78,32 @@ describe('BrowserNomadRepository', () => {
     expect(await repository.loadBookmarks('identity-1')).toEqual([]);
   });
 
+  it('atomically replaces a bookmark when its address changes', async () => {
+    const repository = new BrowserNomadRepository();
+    const previousId = 'identity-1:old-address';
+    await repository.saveBookmark({
+      id: previousId,
+      identityId: 'identity-1',
+      destinationHash: 'a'.repeat(32),
+      path: '/start',
+      label: 'Community node',
+      createdAt: '2026-07-16T10:01:00.000Z',
+    });
+    const updated = {
+      id: `identity-1:${'b'.repeat(32)}:/page/edited.mu`,
+      identityId: 'identity-1',
+      destinationHash: 'b'.repeat(32),
+      path: '/page/edited.mu',
+      requestData: { var_c: 'heap' },
+      label: 'Edited node',
+      createdAt: '2026-07-16T10:01:00.000Z',
+    };
+
+    await repository.replaceBookmark(previousId, updated);
+
+    expect(await repository.loadBookmarks('identity-1')).toEqual([updated]);
+  });
+
   it('migrates legacy announces into the shared destination directory', async () => {
     await createLegacyNomadDatabase();
 

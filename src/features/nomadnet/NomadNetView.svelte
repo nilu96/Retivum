@@ -77,7 +77,7 @@
   const identityReloadDelayMs = 500;
   const mobileToolbarTransitionDurationMs = 220;
   const mobileToolbarViewportPreservationClass = 'nomad-toolbar-preserving-viewport';
-  let bookmarkEditorOpening = $state(false);
+  let bookmarkTogglePending = $state(false);
   let bookmarkEditor = $state<{
     address: string;
     currentName: string;
@@ -523,6 +523,7 @@
       !active
       || !mobileViewport
       || !directoryExpanded
+      || bookmarkEditor
     ) return;
     const toolbar = mobileBrowserElement;
     if (!toolbar || event.composedPath().includes(toolbar)) return;
@@ -909,59 +910,48 @@
     goHome();
   }
 
-  async function collapseMobileDirectoryBeforeBookmarkEditor(): Promise<void> {
-    if (!mobileViewport || !directoryExpanded) return;
-    const waitForViewportCompensation = mobileToolbarStuck;
-    setDirectoryExpanded(false);
-    await tick();
-    if (reducedMotion) {
-      if (waitForViewportCompensation && preservingMobileToolbarViewport) {
-        if (mobileToolbarViewportTimer !== undefined) {
-          window.clearTimeout(mobileToolbarViewportTimer);
-          mobileToolbarViewportTimer = undefined;
-        }
-        finishMobileToolbarViewportPreservation();
-      }
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      window.setTimeout(
-        resolve,
-        mobileToolbarTransitionDurationMs + (waitForViewportCompensation ? 80 : 0),
-      );
-    });
-  }
-
-  async function bookmarkCurrent(): Promise<void> {
+  async function toggleCurrentBookmark(): Promise<void> {
     const targetAddress = parsedAddress;
     const targetBookmark = currentBookmark;
-    if (!targetAddress || bookmarkEditorOpening) return;
+    if (!targetAddress || bookmarkTogglePending) return;
     if (!targetBookmark && !$activeIdentity) return;
-    const nextEditor = targetBookmark ? undefined : {
-      address: formatNomadAddress(
+    let stopWatchingBookmarkChanges: (() => void) | undefined;
+    if (mobileViewport && directoryExpanded && mobileToolbarStuck) {
+      beginMobileToolbarViewportPreservation();
+      let initialNotification = true;
+      stopWatchingBookmarkChanges = nomadBookmarks.subscribe(() => {
+        if (initialNotification) {
+          initialNotification = false;
+          return;
+        }
+        // Store subscribers run before Svelte updates the destination list,
+        // so this captures the old canvas position even after a slow write.
+        beginMobileToolbarViewportPreservation();
+      });
+    }
+    bookmarkTogglePending = true;
+    try {
+      if (targetBookmark) {
+        await reticulumRuntime.deleteNomadBookmark(targetBookmark.id);
+        return;
+      }
+      const addressToBookmark = formatNomadAddress(
         targetAddress.destinationHash,
         targetAddress.path,
         targetAddress.requestData,
-      ),
-      currentName: $knownDestinations.find((destination) => (
+      );
+      const suggestedName = $knownDestinations.find((destination) => (
         destination.destinationHash === targetAddress.destinationHash
-      ))?.displayName ?? '',
-      currentIdentifyBeforeLoad: false,
-    };
-    const openEditor = (): void => {
-      if (targetBookmark) editBookmark(targetBookmark);
-      else bookmarkEditor = nextEditor;
-    };
-    if (!mobileViewport || !directoryExpanded) {
-      openEditor();
-      return;
-    }
-    bookmarkEditorOpening = true;
-    try {
-      await collapseMobileDirectoryBeforeBookmarkEditor();
-      openEditor();
+      ))?.displayName ?? '';
+      if (!await reticulumRuntime.addNomadBookmark(addressToBookmark, suggestedName, false)) {
+        toast.error('nomadnet.bookmark.saveError');
+      }
+    } catch {
+      toast.error('nomadnet.directory.error');
     } finally {
-      bookmarkEditorOpening = false;
+      stopWatchingBookmarkChanges?.();
+      if (stopWatchingBookmarkChanges) beginMobileToolbarViewportPreservation();
+      bookmarkTogglePending = false;
     }
   }
 
@@ -982,11 +972,20 @@
     });
   }
 
-  async function saveBookmark(name: string, identifyBeforeLoad: boolean): Promise<boolean> {
+  async function saveBookmark(
+    address: string,
+    name: string,
+    identifyBeforeLoad: boolean,
+  ): Promise<boolean> {
     if (!bookmarkEditor) return false;
     return bookmarkEditor.bookmarkId
-      ? await reticulumRuntime.updateNomadBookmark(bookmarkEditor.bookmarkId, name, identifyBeforeLoad)
-      : await reticulumRuntime.addNomadBookmark(bookmarkEditor.address, name, identifyBeforeLoad);
+      ? await reticulumRuntime.updateNomadBookmark(
+          bookmarkEditor.bookmarkId,
+          address,
+          name,
+          identifyBeforeLoad,
+        )
+      : await reticulumRuntime.addNomadBookmark(address, name, identifyBeforeLoad);
   }
 
   async function removeBookmark(id: string): Promise<void> {
@@ -1026,10 +1025,10 @@
         <button
           class="icon-button nomad-bookmark-button"
           class:bookmarked={Boolean(currentBookmark)}
-          aria-label={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
-          title={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
-          disabled={bookmarkEditorOpening || !parsedAddress || (!currentBookmark && !$activeIdentity)}
-          onclick={bookmarkCurrent}
+          aria-label={$t(currentBookmark ? 'nomadnet.removeCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          title={$t(currentBookmark ? 'nomadnet.removeCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          disabled={bookmarkTogglePending || !parsedAddress || (!currentBookmark && !$activeIdentity)}
+          onclick={toggleCurrentBookmark}
         ><Icon name={currentBookmark ? 'bookmark-filled' : 'bookmark'} size={19} /></button>
       </div>
     {/if}
@@ -1081,10 +1080,10 @@
           class="icon-button nomad-bookmark-button"
           class:bookmarked={Boolean(currentBookmark)}
           type="button"
-          aria-label={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
-          title={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
-          disabled={bookmarkEditorOpening || !parsedAddress || (!currentBookmark && !$activeIdentity)}
-          onclick={bookmarkCurrent}
+          aria-label={$t(currentBookmark ? 'nomadnet.removeCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          title={$t(currentBookmark ? 'nomadnet.removeCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          disabled={bookmarkTogglePending || !parsedAddress || (!currentBookmark && !$activeIdentity)}
+          onclick={toggleCurrentBookmark}
         ><Icon name={currentBookmark ? 'bookmark-filled' : 'bookmark'} size={19} /></button>
         <button
           class="icon-button nomad-panel-toggle"
