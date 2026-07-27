@@ -313,7 +313,19 @@ describe('ChatView', () => {
     await fireEvent.click(syncButton);
 
     expect(sync).toHaveBeenCalledOnce();
-    expect(await screen.findByText('Sync complete. 2 new messages.')).toBeInTheDocument();
+    expect(await screen.findByText('Sync complete. 1 new message.')).toBeInTheDocument();
+  });
+
+  it('reports no new propagation messages when every received message is a duplicate', async () => {
+    vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 3, duplicates: 3 });
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(await screen.findByRole('button', {
+      name: 'Sync messages from the preferred or best available propagation node',
+    }));
+
+    expect(await screen.findByText('Sync complete. No new messages.')).toBeInTheDocument();
   });
 
   it('keeps showing an active propagation sync after the chat view is remounted', async () => {

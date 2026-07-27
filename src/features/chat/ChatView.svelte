@@ -791,14 +791,17 @@
     propagationSyncRequested = true;
     try {
       const result = await reticulumRuntime.syncLxmfPropagation();
+      const newMessages = result
+        ? Math.max(0, result.received - result.duplicates)
+        : 0;
       if (!result) {
         toast.error('chat.propagationSync.failed');
-      } else if (result.received === 0) {
+      } else if (newMessages === 0) {
         toast.success('chat.propagationSync.complete.none');
-      } else if (result.received === 1) {
+      } else if (newMessages === 1) {
         toast.success('chat.propagationSync.complete.one');
       } else {
-        toast.success('chat.propagationSync.complete.many', { count: result.received });
+        toast.success('chat.propagationSync.complete.many', { count: newMessages });
       }
     } catch {
       toast.error('chat.propagationSync.failed');

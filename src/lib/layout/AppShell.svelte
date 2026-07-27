@@ -85,6 +85,7 @@
   );
 
   onMount(() => onIncomingChatMessage((message) => {
+    if (message.method === 'propagated') return;
     const notificationMode = $appPreferences.chat.inAppNotificationMode;
     if (notificationMode === 'never' || document.visibilityState !== 'visible') return;
     if (current === 'chat' && $navigationLayer?.destinationHash === message.sourceHash) return;

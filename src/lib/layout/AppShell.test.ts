@@ -383,6 +383,19 @@ describe('AppShell Chat unread indicator', () => {
     });
   });
 
+  it('suppresses individual foreground notifications for propagation-sync messages', () => {
+    const destinationHash = 'b'.repeat(32);
+    render(AppShell, { current: 'tools', children: emptyChildren });
+
+    emitIncomingChatMessage(incomingMessage(destinationHash, 'propagated', 'propagated'));
+    expect(get(toasts)).toEqual([]);
+
+    emitIncomingChatMessage(incomingMessage(destinationHash, 'direct', 'direct'));
+    expect(get(toasts).at(-1)).toMatchObject({
+      messageKey: 'chat.notification.messageReceived',
+    });
+  });
+
   it('limits foreground notifications to contacts when configured', () => {
     const contactHash = 'b'.repeat(32);
     const unknownHash = 'c'.repeat(32);
@@ -433,7 +446,7 @@ describe('AppShell Chat unread indicator', () => {
   });
 });
 
-function incomingMessage(sourceHash: string, messageId: string) {
+function incomingMessage(sourceHash: string, messageId: string, method?: string) {
   return {
     id: `identity:${messageId}`,
     identityId: 'identity',
@@ -444,6 +457,7 @@ function incomingMessage(sourceHash: string, messageId: string) {
     content: 'Hello',
     direction: 'incoming' as const,
     status: 'delivered' as const,
+    ...(method ? { method } : {}),
     receivedAt: '2026-07-26T10:00:00.000Z',
   };
 }
