@@ -1,5 +1,5 @@
 import type { ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
-import { messageTime } from '../../domain/chat';
+import { compareChatContacts, messageTime } from '../../domain/chat';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
 export interface ChatDirectory {
@@ -25,7 +25,7 @@ export class BrowserChatRepository {
       return {
         contacts: contacts
           .filter((item) => item.identityId === identityId)
-          .sort((left, right) => left.name.localeCompare(right.name)),
+          .sort(compareChatContacts),
         messages: messages
           .filter((item) => item.identityId === identityId)
           .sort((left, right) => messageTime(right) - messageTime(left)),

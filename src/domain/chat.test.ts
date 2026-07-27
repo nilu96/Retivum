@@ -7,6 +7,7 @@ import {
   chatMessageProgressStatus,
   chatMessageStatusForState,
   shouldUsePropagationFallback,
+  upsertChatContact,
   upsertChatMessage,
 } from './chat';
 
@@ -21,6 +22,17 @@ function message(overrides: Partial<ChatMessage>): ChatMessage {
     content: 'Hello',
     receivedAt: '2026-07-16T10:00:00.000Z',
     ...overrides,
+  };
+}
+
+function contact(destinationHash: string, name: string): ChatContact {
+  return {
+    id: `identity:${destinationHash}`,
+    identityId: 'identity',
+    destinationHash,
+    name,
+    createdAt: '2026-07-16T10:00:00.000Z',
+    updatedAt: '2026-07-16T10:00:00.000Z',
   };
 }
 
@@ -115,5 +127,22 @@ describe('chatConversationSummaries', () => {
       attempts: 5,
       maxAttempts: 5,
     }))).toBe('failed');
+  });
+});
+
+describe('upsertChatContact', () => {
+  it('sorts contacts by name and then destination address', () => {
+    const alphaLaterAddress = contact('c'.repeat(32), 'Alpha');
+    const beta = contact('b'.repeat(32), 'Beta');
+    const alphaEarlierAddress = contact('a'.repeat(32), 'Alpha');
+
+    expect(upsertChatContact(
+      [beta, alphaLaterAddress],
+      alphaEarlierAddress,
+    )).toEqual([
+      alphaEarlierAddress,
+      alphaLaterAddress,
+      beta,
+    ]);
   });
 });

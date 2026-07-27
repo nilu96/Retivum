@@ -178,9 +178,14 @@ export function upsertChatMessage(items: ChatMessage[], message: ChatMessage): C
     .sort((left, right) => messageTime(right) - messageTime(left));
 }
 
+export function compareChatContacts(left: ChatContact, right: ChatContact): number {
+  return left.name.localeCompare(right.name)
+    || left.destinationHash.localeCompare(right.destinationHash);
+}
+
 export function upsertChatContact(items: ChatContact[], contact: ChatContact): ChatContact[] {
   return [contact, ...items.filter((item) => item.id !== contact.id)]
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort(compareChatContacts);
 }
 
 export function upsertChatBlockedDestination(

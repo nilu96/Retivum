@@ -65,6 +65,29 @@ describe('BrowserChatRepository', () => {
     expect((await repository.load('identity-1')).messages).toEqual([]);
   });
 
+  it('loads contacts ordered by name and then destination address', async () => {
+    const repository = new BrowserChatRepository();
+    const saveContact = (destinationHash: string, name: string) => repository.saveContact({
+      id: `identity-1:${destinationHash}`,
+      identityId: 'identity-1',
+      destinationHash,
+      name,
+      createdAt: '2026-07-16T10:02:00.000Z',
+      updatedAt: '2026-07-16T10:02:00.000Z',
+    });
+    await saveContact('c'.repeat(32), 'Alpha');
+    await saveContact('b'.repeat(32), 'Beta');
+    await saveContact('a'.repeat(32), 'Alpha');
+
+    expect((await repository.load('identity-1')).contacts.map(
+      (contact) => contact.destinationHash,
+    )).toEqual([
+      'a'.repeat(32),
+      'c'.repeat(32),
+      'b'.repeat(32),
+    ]);
+  });
+
   it('migrates announce names into the global destination directory', async () => {
     const request = indexedDB.open('retivum', 10);
     await new Promise<void>((resolve, reject) => {
