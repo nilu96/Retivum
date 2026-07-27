@@ -21,6 +21,7 @@
     | 'probe'
     | 'send'
     | 'bookmark'
+    | 'bookmark-filled'
     | 'history'
     | 'shield'
     | 'palette'
@@ -133,6 +134,8 @@
     <path d="M10.5 13.5 21 3" />
   {:else if name === 'bookmark'}
     <path d="M6 3h12v18l-6-4-6 4V3Z" />
+  {:else if name === 'bookmark-filled'}
+    <path d="M6 3h12v18l-6-4-6 4V3Z" fill="currentColor" stroke="none" />
   {:else if name === 'history'}
     <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />
     <path d="M3 3v5h5m4-1v5l3 2" />

@@ -2,6 +2,7 @@
   import type { MessageKey } from '../../i18n';
   import { t } from '../../i18n';
   import { lockBodyScroll } from '../actions/bodyScrollLock';
+  import { copyText } from '../clipboard';
   import { toast } from '../notifications/toasts';
   import Icon from './Icon.svelte';
 
@@ -10,6 +11,7 @@
     title,
     description,
     addressLabel,
+    copyAddressLabel,
     nameLabel,
     namePlaceholder,
     nameHelp,
@@ -25,6 +27,7 @@
     title: string;
     description: string;
     addressLabel: string;
+    copyAddressLabel: string;
     nameLabel: string;
     namePlaceholder: string;
     nameHelp: string;
@@ -45,6 +48,11 @@
     name = currentName;
     identifyBeforeLoad = currentIdentifyBeforeLoad;
   });
+
+  async function copyAddress(): Promise<void> {
+    if (await copyText(address)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -73,7 +81,13 @@
     <form onsubmit={submit}>
       <div class="bookmark-editor-address">
         <span>{addressLabel}</span>
-        <code>{address}</code>
+        <button
+          class="editor-address-copy"
+          type="button"
+          title={copyAddressLabel}
+          aria-label={copyAddressLabel}
+          onclick={copyAddress}
+        ><code>{address}</code><Icon name="copy" size={17} /></button>
       </div>
       <label class="field">
         <span>{nameLabel}</span>

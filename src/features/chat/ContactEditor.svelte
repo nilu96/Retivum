@@ -58,7 +58,7 @@
       <div class="bookmark-editor-address">
         <span>{$t('chat.contact.destination')}</span>
         <button
-          class="contact-editor-destination-copy"
+          class="editor-address-copy"
           type="button"
           title={$t('chat.destination.actions.copyHash')}
           aria-label={$t('chat.destination.actions.copyHash')}

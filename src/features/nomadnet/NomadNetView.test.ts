@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NomadPage, NomadPageLoadUpdate } from '../../domain/nomadnet';
 import {
@@ -26,6 +26,19 @@ function setNomadDestinations(records: Array<{
   })));
 }
 
+function useMobileViewport(): void {
+  vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+    matches: query === '(max-width: 699px)',
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })));
+}
+
 describe('NomadNetView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -36,7 +49,10 @@ describe('NomadNetView', () => {
     interfaceStatuses.set({});
   });
 
-  afterEach(() => vi.useRealTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it('shows bookmarks first but defaults to announces when no bookmarks exist', async () => {
     render(NomadNetView);
@@ -44,13 +60,52 @@ describe('NomadNetView', () => {
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual(['Bookmarks', 'Announces']);
     expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('heading', { name: 'No NomadNet announces yet' })).toBeInTheDocument();
-    const directoryToggle = screen.getByRole('button', { name: 'Hide destination list' });
-    expect(directoryToggle).toHaveAttribute('aria-expanded', 'true');
-    await fireEvent.click(directoryToggle);
-    expect(screen.getByRole('button', { name: 'Show announces (0)' })).toHaveAttribute('aria-expanded', 'false');
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     expect(screen.getByRole('heading', { name: 'No bookmarks yet' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search bookmarks')).toBeInTheDocument();
+  });
+
+  it('keeps the mobile page controls available while toggling the floating destination panel', async () => {
+    useMobileViewport();
+    const { container } = render(NomadNetView);
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    const browser = container.querySelector('.nomad-mobile-browser');
+    expect(screen.getByRole('heading', { name: 'NomadNet' })).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Back one page' })).toBeDisabled();
+    expect(within(toolbar).getByRole('button', { name: 'Open announced home page' })).toBeDisabled();
+    expect(within(toolbar).getByRole('button', { name: 'Reload page' })).toBeDisabled();
+    expect(within(toolbar).getByRole('button', { name: 'Share identity with this page' })).toBeDisabled();
+    expect(within(toolbar).getByRole('button', { name: 'Bookmark current address' })).toBeDisabled();
+    expect(browser).toHaveClass('expanded');
+
+    const collapse = within(toolbar).getByRole('button', { name: 'Hide destination list' });
+    expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    await fireEvent.click(collapse);
+    expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+    expect(browser).not.toHaveClass('expanded');
+  });
+
+  it('turns the mobile Home action into Cancel while loading', async () => {
+    useMobileViewport();
+    const destinationHash = '9'.repeat(32);
+    vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
+    const cancelPage = vi.spyOn(reticulumRuntime, 'cancelNomadPage');
+    render(NomadNetView);
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
+      target: { value: `${destinationHash}:/page/slow.mu` },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
+
+    expect(within(toolbar).queryByRole('button', { name: 'Open announced home page' })).not.toBeInTheDocument();
+    const cancel = within(toolbar).getByRole('button', { name: 'Cancel page loading' });
+    expect(cancel).toBeEnabled();
+    await fireEvent.click(cancel);
+    expect(cancelPage).toHaveBeenCalledWith(destinationHash);
+    expect(within(toolbar).getByRole('button', { name: 'Open announced home page' })).toBeDisabled();
   });
 
   it('selects bookmarks when they finish loading after the view opens', async () => {
@@ -88,6 +143,7 @@ describe('NomadNetView', () => {
   });
 
   it('collapses the mobile directory immediately after choosing an announce or bookmark', async () => {
+    useMobileViewport();
     const announcedHash = '1'.repeat(32);
     const bookmarkedHash = '2'.repeat(32);
     setNomadDestinations([{
@@ -108,6 +164,7 @@ describe('NomadNetView', () => {
     }]);
     const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
     render(NomadNetView);
+    await screen.findByRole('navigation', { name: 'NomadNet page controls' });
 
     expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'true');
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
@@ -136,9 +193,11 @@ describe('NomadNetView', () => {
   });
 
   it('collapses the mobile directory immediately after opening an address', async () => {
+    useMobileViewport();
     const destinationHash = '3'.repeat(32);
     vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
     render(NomadNetView);
+    await screen.findByRole('navigation', { name: 'NomadNet page controls' });
 
     await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
       target: { value: `${destinationHash}:/page/index.mu` },
@@ -245,7 +304,10 @@ describe('NomadNetView', () => {
     await fireEvent.input(screen.getByPlaceholderText('destination:/page/path'), {
       target: { value: `${destinationHash}:/start\`c=heap` },
     });
-    await fireEvent.click(screen.getByRole('button', { name: 'Bookmark current address' }));
+    const addCurrent = screen.getByRole('button', { name: 'Bookmark current address' });
+    expect(addCurrent).not.toHaveClass('primary', 'bookmarked');
+    expect(addCurrent.querySelector('path[fill="currentColor"]')).not.toBeInTheDocument();
+    await fireEvent.click(addCurrent);
     const bookmarkName = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(bookmarkName).toHaveValue('Forest Node');
     await fireEvent.input(bookmarkName, {
@@ -438,7 +500,7 @@ describe('NomadNetView', () => {
     await waitFor(() => expect(updateBookmark).toHaveBeenCalledWith('identity:bookmark', 'New name', false));
   });
 
-  it('disables the bookmark action when the selected destination is already bookmarked', async () => {
+  it('opens the existing bookmark in the editor from the desktop bookmark action', async () => {
     const destinationHash = 'e'.repeat(32);
     activeIdentity.set({
       id: 'identity',
@@ -459,7 +521,46 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     await fireEvent.click(screen.getByRole('button', { name: /Existing bookmark/ }));
 
-    expect(screen.getByRole('button', { name: 'Already bookmarked' })).toBeDisabled();
+    const editCurrent = screen.getByRole('button', { name: 'Edit current bookmark' });
+    expect(editCurrent).toBeEnabled();
+    expect(editCurrent).toHaveClass('bookmarked');
+    expect(editCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
+    await fireEvent.click(editCurrent);
+    expect(screen.getByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Existing bookmark');
+  });
+
+  it('opens the existing bookmark in the editor from the mobile bookmark action', async () => {
+    useMobileViewport();
+    const destinationHash = 'e'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    nomadBookmarks.set([{
+      id: 'identity:existing-mobile',
+      identityId: 'identity',
+      destinationHash,
+      path: '/start',
+      label: 'Mobile bookmark',
+      identifyBeforeLoad: true,
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    render(NomadNetView);
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    await fireEvent.click(screen.getByRole('button', { name: /Mobile bookmark/ }));
+    const editCurrent = within(toolbar).getByRole('button', { name: 'Edit current bookmark' });
+    expect(editCurrent).toBeEnabled();
+    expect(editCurrent).toHaveClass('bookmarked');
+    expect(editCurrent.querySelector('path[fill="currentColor"]')).toBeInTheDocument();
+    await fireEvent.click(editCurrent);
+
+    expect(screen.getByRole('heading', { name: 'Edit bookmark' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Mobile bookmark');
+    expect(screen.getByRole('switch', { name: /Identify before loading/ })).toBeChecked();
   });
 
   it('loads announced pages and follows same-destination Micron links', async () => {
@@ -502,7 +603,7 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(destinationHash) }));
     expect(await screen.findByText('Welcome')).toBeInTheDocument();
     expect(requestPage).toHaveBeenNthCalledWith(1, destinationHash, '/page/index.mu', {}, expect.any(Function));
-    expect(screen.getByRole('button', { name: 'Show announces (1)' })).toHaveAttribute('aria-expanded', 'false');
+    expect(document.querySelector('.nomad-mobile-browser')).not.toHaveClass('expanded');
 
     await fireEvent.click(screen.getByRole('link', { name: 'Next' }));
     expect(await screen.findByText('Next page')).toBeInTheDocument();

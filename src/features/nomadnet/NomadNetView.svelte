@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
     NOMAD_DEFAULT_PAGE_PATH,
@@ -53,6 +54,7 @@
     bookmarkId?: string;
   };
 
+  let { active = true }: { active?: boolean } = $props();
   let address = $state('');
   let selectedScope = $state<NomadDirectoryScope>();
   let query = $state('');
@@ -84,6 +86,10 @@
     autofocus: boolean;
     guardOpeningRelease: boolean;
   }) | undefined>();
+  let mobileViewport = $state(
+    typeof window !== 'undefined'
+      && window.matchMedia?.('(max-width: 699px)').matches === true,
+  );
 
   const parsedAddress = $derived(parseNomadAddress(address));
   const currentPageTarget = $derived(pendingPageRequest ?? failedPageRequest ?? loadedPage);
@@ -138,6 +144,18 @@
       ? undefined
       : $t('nomadnet.offlineHint'),
   );
+
+  onMount(() => {
+    const mobileQuery = window.matchMedia?.('(max-width: 699px)');
+    const updateMobileViewport = (): void => {
+      mobileViewport = mobileQuery?.matches === true;
+    };
+    updateMobileViewport();
+    mobileQuery?.addEventListener('change', updateMobileViewport);
+    return () => {
+      mobileQuery?.removeEventListener('change', updateMobileViewport);
+    };
+  });
 
   const scopes: Array<{ id: NomadDirectoryScope; label: MessageKey; searchName: MessageKey }> = [
     { id: 'bookmarks', label: 'nomadnet.scope.bookmarks', searchName: 'nomadnet.scope.bookmarks.searchName' },
@@ -205,6 +223,16 @@
 
   function closeDestinationActions(): void {
     destinationActions = undefined;
+  }
+
+  function toggleDirectory(): void {
+    directoryExpanded = !directoryExpanded;
+  }
+
+  function handleViewKeydown(event: KeyboardEvent): void {
+    if (!active || !mobileViewport || !directoryExpanded || event.key !== 'Escape') return;
+    event.preventDefault();
+    directoryExpanded = false;
   }
 
   function destinationRowClick(target: DestinationActionTarget): void {
@@ -584,7 +612,12 @@
   }
 
   function bookmarkCurrent(): void {
-    if (!parsedAddress || currentBookmark) return;
+    if (!parsedAddress) return;
+    if (currentBookmark) {
+      editBookmark(currentBookmark);
+      return;
+    }
+    if (!$activeIdentity) return;
     bookmarkEditor = {
       address: formatNomadAddress(
         parsedAddress.destinationHash,
@@ -623,6 +656,8 @@
   }
 </script>
 
+<svelte:window onkeydown={handleViewKeydown} />
+
 <div class="page nomad-page">
   <header class="page-header nomad-header">
     <div>
@@ -630,100 +665,161 @@
       <h1>{$t('nomadnet.title')}</h1>
       <p>{$t('nomadnet.subtitle')}</p>
     </div>
-    <div class="header-actions">
-      <button
-        class="icon-button"
-        aria-label={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
-        title={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
-        disabled={!loadedPage || loadingPage || sharingIdentity}
-        onclick={() => { identityShareConfirmationOpen = true; }}
-      ><Icon name="fingerprint" size={19} /></button>
-      <button
-        class="icon-button"
-        aria-label={$t('nomadnet.page.reload')}
-        title={$t('nomadnet.page.reload')}
-        disabled={!loadedPage && !pendingPageRequest && !failedPageRequest}
-        onclick={reloadPage}
-      ><Icon name="sync" size={19} /></button>
-      <button
-        class="icon-button"
-        class:primary={Boolean(parsedAddress) && !currentBookmark}
-        aria-label={$t(currentBookmark ? 'nomadnet.alreadyBookmarked' : 'nomadnet.bookmarkCurrent')}
-        title={$t(currentBookmark ? 'nomadnet.alreadyBookmarked' : 'nomadnet.bookmarkCurrent')}
-        disabled={!parsedAddress || !$activeIdentity || Boolean(currentBookmark)}
-        onclick={bookmarkCurrent}
-      ><Icon name="bookmark" size={19} /></button>
-    </div>
+    {#if !mobileViewport}
+      <div class="header-actions">
+        <button
+          class="icon-button"
+          aria-label={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          title={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          disabled={!loadedPage || loadingPage || sharingIdentity}
+          onclick={() => { identityShareConfirmationOpen = true; }}
+        ><Icon name="fingerprint" size={19} /></button>
+        <button
+          class="icon-button"
+          aria-label={$t('nomadnet.page.reload')}
+          title={$t('nomadnet.page.reload')}
+          disabled={!loadedPage && !pendingPageRequest && !failedPageRequest}
+          onclick={reloadPage}
+        ><Icon name="sync" size={19} /></button>
+        <button
+          class="icon-button nomad-bookmark-button"
+          class:bookmarked={Boolean(currentBookmark)}
+          aria-label={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          title={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          disabled={!parsedAddress || (!currentBookmark && !$activeIdentity)}
+          onclick={bookmarkCurrent}
+        ><Icon name={currentBookmark ? 'bookmark-filled' : 'bookmark'} size={19} /></button>
+      </div>
+    {/if}
   </header>
 
-  <form class="nomad-address" onsubmit={submitAddress}>
-    <div class="nomad-browser-actions">
-      <button
-        class="icon-button"
-        type="button"
-        aria-label={$t('nomadnet.page.back')}
-        title={$t('nomadnet.page.back')}
-        disabled={!canGoBack}
-        onclick={goBack}
-      ><Icon name="arrow-left" size={19} /></button>
-      <button
-        class="icon-button"
-        type="button"
-        aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
-        title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
-        disabled={!loadingPage && !canGoHome}
-        onclick={homeOrCancel}
-      ><Icon name={loadingPage ? 'close' : 'home'} size={19} /></button>
-    </div>
-    <label>
-      <span class="sr-only">{$t('nomadnet.address.label')}</span>
-      <Icon name="nomadnet" size={19} />
-      <input bind:value={address} placeholder={$t('nomadnet.address.placeholder')} autocapitalize="none" spellcheck="false" />
-    </label>
-    <button class="button primary" type="submit" disabled={!parsedAddress || loadingPage}>
-      {$t(loadingPage ? 'nomadnet.page.loading.short' : 'nomadnet.go')}<Icon name="arrow-right" size={17} />
-    </button>
-  </form>
+  <div class="nomad-mobile-browser" class:expanded={directoryExpanded}>
+    {#if mobileViewport}
+      <nav class="nomad-mobile-toolbar" aria-label={$t('nomadnet.page.actions.label')}>
+        <button
+          class="icon-button nomad-back-button"
+          type="button"
+          aria-label={$t('nomadnet.page.back')}
+          title={$t('nomadnet.page.back')}
+          disabled={!canGoBack}
+          onclick={goBack}
+        ><Icon name="arrow-left" size={19} /></button>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
+          title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
+          disabled={!loadingPage && !canGoHome}
+          onclick={homeOrCancel}
+        ><Icon name={loadingPage ? 'close' : 'home'} size={19} /></button>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label={$t('nomadnet.page.reload')}
+          title={$t('nomadnet.page.reload')}
+          disabled={!loadedPage && !pendingPageRequest && !failedPageRequest}
+          onclick={reloadPage}
+        ><Icon name="sync" size={19} /></button>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          title={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          disabled={!loadedPage || loadingPage || sharingIdentity}
+          onclick={() => { identityShareConfirmationOpen = true; }}
+        ><Icon name="fingerprint" size={19} /></button>
+        <button
+          class="icon-button nomad-bookmark-button"
+          class:bookmarked={Boolean(currentBookmark)}
+          type="button"
+          aria-label={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          title={$t(currentBookmark ? 'nomadnet.editCurrentBookmark' : 'nomadnet.bookmarkCurrent')}
+          disabled={!parsedAddress || (!currentBookmark && !$activeIdentity)}
+          onclick={bookmarkCurrent}
+        ><Icon name={currentBookmark ? 'bookmark-filled' : 'bookmark'} size={19} /></button>
+        <button
+          class="icon-button nomad-panel-toggle"
+          type="button"
+          aria-controls="nomad-mobile-panel"
+          aria-expanded={directoryExpanded}
+          aria-label={$t(directoryExpanded ? 'nomadnet.directory.hide' : 'nomadnet.directory.show', {
+            count: visibleDestinationCount,
+            scope: $t(scope === 'announces'
+              ? 'nomadnet.scope.announces.searchName'
+              : 'nomadnet.scope.bookmarks.searchName'),
+          })}
+          title={$t(directoryExpanded ? 'nomadnet.directory.hide' : 'nomadnet.directory.show', {
+            count: visibleDestinationCount,
+            scope: $t(scope === 'announces'
+              ? 'nomadnet.scope.announces.searchName'
+              : 'nomadnet.scope.bookmarks.searchName'),
+          })}
+          onclick={toggleDirectory}
+        ><Icon name={directoryExpanded ? 'chevron-up' : 'chevron-down'} size={19} /></button>
+      </nav>
+    {/if}
 
-  <div class="nomad-workspace">
-    <aside class:expanded={directoryExpanded} class="nomad-directory">
-      <div class="scope-tabs" role="tablist" aria-label={$t('nomadnet.scopes.label')}>
-        {#each scopes as item}
-          <button
-            role="tab"
-            aria-selected={scope === item.id}
-            class:active={scope === item.id}
-            onclick={() => { selectedScope = item.id; query = ''; }}
-          >{$t(item.label)}</button>
-        {/each}
-      </div>
-      <label class="search-field">
-        <Icon name="search" size={18} />
-        <span class="sr-only">{$t('nomadnet.search.label', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}</span>
-        <input
-          bind:value={query}
-          type="search"
-          placeholder={$t('nomadnet.search.placeholder', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}
-          onfocus={() => { directoryExpanded = true; }}
-        />
-      </label>
-      <button
-        class="nomad-directory-toggle"
-        type="button"
-        aria-controls="nomad-destination-results"
-        aria-expanded={directoryExpanded}
-        onclick={() => { directoryExpanded = !directoryExpanded; }}
-      >
-        {#if directoryExpanded}<Icon name="chevron-down" size={17} />{/if}
-        <span>{$t(directoryExpanded ? 'nomadnet.directory.hide' : 'nomadnet.directory.show', {
-          count: visibleDestinationCount,
-          scope: $t(scope === 'announces'
-            ? 'nomadnet.scope.announces.searchName'
-            : 'nomadnet.scope.bookmarks.searchName'),
-        })}</span>
-        {#if !directoryExpanded}<Icon name="chevron-down" size={17} />{/if}
-      </button>
-      <div id="nomad-destination-results" class="nomad-directory-content" role="tabpanel">
+    <div id="nomad-mobile-panel" class="nomad-browser-panel">
+      <form class="nomad-address" onsubmit={submitAddress}>
+        {#if !mobileViewport}
+          <div class="nomad-browser-actions">
+            <button
+              class="icon-button"
+              type="button"
+              aria-label={$t('nomadnet.page.back')}
+              title={$t('nomadnet.page.back')}
+              disabled={!canGoBack}
+              onclick={goBack}
+            ><Icon name="arrow-left" size={19} /></button>
+            <button
+              class="icon-button"
+              type="button"
+              aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
+              title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
+              disabled={!loadingPage && !canGoHome}
+              onclick={homeOrCancel}
+            ><Icon name={loadingPage ? 'close' : 'home'} size={19} /></button>
+          </div>
+        {/if}
+        <label>
+          <span class="sr-only">{$t('nomadnet.address.label')}</span>
+          <Icon name="nomadnet" size={19} />
+          <input bind:value={address} placeholder={$t('nomadnet.address.placeholder')} autocapitalize="none" spellcheck="false" />
+        </label>
+        <button
+          class="button primary nomad-open-button"
+          type="submit"
+          aria-label={$t(loadingPage ? 'nomadnet.page.loading.short' : 'nomadnet.go')}
+          title={$t(loadingPage ? 'nomadnet.page.loading.short' : 'nomadnet.go')}
+          disabled={!parsedAddress || loadingPage}
+        >
+          <span>{$t(loadingPage ? 'nomadnet.page.loading.short' : 'nomadnet.go')}</span>
+          <Icon name="arrow-right" size={17} />
+        </button>
+      </form>
+
+      <aside class:expanded={directoryExpanded} class="nomad-directory">
+        <div class="scope-tabs" role="tablist" aria-label={$t('nomadnet.scopes.label')}>
+          {#each scopes as item}
+            <button
+              role="tab"
+              aria-selected={scope === item.id}
+              class:active={scope === item.id}
+              onclick={() => { selectedScope = item.id; query = ''; }}
+            >{$t(item.label)}</button>
+          {/each}
+        </div>
+        <label class="search-field">
+          <Icon name="search" size={18} />
+          <span class="sr-only">{$t('nomadnet.search.label', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}</span>
+          <input
+            bind:value={query}
+            type="search"
+            placeholder={$t('nomadnet.search.placeholder', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}
+            onfocus={() => { directoryExpanded = true; }}
+          />
+        </label>
+        <div id="nomad-destination-results" class="nomad-directory-content" role="tabpanel">
         {#if scope === 'announces' && filteredAnnounces.length}
           <div class="nomad-destination-list">
             {#each filteredAnnounces as announce (announce.destinationHash)}
@@ -814,8 +910,10 @@
         {/if}
       </div>
     </aside>
+    </div>
+  </div>
 
-    <section class:page-loaded={Boolean(loadedPage) && !loadingPage && !pageError} class="nomad-canvas" aria-busy={loadingPage}>
+  <section class:page-loaded={Boolean(loadedPage) && !loadingPage && !pageError} class="nomad-canvas" aria-busy={loadingPage}>
       <div class="nomad-grid" aria-hidden="true"></div>
       {#if loadingPage}
         <EmptyState
@@ -850,8 +948,7 @@
           hint={interfaceRequiredHint}
         />
       {/if}
-    </section>
-  </div>
+  </section>
 </div>
 
 {#if bookmarkEditor}

@@ -696,6 +696,7 @@
       : 'provisioning.bookmark.editor.editTitle')}
     description={$t('provisioning.bookmark.editor.description')}
     addressLabel={$t('provisioning.destination.label')}
+    copyAddressLabel={$t('provisioning.bookmark.copyAddress')}
     nameLabel={$t('nomadnet.bookmark.name')}
     namePlaceholder={$t('provisioning.bookmark.name.placeholder')}
     nameHelp={$t('nomadnet.bookmark.name.help')}

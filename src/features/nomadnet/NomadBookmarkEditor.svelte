@@ -25,6 +25,7 @@
   title={$t(mode === 'add' ? 'nomadnet.bookmark.editor.addTitle' : 'nomadnet.bookmark.editor.editTitle')}
   description={$t('nomadnet.bookmark.editor.description')}
   addressLabel={$t('nomadnet.bookmark.address')}
+  copyAddressLabel={$t('nomadnet.bookmark.copyAddress')}
   nameLabel={$t('nomadnet.bookmark.name')}
   namePlaceholder={$t('nomadnet.bookmark.name.placeholder')}
   nameHelp={$t('nomadnet.bookmark.name.help')}

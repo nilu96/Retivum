@@ -69,7 +69,7 @@
     <StatusDetailsView />
   {/if}
   <div class="persistent-route-view" hidden={$route !== 'nomadnet'}>
-    <NomadNetView />
+    <NomadNetView active={$route === 'nomadnet'} />
   </div>
 </AppShell>
 
