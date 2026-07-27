@@ -572,8 +572,12 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .nomad-address label { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 45px; padding-inline: 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-subtle); background: var(--surface-1); }
 .nomad-address label:focus-within { border-color: var(--accent); }
 .nomad-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
-.nomad-bookmark-button.bookmarked,
-.nomad-identify-button.identified { color: var(--accent-strong); }
+.nomad-bookmark-button.bookmarked { color: var(--accent-strong); }
+.nomad-identify-button.identified {
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
 .nomad-identify-button.identified:disabled { cursor: default; opacity: 1; }
 .nomad-canvas { position: relative; display: grid; min-height: 0; grid-column: 2; grid-row: 3; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .conversation-empty > .empty-state,
@@ -1418,6 +1422,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     padding: 5px;
   }
   .nomad-mobile-toolbar .icon-button {
+    position: relative;
     width: 42px;
     height: 42px;
     flex: 0 1 42px;
@@ -1426,6 +1431,21 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     border-radius: 50%;
     background: transparent;
     box-shadow: none;
+  }
+  .nomad-mobile-toolbar .nomad-identify-button.identified {
+    border-color: transparent;
+    color: inherit;
+    background: transparent;
+  }
+  .nomad-mobile-toolbar .nomad-identify-button.identified::after {
+    position: absolute;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    content: "";
+    inset-block-start: 7px;
+    inset-inline-end: 7px;
   }
   .nomad-mobile-toolbar .icon-button:hover:not(:disabled) { border-color: transparent; background: var(--surface-hover); }
   .nomad-mobile-toolbar .nomad-back-button svg { transform: translateX(1px); }
