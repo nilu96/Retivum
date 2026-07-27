@@ -938,26 +938,14 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .button.danger { border-color: var(--danger); color: var(--danger-ink); background: var(--danger); }
 .button.danger:hover:not(:disabled) { filter: brightness(.92); }
 .bookmark-editor-address { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: .74rem; font-weight: 650; }
-.bookmark-address-field { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) 40px; align-items: stretch; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; color: var(--text-subtle); background: var(--surface-2); }
-.bookmark-address-field.editable { color: var(--text); background: var(--surface-1); transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
-.bookmark-address-field.editable:hover { border-color: var(--border-strong); background: var(--surface-hover); }
-.bookmark-address-field:focus-within { border-color: var(--accent); }
-.bookmark-address-field.editable:focus-within { background: var(--surface-1); box-shadow: 0 0 0 3px var(--accent-soft); }
-.bookmark-address-field input, .bookmark-address-field code { min-width: 0; padding: 10px 11px; border: 0; outline: 0; color: inherit; background: transparent; font: .68rem "SFMono-Regular", Consolas, monospace; }
-.bookmark-address-field input { min-height: 42px; caret-color: var(--accent); cursor: text; font-size: .76rem; }
-.bookmark-address-field code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bookmark-address-copy { display: grid; width: 40px; min-width: 40px; min-height: 38px; place-items: center; padding: 0; border: 0; border-inline-start: 1px solid var(--border); border-radius: 0; color: var(--text-subtle); background: transparent; }
 .editor-address-copy { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 0; border-radius: 9px; color: var(--text-subtle); background: var(--surface-2); text-align: start; }
 .editor-address-copy code { min-width: 0; overflow: hidden; color: inherit; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .editor-address-copy svg { flex: none; }
 @media (hover: hover) and (pointer: fine) {
-  .bookmark-address-copy:hover,
   .editor-address-copy:hover { background: var(--surface-hover); }
 }
 @media (hover: none) and (pointer: coarse) {
-  .bookmark-address-copy,
   .editor-address-copy { -webkit-tap-highlight-color: transparent; }
-  .bookmark-address-copy:active,
   .editor-address-copy:active { background: var(--surface-hover); }
 }
 .bookmark-identify-option { padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); cursor: pointer; }

@@ -790,8 +790,9 @@ describe('NomadNetView', () => {
     await fireEvent.click(addCurrent);
 
     expect(screen.getByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'NomadNet address' }))
-      .toHaveValue(`${destinationHash}:/start\`c=heap`);
+    expect(screen.getByRole('button', { name: 'Copy bookmark address' }))
+      .toHaveTextContent(`${destinationHash}:/start\`c=heap`);
+    expect(screen.queryByRole('textbox', { name: 'NomadNet address' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Forest Node');
     expect(addBookmark).not.toHaveBeenCalled();
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -1033,9 +1034,9 @@ describe('NomadNetView', () => {
     expect(removeBookmark).toHaveBeenCalledWith('identity:context-menu-bookmark');
   });
 
-  it('updates the address and name of an existing bookmark', async () => {
+  it('updates the name of an existing bookmark while keeping its address read-only', async () => {
     const destinationHash = 'd'.repeat(32);
-    const editedAddress = `${'e'.repeat(32)}:/page/edited.mu\`c=heap`;
+    const address = `${destinationHash}:/page/index.mu`;
     nomadBookmarks.set([{
       id: 'identity:bookmark',
       identityId: 'identity',
@@ -1051,16 +1052,15 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const input = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(input).toHaveValue('Old name');
-    const addressInput = screen.getByRole('textbox', { name: 'NomadNet address' });
-    expect(addressInput).toHaveValue(`${destinationHash}:/page/index.mu`);
+    expect(screen.getByRole('button', { name: 'Copy bookmark address' })).toHaveTextContent(address);
+    expect(screen.queryByRole('textbox', { name: 'NomadNet address' })).not.toBeInTheDocument();
     expect(screen.getByRole('switch', { name: /Identify before loading/ })).not.toBeChecked();
-    await fireEvent.input(addressInput, { target: { value: editedAddress } });
     await fireEvent.input(input, { target: { value: 'New name' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(updateBookmark).toHaveBeenCalledWith(
       'identity:bookmark',
-      editedAddress,
+      address,
       'New name',
       false,
     ));
@@ -1151,7 +1151,7 @@ describe('NomadNetView', () => {
       .toHaveAttribute('aria-expanded', 'true');
 
     await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
-    await fireEvent.click(screen.getByRole('textbox', { name: 'NomadNet address' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy bookmark address' }));
 
     expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
       .toHaveAttribute('aria-expanded', 'true');

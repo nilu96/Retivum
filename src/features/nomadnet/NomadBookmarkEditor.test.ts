@@ -13,9 +13,8 @@ describe('NomadBookmarkEditor', () => {
   });
 
   for (const mode of ['add', 'edit'] as const) {
-    it(`edits and copies the full address from the ${mode} bookmark dialog`, async () => {
+    it(`shows the full address as a read-only copy control in the ${mode} bookmark dialog`, async () => {
       const address = `${'a'.repeat(32)}:/start\`c=heap`;
-      const editedAddress = `${'b'.repeat(32)}:/page/edited.mu`;
       const writeText = vi.fn().mockResolvedValue(undefined);
       clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
       Object.defineProperty(navigator, 'clipboard', {
@@ -31,25 +30,22 @@ describe('NomadBookmarkEditor', () => {
         oncancel: vi.fn(),
       });
 
-      const addressInput = screen.getByRole('textbox', { name: 'NomadNet address' });
       const copyButton = screen.getByRole('button', { name: 'Copy bookmark address' });
-      expect(addressInput).toHaveValue(address);
-      expect(copyButton).not.toHaveTextContent(address);
-      await fireEvent.input(addressInput, { target: { value: editedAddress } });
-      await fireEvent.click(addressInput);
+      expect(copyButton).toHaveTextContent(address);
+      expect(screen.queryByRole('textbox', { name: 'NomadNet address' })).not.toBeInTheDocument();
       expect(writeText).not.toHaveBeenCalled();
       await fireEvent.click(copyButton);
 
-      await waitFor(() => expect(writeText).toHaveBeenCalledWith(editedAddress));
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith(address));
     });
   }
 
-  it('requires and saves a trimmed local bookmark name', async () => {
+  it('requires and saves a trimmed local bookmark name without changing the address', async () => {
     const onsave = vi.fn().mockResolvedValue(true);
     const oncancel = vi.fn();
-    const editedAddress = `${'b'.repeat(32)}:/page/edited.mu`;
+    const address = `${'a'.repeat(32)}:/start`;
     render(NomadBookmarkEditor, {
-      address: `${'a'.repeat(32)}:/start`,
+      address,
       currentName: 'Node',
       currentIdentifyBeforeLoad: false,
       mode: 'edit',
@@ -60,16 +56,12 @@ describe('NomadBookmarkEditor', () => {
     const nameInput = screen.getByRole('textbox', { name: 'Bookmark name' });
     expect(nameInput).toHaveValue('Node');
     expect(nameInput).toBeRequired();
-    await fireEvent.input(
-      screen.getByRole('textbox', { name: 'NomadNet address' }),
-      { target: { value: `  ${editedAddress}  ` } },
-    );
     await fireEvent.input(nameInput, { target: { value: '  Community node  ' } });
     await fireEvent.click(screen.getByRole('switch', { name: /Identify before loading/ }));
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onsave).toHaveBeenCalledWith(
-      editedAddress,
+      address,
       'Community node',
       true,
     ));
