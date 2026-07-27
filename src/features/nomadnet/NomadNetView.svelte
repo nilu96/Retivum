@@ -331,6 +331,31 @@
     }
   }
 
+  function resetPageViewport(): void {
+    if (mobileToolbarViewportTimer !== undefined) {
+      window.clearTimeout(mobileToolbarViewportTimer);
+      mobileToolbarViewportTimer = undefined;
+    }
+    if (mobileToolbarViewportAnimationFrame !== undefined) {
+      window.cancelAnimationFrame(mobileToolbarViewportAnimationFrame);
+      mobileToolbarViewportAnimationFrame = undefined;
+    }
+    preservingMobileToolbarViewport = false;
+    mobileToolbarViewportAnchorTop = undefined;
+    mobileToolbarViewportOffset = 0;
+    mobileCanvasElement?.classList.remove('nomad-toolbar-viewport-anchor');
+    mobileCanvasElement?.style.removeProperty('--nomad-toolbar-viewport-offset');
+    document.documentElement.classList.remove(mobileToolbarViewportPreservationClass);
+    directoryExpanded = false;
+    if (mobilePanelElement) mobilePanelElement.scrollTop = 0;
+    mobileToolbarStuck = false;
+    mobileToolbarAtStickyEdge = false;
+    mobileToolbarScrollTakeoverActive = false;
+    mobileToolbarDocumentLockY = undefined;
+    mobileToolbarStickyBoundaryY = undefined;
+    if (mobileViewport) window.scrollTo(0, 0);
+  }
+
   function selectDirectoryScope(nextScope: NomadDirectoryScope): void {
     if (scope !== nextScope || query) {
       beginMobileToolbarViewportPreservation();
@@ -532,6 +557,7 @@
     freshLink = false,
     identifyBeforeLoad = false,
   ): Promise<boolean> {
+    resetPageViewport();
     const requestPath = nomadRequestPath(path);
     // Values read back from Svelte state can be proxies, which cannot be sent
     // through Worker.postMessage. Keep the runtime boundary cloneable.
@@ -591,6 +617,7 @@
           );
       if (sequence !== navigationSequence) return false;
       if (!nextPage) {
+        resetPageViewport();
         pageError = 'load';
         failedPageRequest = request;
         return false;
@@ -609,12 +636,13 @@
           requestData: { ...(previousPage.requestData ?? {}) },
         }].slice(-maximumNavigationHistoryEntries);
       }
-      setDirectoryExpanded(false);
+      resetPageViewport();
       loadedPage = { ...nextPage, requestData: nextRequestData, identifyBeforeLoad };
       address = formatNomadAddress(nextPage.destinationHash, nextPage.path, nextRequestData);
       return true;
     } catch {
       if (sequence === navigationSequence) {
+        resetPageViewport();
         pageError = 'load';
         pageErrorCode = 'NOMAD_REQUEST_FAILED';
         failedPageRequest = request;
@@ -664,6 +692,7 @@
     if (!loadedPage) return;
     const next = resolveNomadLink(loadedPage.destinationHash, target);
     if (!next) {
+      resetPageViewport();
       pageError = 'link';
       pageErrorCode = undefined;
       return;
@@ -743,10 +772,10 @@
   function goBack(): void {
     if (cancelPendingPageLoad()) return;
     if (pageError === 'load' && failedPageRequest && loadedPage) {
+      resetPageViewport();
       failedPageRequest = undefined;
       pageError = undefined;
       pageErrorCode = undefined;
-      setDirectoryExpanded(false);
       address = formatNomadAddress(
         loadedPage.destinationHash,
         loadedPage.path,
@@ -763,7 +792,7 @@
     loadingPage = false;
     pageError = undefined;
     pageErrorCode = undefined;
-    setDirectoryExpanded(false);
+    resetPageViewport();
     loadedPage = {
       ...previous,
       requestData: { ...(previous.requestData ?? {}) },
@@ -779,7 +808,7 @@
     loadingPage = false;
     pageError = undefined;
     pageErrorCode = undefined;
-    setDirectoryExpanded(false);
+    resetPageViewport();
     if (loadedPage) {
       address = formatNomadAddress(
         loadedPage.destinationHash,

@@ -603,6 +603,7 @@ describe('NomadNetView', () => {
 
     expect(screen.getByRole('button', { name: 'Show announces (0)' }))
       .toHaveAttribute('aria-expanded', 'false');
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
   });
 
   it('uses the exact bookmark identification policy when opening an announced page', async () => {
@@ -1198,6 +1199,7 @@ describe('NomadNetView', () => {
   });
 
   it('reloads the currently displayed page', async () => {
+    useMobileViewport();
     const destinationHash = '9'.repeat(32);
     activeIdentity.set({
       id: 'identity',
@@ -1231,8 +1233,10 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(destinationHash) }));
     expect(await screen.findByText('First version')).toBeInTheDocument();
 
+    vi.mocked(window.scrollTo).mockClear();
     await fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
     expect(await screen.findByText('Reloaded version')).toBeInTheDocument();
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
     expect(requestPage).toHaveBeenNthCalledWith(2, destinationHash, '/page/index.mu', {}, expect.any(Function), true);
   });
 
@@ -1426,6 +1430,7 @@ describe('NomadNetView', () => {
   });
 
   it('restores cached history when navigating back and returns to the announced home page', async () => {
+    useMobileViewport();
     const destinationHash = '8'.repeat(32);
     setNomadDestinations([{
       id: destinationHash,
@@ -1466,18 +1471,24 @@ describe('NomadNetView', () => {
     expect(back).toBeDisabled();
     expect(home).toBeDisabled();
 
+    vi.mocked(window.scrollTo).mockClear();
     await fireEvent.click(screen.getByRole('link', { name: 'Open details' }));
     expect(await screen.findByText('Details page')).toBeInTheDocument();
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
     expect(back).toBeEnabled();
     expect(home).toBeEnabled();
 
+    vi.mocked(window.scrollTo).mockClear();
     await fireEvent.click(home);
     expect(await screen.findByText('Home page again')).toBeInTheDocument();
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
     expect(requestPage).toHaveBeenNthCalledWith(3, destinationHash, '/page/index.mu', {}, expect.any(Function));
     expect(home).toBeDisabled();
 
+    vi.mocked(window.scrollTo).mockClear();
     await fireEvent.click(back);
     expect(screen.getByText('Details page')).toBeInTheDocument();
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
     expect(requestPage).toHaveBeenCalledTimes(3);
   });
 });
