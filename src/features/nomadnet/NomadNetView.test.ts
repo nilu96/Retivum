@@ -28,7 +28,7 @@ function setNomadDestinations(records: Array<{
 
 function useMobileViewport(): void {
   vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
-    matches: query === '(max-width: 699px)',
+    matches: query === '(max-width: 699px)' || query === '(prefers-reduced-motion: reduce)',
     media: query,
     onchange: null,
     addEventListener: vi.fn(),
@@ -37,6 +37,7 @@ function useMobileViewport(): void {
     removeListener: vi.fn(),
     dispatchEvent: vi.fn(),
   })));
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
 }
 
 describe('NomadNetView', () => {
@@ -81,10 +82,402 @@ describe('NomadNetView', () => {
 
     const collapse = within(toolbar).getByRole('button', { name: 'Hide destination list' });
     expect(collapse).toHaveAttribute('aria-expanded', 'true');
+    expect(browser).not.toHaveClass('stuck');
+
+    const toolbarRect = vi.spyOn(browser!, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: 52,
+      left: 0,
+      width: 320,
+      height: 52,
+      toJSON: () => ({}),
+    });
+    const scrollY = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+    expect(browser).toHaveClass('at-sticky-edge');
+    expect(browser).not.toHaveClass('scroll-takeover');
+
+    scrollY.mockReturnValue(160);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).not.toHaveClass('at-sticky-edge'));
+
+    scrollY.mockReturnValue(0);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).not.toHaveClass('stuck'));
+    toolbarRect.mockRestore();
+
     await fireEvent.click(collapse);
     expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
       .toHaveAttribute('aria-expanded', 'false');
     expect(browser).not.toHaveClass('expanded');
+  });
+
+  it('compensates sticky toolbar height changes to preserve the page viewport', async () => {
+    useMobileViewport();
+    let browserResizeCallback: ResizeObserverCallback | undefined;
+    class TestResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element): void {
+        if (target.classList.contains('nomad-mobile-browser')) {
+          browserResizeCallback = this.callback;
+        }
+      }
+
+      disconnect(): void {}
+      unobserve(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    const canvas = container.querySelector<HTMLElement>('.nomad-canvas')!;
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    let browserHeight = 52;
+    vi.spyOn(browser, 'getBoundingClientRect').mockImplementation(() => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: browserHeight,
+      left: 0,
+      width: 320,
+      height: browserHeight,
+      toJSON: () => ({}),
+    }));
+    vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => {
+      const viewportOffset = Number.parseFloat(
+        canvas.style.getPropertyValue('--nomad-toolbar-viewport-offset'),
+      ) || 0;
+      return {
+        x: 0,
+        y: browserHeight + 200 + viewportOffset,
+        top: browserHeight + 200 + viewportOffset,
+        right: 320,
+        bottom: browserHeight + 590 + viewportOffset,
+        left: 0,
+        width: 320,
+        height: 390,
+        toJSON: () => ({}),
+      };
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(0);
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
+    browserResizeCallback?.([], {} as ResizeObserver);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Show announces (0)' }));
+    expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');
+    browserHeight = 152;
+    browserResizeCallback?.([], {} as ResizeObserver);
+    await waitFor(() => expect(window.scrollTo).toHaveBeenCalledWith(0, 220));
+    await waitFor(() => expect(document.documentElement)
+      .not.toHaveClass('nomad-toolbar-preserving-viewport'));
+  });
+
+  it('does not collapse past the sticky boundary when the toolbar is taller than the scroll offset', async () => {
+    useMobileViewport();
+    let browserResizeCallback: ResizeObserverCallback | undefined;
+    class BoundaryResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+
+      observe(target: Element): void {
+        if (target.classList.contains('nomad-mobile-browser')) {
+          browserResizeCallback = this.callback;
+        }
+      }
+
+      disconnect(): void {}
+      unobserve(): void {}
+    }
+    vi.stubGlobal('ResizeObserver', BoundaryResizeObserver);
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    const canvas = container.querySelector<HTMLElement>('.nomad-canvas')!;
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    let browserHeight = 300;
+    let scrollY = 0;
+    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
+    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(0);
+    vi.spyOn(browser, 'getBoundingClientRect').mockImplementation(() => ({
+      x: 0,
+      y: Math.max(0, 100 - scrollY),
+      top: Math.max(0, 100 - scrollY),
+      right: 320,
+      bottom: Math.max(0, 100 - scrollY) + browserHeight,
+      left: 0,
+      width: 320,
+      height: browserHeight,
+      toJSON: () => ({}),
+    }));
+    vi.spyOn(canvas, 'getBoundingClientRect').mockImplementation(() => {
+      const viewportOffset = Number.parseFloat(
+        canvas.style.getPropertyValue('--nomad-toolbar-viewport-offset'),
+      ) || 0;
+      const top = 200 + browserHeight - scrollY + viewportOffset;
+      return {
+        x: 0,
+        y: top,
+        top,
+        right: 320,
+        bottom: top + 390,
+        left: 0,
+        width: 320,
+        height: 390,
+        toJSON: () => ({}),
+      };
+    });
+
+    scrollY = 90;
+    await fireEvent.scroll(window);
+    scrollY = 100;
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+    vi.mocked(window.scrollTo).mockClear();
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
+    browserHeight = 52;
+    browserResizeCallback?.([], {} as ResizeObserver);
+    expect(canvas.style.getPropertyValue('--nomad-toolbar-viewport-offset')).toBe('0px');
+    await waitFor(() => expect(document.documentElement)
+      .not.toHaveClass('nomad-toolbar-preserving-viewport'));
+    expect(window.scrollTo).toHaveBeenCalledWith(0, 100);
+    expect(window.scrollTo).not.toHaveBeenCalledWith(0, 0);
+  });
+
+  it('preserves the page viewport while switching scopes in a sticky expanded toolbar', async () => {
+    useMobileViewport();
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    vi.spyOn(browser, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: 300,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
+    expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');
+    await waitFor(() => expect(document.documentElement)
+      .not.toHaveClass('nomad-toolbar-preserving-viewport'));
+  });
+
+  it('collapses on title and page-margin clicks outside the expanded mobile toolbar', async () => {
+    useMobileViewport();
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector('.nomad-mobile-browser');
+    const heading = screen.getByRole('heading', { name: 'NomadNet' });
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    await fireEvent.click(heading);
+    expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Show announces (0)' }));
+    vi.spyOn(browser!, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: 52,
+      left: 0,
+      width: 320,
+      height: 52,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+
+    await fireEvent.click(container.querySelector('.nomad-page')!);
+    expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('detects destination overflow before sticky lock and disables it again when content fits', async () => {
+    useMobileViewport();
+    setNomadDestinations([{
+      destinationHash: 'a'.repeat(32),
+      displayName: 'Overflow node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector('.nomad-mobile-browser');
+    const panel = container.querySelector<HTMLElement>('.nomad-browser-panel')!;
+    let panelScrollHeight = 500;
+    Object.defineProperty(panel, 'scrollHeight', {
+      configurable: true,
+      get: () => panelScrollHeight,
+    });
+    Object.defineProperty(panel, 'clientHeight', {
+      configurable: true,
+      get: () => 300,
+    });
+
+    await fireEvent.input(screen.getByPlaceholderText('Search announces'), {
+      target: { value: 'missing' },
+    });
+    await waitFor(() => expect(panel).toHaveClass('scrollable'));
+    expect(browser).not.toHaveClass('stuck');
+
+    vi.spyOn(browser!, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 320,
+      bottom: 300,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(120);
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+    expect(panel).toHaveClass('scrollable');
+
+    panelScrollHeight = 300;
+    await fireEvent.input(screen.getByPlaceholderText('Search announces'), {
+      target: { value: '' },
+    });
+    await waitFor(() => expect(panel).not.toHaveClass('scrollable'));
+  });
+
+  it('hands continued page scrolling to an overflowing panel when the toolbar locks', async () => {
+    useMobileViewport();
+    setNomadDestinations([{
+      destinationHash: 'a'.repeat(32),
+      displayName: 'Overflow node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    const panel = container.querySelector<HTMLElement>('.nomad-browser-panel')!;
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    let scrollY = 0;
+    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
+    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(0);
+    const scrollTo = vi.mocked(window.scrollTo);
+    vi.spyOn(browser, 'getBoundingClientRect').mockImplementation(() => ({
+      x: 0,
+      y: Math.max(0, 100 - scrollY),
+      top: Math.max(0, 100 - scrollY),
+      right: 320,
+      bottom: Math.max(0, 100 - scrollY) + 300,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    }));
+    Object.defineProperty(panel, 'scrollHeight', {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(panel, 'clientHeight', {
+      configurable: true,
+      get: () => 300,
+    });
+
+    await fireEvent.input(screen.getByPlaceholderText('Search announces'), {
+      target: { value: 'missing' },
+    });
+    await waitFor(() => expect(panel).toHaveClass('scrollable'));
+
+    scrollY = 90;
+    await fireEvent.scroll(window);
+    expect(browser).not.toHaveClass('stuck');
+
+    scrollY = 120;
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+    expect(browser).toHaveClass('at-sticky-edge');
+    expect(browser).toHaveClass('scroll-takeover');
+    expect(scrollTo).toHaveBeenLastCalledWith(0, 100);
+    expect(panel.scrollTop).toBe(20);
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
+    scrollY = 140;
+    await fireEvent.scroll(window);
+    expect(browser).toHaveClass('stuck');
+    expect(browser).not.toHaveClass('at-sticky-edge');
+    expect(browser).toHaveClass('scroll-takeover');
+
+    scrollY = 90;
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).not.toHaveClass('stuck'));
+    expect(browser).not.toHaveClass('at-sticky-edge');
+    expect(browser).not.toHaveClass('scroll-takeover');
+  });
+
+  it('does not redefine the sticky edge when a compact pill expands', async () => {
+    useMobileViewport();
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    let scrollY = 0;
+    vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
+    vi.spyOn(browser, 'getBoundingClientRect').mockImplementation(() => ({
+      x: 0,
+      y: Math.max(0, 100 - scrollY),
+      top: Math.max(0, 100 - scrollY),
+      right: 320,
+      bottom: Math.max(0, 100 - scrollY) + 300,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    }));
+
+    scrollY = 120;
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).toHaveClass('stuck'));
+    scrollY = 160;
+    await fireEvent.scroll(window);
+    await waitFor(() => expect(browser).not.toHaveClass('at-sticky-edge'));
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
+    await fireEvent.click(within(toolbar).getByRole('button', { name: /^Show / }));
+    const panel = container.querySelector<HTMLElement>('.nomad-browser-panel')!;
+    Object.defineProperty(panel, 'scrollHeight', {
+      configurable: true,
+      get: () => 500,
+    });
+    Object.defineProperty(panel, 'clientHeight', {
+      configurable: true,
+      get: () => 300,
+    });
+    setNomadDestinations([{
+      destinationHash: 'a'.repeat(32),
+      displayName: 'Overflow node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    await waitFor(() => expect(panel).toHaveClass('scrollable'));
+    expect(browser).toHaveClass('scroll-takeover');
+    expect(browser).not.toHaveClass('at-sticky-edge');
+
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
+    expect(browser).not.toHaveClass('expanded');
+    expect(browser).not.toHaveClass('at-sticky-edge');
   });
 
   it('turns the mobile Home action into Cancel while loading', async () => {
@@ -170,17 +563,15 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
     const announcedPage = screen.getByRole('button', { name: /Announced node/ });
     await fireEvent.click(announcedPage);
-    expect(announcedPage).toHaveClass('active');
-    expect(announcedPage).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('button', { name: 'Show announces (1)' })).toHaveAttribute('aria-expanded', 'false');
 
     await fireEvent.click(screen.getByRole('button', { name: 'Show announces (1)' }));
+    const reopenedAnnouncedPage = screen.getByRole('button', { name: /Announced node/ });
+    expect(reopenedAnnouncedPage).toHaveClass('active');
+    expect(reopenedAnnouncedPage).toHaveAttribute('aria-current', 'page');
     await fireEvent.click(screen.getByRole('tab', { name: 'Bookmarks' }));
     const bookmarkedPage = screen.getByRole('button', { name: /Saved node/ });
     await fireEvent.click(bookmarkedPage);
-    expect(bookmarkedPage.closest('.nomad-bookmark-row')).toHaveClass('active');
-    expect(bookmarkedPage).toHaveAttribute('aria-current', 'page');
-    expect(bookmarkedPage).toHaveTextContent('/page/stack.mu`c=heap');
     expect(requestPage).toHaveBeenLastCalledWith(
       bookmarkedHash,
       '/page/stack.mu',
@@ -190,6 +581,12 @@ describe('NomadNetView', () => {
       true,
     );
     expect(screen.getByRole('button', { name: 'Show bookmarks (1)' })).toHaveAttribute('aria-expanded', 'false');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Show bookmarks (1)' }));
+    const reopenedBookmarkedPage = screen.getByRole('button', { name: /Saved node/ });
+    expect(reopenedBookmarkedPage.closest('.nomad-bookmark-row')).toHaveClass('active');
+    expect(reopenedBookmarkedPage).toHaveAttribute('aria-current', 'page');
+    expect(reopenedBookmarkedPage).toHaveTextContent('/page/stack.mu`c=heap');
   });
 
   it('collapses the mobile directory immediately after opening an address', async () => {

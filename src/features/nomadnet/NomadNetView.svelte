@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
+  import { slide } from 'svelte/transition';
   import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
     NOMAD_DEFAULT_PAGE_PATH,
@@ -74,6 +75,9 @@
   let navigationSequence = 0;
   const maximumNavigationHistoryEntries = 32;
   const identityReloadDelayMs = 500;
+  const mobilePanelScrollEndInset = 16;
+  const mobileToolbarTransitionDurationMs = 220;
+  const mobileToolbarViewportPreservationClass = 'nomad-toolbar-preserving-viewport';
   let bookmarkEditor = $state<{
     address: string;
     currentName: string;
@@ -89,6 +93,24 @@
   let mobileViewport = $state(
     typeof window !== 'undefined'
       && window.matchMedia?.('(max-width: 699px)').matches === true,
+  );
+  let mobileBrowserElement = $state<HTMLElement>();
+  let mobileToolbarStuck = $state(false);
+  let mobileToolbarAtStickyEdge = $state(false);
+  let mobileToolbarScrollTakeoverActive = $state(false);
+  let mobileToolbarDocumentLockY: number | undefined;
+  let mobileToolbarStickyBoundaryY: number | undefined;
+  let mobileToolbarViewportAnchorTop: number | undefined;
+  let mobileToolbarViewportOffset = 0;
+  let preservingMobileToolbarViewport = false;
+  let mobileToolbarViewportTimer: number | undefined;
+  let mobileToolbarViewportAnimationFrame: number | undefined;
+  let mobilePanelElement = $state<HTMLElement>();
+  let mobilePanelScrollable = $state(false);
+  let mobileCanvasElement = $state<HTMLElement>();
+  let reducedMotion = $state(
+    typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true,
   );
 
   const parsedAddress = $derived(parseNomadAddress(address));
@@ -147,13 +169,80 @@
 
   onMount(() => {
     const mobileQuery = window.matchMedia?.('(max-width: 699px)');
+    const motionQuery = window.matchMedia?.('(prefers-reduced-motion: reduce)');
     const updateMobileViewport = (): void => {
       mobileViewport = mobileQuery?.matches === true;
     };
+    const updateMotionPreference = (): void => {
+      reducedMotion = motionQuery?.matches === true;
+    };
     updateMobileViewport();
+    updateMotionPreference();
     mobileQuery?.addEventListener('change', updateMobileViewport);
+    motionQuery?.addEventListener('change', updateMotionPreference);
+    window.addEventListener('scroll', updateMobileToolbarStuck, { passive: true, capture: true });
+    window.addEventListener('resize', updateMobileToolbarStuck, { passive: true });
+    document.addEventListener('click', handleViewOutsideClick, { capture: true });
+    window.visualViewport?.addEventListener('resize', updateMobileToolbarStuck);
+    window.visualViewport?.addEventListener('scroll', updateMobileToolbarStuck);
     return () => {
+      if (mobileToolbarViewportTimer !== undefined) {
+        window.clearTimeout(mobileToolbarViewportTimer);
+      }
+      if (mobileToolbarViewportAnimationFrame !== undefined) {
+        window.cancelAnimationFrame(mobileToolbarViewportAnimationFrame);
+      }
+      mobileCanvasElement?.classList.remove('nomad-toolbar-viewport-anchor');
+      mobileCanvasElement?.style.removeProperty('--nomad-toolbar-viewport-offset');
+      document.documentElement.classList.remove(mobileToolbarViewportPreservationClass);
       mobileQuery?.removeEventListener('change', updateMobileViewport);
+      motionQuery?.removeEventListener('change', updateMotionPreference);
+      window.removeEventListener('scroll', updateMobileToolbarStuck, true);
+      window.removeEventListener('resize', updateMobileToolbarStuck);
+      document.removeEventListener('click', handleViewOutsideClick, true);
+      window.visualViewport?.removeEventListener('resize', updateMobileToolbarStuck);
+      window.visualViewport?.removeEventListener('scroll', updateMobileToolbarStuck);
+    };
+  });
+
+  $effect(() => {
+    mobileViewport;
+    directoryExpanded;
+    active;
+    void tick().then(updateMobileToolbarStuck);
+  });
+
+  $effect(() => {
+    const browser = mobileBrowserElement;
+    if (!browser) return;
+    if (typeof ResizeObserver === 'undefined') return;
+    const resizeObserver = new ResizeObserver(() => {
+      preserveMobileToolbarViewport();
+    });
+    resizeObserver.observe(browser);
+    return () => {
+      resizeObserver.disconnect();
+    };
+  });
+
+  $effect(() => {
+    const panel = mobilePanelElement;
+    if (!panel) {
+      mobilePanelScrollable = false;
+      return;
+    }
+    updateMobilePanelScrollability();
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? undefined
+      : new ResizeObserver(updateMobilePanelScrollability);
+    const mutationObserver = typeof MutationObserver === 'undefined'
+      ? undefined
+      : new MutationObserver(updateMobilePanelScrollability);
+    resizeObserver?.observe(panel);
+    mutationObserver?.observe(panel, { childList: true, subtree: true, characterData: true });
+    return () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
     };
   });
 
@@ -226,13 +315,192 @@
   }
 
   function toggleDirectory(): void {
-    directoryExpanded = !directoryExpanded;
+    setDirectoryExpanded(!directoryExpanded);
+  }
+
+  function setDirectoryExpanded(expanded: boolean): void {
+    if (directoryExpanded === expanded) return;
+    beginMobileToolbarViewportPreservation();
+    if (!expanded && mobileToolbarStuck) {
+      mobileToolbarAtStickyEdge = window.scrollY
+        <= (mobileToolbarStickyBoundaryY ?? window.scrollY) + 1;
+    }
+    directoryExpanded = expanded;
+    if (expanded && mobileToolbarStuck) {
+      mobileToolbarDocumentLockY = window.scrollY;
+    }
+  }
+
+  function selectDirectoryScope(nextScope: NomadDirectoryScope): void {
+    if (scope !== nextScope || query) {
+      beginMobileToolbarViewportPreservation();
+    }
+    selectedScope = nextScope;
+    query = '';
+  }
+
+  function beginMobileToolbarViewportPreservation(): void {
+    if (!mobileViewport || !mobileToolbarStuck || !mobileBrowserElement) return;
+    if (mobileToolbarViewportAnimationFrame !== undefined) {
+      window.cancelAnimationFrame(mobileToolbarViewportAnimationFrame);
+      mobileToolbarViewportAnimationFrame = undefined;
+    }
+    if (!preservingMobileToolbarViewport) {
+      preservingMobileToolbarViewport = true;
+      document.documentElement.classList.add(mobileToolbarViewportPreservationClass);
+      mobileToolbarViewportAnchorTop = mobileCanvasElement?.getBoundingClientRect().top;
+      mobileToolbarViewportOffset = 0;
+      mobileCanvasElement?.classList.add('nomad-toolbar-viewport-anchor');
+      mobileCanvasElement?.style.setProperty('--nomad-toolbar-viewport-offset', '0px');
+    }
+    if (mobileToolbarViewportTimer !== undefined) {
+      window.clearTimeout(mobileToolbarViewportTimer);
+    }
+    mobileToolbarViewportTimer = window.setTimeout(() => {
+      finishMobileToolbarViewportPreservation();
+    }, reducedMotion ? 50 : mobileToolbarTransitionDurationMs + 80);
+  }
+
+  function preserveMobileToolbarViewport(): void {
+    if (
+      !preservingMobileToolbarViewport
+      || !mobileToolbarStuck
+      || mobileToolbarViewportAnchorTop === undefined
+      || !mobileCanvasElement
+    ) return;
+    const layoutTop = mobileCanvasElement.getBoundingClientRect().top
+      - mobileToolbarViewportOffset;
+    const desiredViewportOffset = mobileToolbarViewportAnchorTop - layoutTop;
+    const availableUpwardScroll = mobileToolbarStuck
+      ? Math.max(0, window.scrollY - (mobileToolbarStickyBoundaryY ?? 0))
+      : Number.POSITIVE_INFINITY;
+    mobileToolbarViewportOffset = desiredViewportOffset > 0
+      ? Math.min(desiredViewportOffset, availableUpwardScroll)
+      : desiredViewportOffset;
+    mobileCanvasElement.style.setProperty(
+      '--nomad-toolbar-viewport-offset',
+      `${mobileToolbarViewportOffset}px`,
+    );
+  }
+
+  function finishMobileToolbarViewportPreservation(): void {
+    preserveMobileToolbarViewport();
+    const canvas = mobileCanvasElement;
+    const anchorTop = mobileToolbarViewportAnchorTop;
+    const currentScrollY = window.scrollY;
+    const minimumScrollY = mobileToolbarStuck
+      ? (mobileToolbarStickyBoundaryY ?? 0)
+      : 0;
+    const targetScrollY = Math.max(
+      minimumScrollY,
+      currentScrollY - mobileToolbarViewportOffset,
+    );
+    const intendedScrollDelta = targetScrollY - currentScrollY;
+    canvas?.classList.remove('nomad-toolbar-viewport-anchor');
+    canvas?.style.removeProperty('--nomad-toolbar-viewport-offset');
+    window.scrollTo(window.scrollX, targetScrollY);
+    if (canvas && anchorTop !== undefined) {
+      const residual = canvas.getBoundingClientRect().top - anchorTop;
+      if (residual !== 0) {
+        window.scrollTo(window.scrollX, Math.max(minimumScrollY, targetScrollY + residual));
+      }
+    }
+    mobileToolbarDocumentLockY = (mobileToolbarDocumentLockY ?? currentScrollY)
+      + intendedScrollDelta;
+    preservingMobileToolbarViewport = false;
+    mobileToolbarViewportAnchorTop = undefined;
+    mobileToolbarViewportOffset = 0;
+    mobileToolbarViewportTimer = undefined;
+    mobileToolbarViewportAnimationFrame = window.requestAnimationFrame(() => {
+      document.documentElement.classList.remove(mobileToolbarViewportPreservationClass);
+      mobileToolbarViewportAnimationFrame = undefined;
+    });
+  }
+
+  function updateMobileToolbarStuck(): void {
+    if (!mobileViewport || !active || !mobileBrowserElement) {
+      mobileToolbarStuck = false;
+      mobileToolbarAtStickyEdge = false;
+      mobileToolbarScrollTakeoverActive = false;
+      mobileToolbarDocumentLockY = undefined;
+      mobileToolbarStickyBoundaryY = undefined;
+      return;
+    }
+    const stickyTop = Number.parseFloat(getComputedStyle(mobileBrowserElement).top);
+    const resolvedStickyTop = Number.isFinite(stickyTop) ? stickyTop : 0;
+    const toolbarTop = mobileBrowserElement.getBoundingClientRect().top;
+    const stuck = window.scrollY > 0 && toolbarTop <= resolvedStickyTop + 1;
+    if (!stuck) {
+      mobileToolbarStuck = false;
+      mobileToolbarAtStickyEdge = false;
+      mobileToolbarScrollTakeoverActive = false;
+      mobileToolbarDocumentLockY = window.scrollY + Math.max(0, toolbarTop - resolvedStickyTop);
+      mobileToolbarStickyBoundaryY = undefined;
+      return;
+    }
+
+    const enteringStickyState = !mobileToolbarStuck;
+    mobileToolbarStuck = true;
+    if (mobileToolbarDocumentLockY === undefined) {
+      mobileToolbarDocumentLockY = window.scrollY;
+    }
+    if (enteringStickyState) {
+      mobileToolbarAtStickyEdge = true;
+      mobileToolbarStickyBoundaryY = mobileToolbarDocumentLockY;
+      mobileToolbarScrollTakeoverActive = directoryExpanded && mobilePanelScrollable;
+    } else {
+      mobileToolbarAtStickyEdge = window.scrollY
+        <= (mobileToolbarStickyBoundaryY ?? window.scrollY) + 1;
+    }
+    if (
+      !mobileToolbarScrollTakeoverActive
+      || !directoryExpanded
+      || !mobilePanelScrollable
+      || window.scrollY <= mobileToolbarDocumentLockY
+    ) {
+      return;
+    }
+
+    const transferredDistance = window.scrollY - mobileToolbarDocumentLockY;
+    if (mobilePanelElement) {
+      mobilePanelElement.scrollTop += transferredDistance;
+    }
+    window.scrollTo(window.scrollX, mobileToolbarDocumentLockY);
+  }
+
+  function updateMobilePanelScrollability(): void {
+    const panel = mobilePanelElement;
+    if (!directoryExpanded || !panel) {
+      mobilePanelScrollable = false;
+      return;
+    }
+    const appliedEndInset = mobileToolbarStuck && panel.classList.contains('scrollable')
+      ? mobilePanelScrollEndInset
+      : 0;
+    const scrollable = panel.scrollHeight - appliedEndInset > panel.clientHeight + 1;
+    const wasScrollable = untrack(() => mobilePanelScrollable);
+    if (scrollable && !wasScrollable && mobileToolbarStuck) {
+      mobileToolbarDocumentLockY = window.scrollY;
+      mobileToolbarScrollTakeoverActive = true;
+    }
+    mobilePanelScrollable = scrollable;
   }
 
   function handleViewKeydown(event: KeyboardEvent): void {
     if (!active || !mobileViewport || !directoryExpanded || event.key !== 'Escape') return;
     event.preventDefault();
-    directoryExpanded = false;
+    setDirectoryExpanded(false);
+  }
+
+  function handleViewOutsideClick(event: MouseEvent): void {
+    if (
+      !active
+      || !mobileViewport
+      || !directoryExpanded
+    ) return;
+    const toolbar = mobileBrowserElement;
+    if (!toolbar || event.composedPath().includes(toolbar)) return;
+    setDirectoryExpanded(false);
   }
 
   function destinationRowClick(target: DestinationActionTarget): void {
@@ -341,7 +609,7 @@
           requestData: { ...(previousPage.requestData ?? {}) },
         }].slice(-maximumNavigationHistoryEntries);
       }
-      directoryExpanded = false;
+      setDirectoryExpanded(false);
       loadedPage = { ...nextPage, requestData: nextRequestData, identifyBeforeLoad };
       address = formatNomadAddress(nextPage.destinationHash, nextPage.path, nextRequestData);
       return true;
@@ -365,7 +633,7 @@
     path = '/',
     requestData: NomadRequestData = {},
   ): void {
-    directoryExpanded = false;
+    setDirectoryExpanded(false);
     const bookmark = bookmarkForPage(destinationHash, path, requestData);
     void openDestination(
       destinationHash,
@@ -380,7 +648,7 @@
   function submitAddress(event: SubmitEvent): void {
     event.preventDefault();
     if (parsedAddress) {
-      directoryExpanded = false;
+      setDirectoryExpanded(false);
       void openDestination(
         parsedAddress.destinationHash,
         parsedAddress.path,
@@ -478,7 +746,7 @@
       failedPageRequest = undefined;
       pageError = undefined;
       pageErrorCode = undefined;
-      directoryExpanded = false;
+      setDirectoryExpanded(false);
       address = formatNomadAddress(
         loadedPage.destinationHash,
         loadedPage.path,
@@ -495,7 +763,7 @@
     loadingPage = false;
     pageError = undefined;
     pageErrorCode = undefined;
-    directoryExpanded = false;
+    setDirectoryExpanded(false);
     loadedPage = {
       ...previous,
       requestData: { ...(previous.requestData ?? {}) },
@@ -511,7 +779,7 @@
     loadingPage = false;
     pageError = undefined;
     pageErrorCode = undefined;
-    directoryExpanded = false;
+    setDirectoryExpanded(false);
     if (loadedPage) {
       address = formatNomadAddress(
         loadedPage.destinationHash,
@@ -693,7 +961,14 @@
     {/if}
   </header>
 
-  <div class="nomad-mobile-browser" class:expanded={directoryExpanded}>
+  <div
+    class="nomad-mobile-browser"
+    class:expanded={directoryExpanded}
+    class:stuck={mobileToolbarStuck}
+    class:at-sticky-edge={mobileToolbarAtStickyEdge}
+    class:scroll-takeover={mobileToolbarScrollTakeoverActive}
+    bind:this={mobileBrowserElement}
+  >
     {#if mobileViewport}
       <nav class="nomad-mobile-toolbar" aria-label={$t('nomadnet.page.actions.label')}>
         <button
@@ -755,11 +1030,19 @@
               : 'nomadnet.scope.bookmarks.searchName'),
           })}
           onclick={toggleDirectory}
-        ><Icon name={directoryExpanded ? 'chevron-up' : 'chevron-down'} size={19} /></button>
+        ><Icon name="chevron-down" size={19} /></button>
       </nav>
     {/if}
 
-    <div id="nomad-mobile-panel" class="nomad-browser-panel">
+    {#if !mobileViewport || directoryExpanded}
+    <div
+      id="nomad-mobile-panel"
+      class="nomad-browser-panel"
+      class:scrollable={mobilePanelScrollable}
+      bind:this={mobilePanelElement}
+      style:--nomad-panel-scroll-end-inset={`${mobilePanelScrollEndInset}px`}
+      transition:slide={{ axis: 'y', duration: reducedMotion ? 0 : mobileToolbarTransitionDurationMs }}
+    >
       <form class="nomad-address" onsubmit={submitAddress}>
         {#if !mobileViewport}
           <div class="nomad-browser-actions">
@@ -805,7 +1088,7 @@
               role="tab"
               aria-selected={scope === item.id}
               class:active={scope === item.id}
-              onclick={() => { selectedScope = item.id; query = ''; }}
+              onclick={() => { selectDirectoryScope(item.id); }}
             >{$t(item.label)}</button>
           {/each}
         </div>
@@ -816,7 +1099,7 @@
             bind:value={query}
             type="search"
             placeholder={$t('nomadnet.search.placeholder', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}
-            onfocus={() => { directoryExpanded = true; }}
+            onfocus={() => { setDirectoryExpanded(true); }}
           />
         </label>
         <div id="nomad-destination-results" class="nomad-directory-content" role="tabpanel">
@@ -911,9 +1194,15 @@
       </div>
     </aside>
     </div>
+    {/if}
   </div>
 
-  <section class:page-loaded={Boolean(loadedPage) && !loadingPage && !pageError} class="nomad-canvas" aria-busy={loadingPage}>
+  <section
+    class:page-loaded={Boolean(loadedPage) && !loadingPage && !pageError}
+    class="nomad-canvas"
+    aria-busy={loadingPage}
+    bind:this={mobileCanvasElement}
+  >
       <div class="nomad-grid" aria-hidden="true"></div>
       {#if loadingPage}
         <EmptyState
