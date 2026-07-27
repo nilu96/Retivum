@@ -743,7 +743,7 @@ describe('NomadNetView', () => {
     expect(screen.getByRole('button', { name: /Subpage node/ })).toHaveAttribute('aria-current', 'page');
   });
 
-  it('toggles the current address bookmark without opening an editor', async () => {
+  it('opens the editor when adding the current address and removes it without a dialog', async () => {
     const destinationHash = 'a'.repeat(32);
     const bookmarkId = 'identity:current-page';
     activeIdentity.set({
@@ -789,6 +789,13 @@ describe('NomadNetView', () => {
     expect(addCurrent.querySelector('path[fill="currentColor"]')).not.toBeInTheDocument();
     await fireEvent.click(addCurrent);
 
+    expect(screen.getByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'NomadNet address' }))
+      .toHaveValue(`${destinationHash}:/start\`c=heap`);
+    expect(screen.getByRole('textbox', { name: 'Bookmark name' })).toHaveValue('Forest Node');
+    expect(addBookmark).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/start\`c=heap`,
       'Forest Node',
@@ -802,6 +809,7 @@ describe('NomadNetView', () => {
     await fireEvent.click(removeCurrent);
 
     await waitFor(() => expect(deleteBookmark).toHaveBeenCalledWith(bookmarkId));
+    expect(screen.queryByRole('heading', { name: 'Edit bookmark' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Bookmark current address' }))
       .not.toHaveClass('bookmarked');
   });
@@ -852,12 +860,18 @@ describe('NomadNetView', () => {
 
     await fireEvent.click(within(toolbar).getByRole('button', { name: 'Bookmark current address' }));
 
-    expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');
+    expect(screen.getByRole('heading', { name: 'Add bookmark' })).toBeInTheDocument();
+    expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true');
+    expect(document.documentElement).not.toHaveClass('nomad-toolbar-preserving-viewport');
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/page/index.mu`,
       '',
       false,
     ));
+    expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');
     expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
       .toHaveAttribute('aria-expanded', 'true');
     expect(screen.queryByRole('heading', { name: 'Add bookmark' })).not.toBeInTheDocument();

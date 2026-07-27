@@ -1016,31 +1016,31 @@
     );
   }
 
+  function preserveMobileToolbarForBookmarkChange(): (() => void) | undefined {
+    if (!mobileViewport || !directoryExpanded || !mobileToolbarStuck) return undefined;
+    beginMobileToolbarViewportPreservation();
+    let initialNotification = true;
+    const stopWatchingBookmarkChanges = nomadBookmarks.subscribe(() => {
+      if (initialNotification) {
+        initialNotification = false;
+        return;
+      }
+      // Store subscribers run before Svelte updates the destination list,
+      // so this captures the old canvas position even after a slow write.
+      beginMobileToolbarViewportPreservation();
+    });
+    return () => {
+      stopWatchingBookmarkChanges();
+      beginMobileToolbarViewportPreservation();
+    };
+  }
+
   async function toggleCurrentBookmark(): Promise<void> {
     const targetAddress = parsedAddress;
     const targetBookmark = currentBookmark;
     if (!targetAddress || bookmarkTogglePending) return;
     if (!targetBookmark && !$activeIdentity) return;
-    let stopWatchingBookmarkChanges: (() => void) | undefined;
-    if (mobileViewport && directoryExpanded && mobileToolbarStuck) {
-      beginMobileToolbarViewportPreservation();
-      let initialNotification = true;
-      stopWatchingBookmarkChanges = nomadBookmarks.subscribe(() => {
-        if (initialNotification) {
-          initialNotification = false;
-          return;
-        }
-        // Store subscribers run before Svelte updates the destination list,
-        // so this captures the old canvas position even after a slow write.
-        beginMobileToolbarViewportPreservation();
-      });
-    }
-    bookmarkTogglePending = true;
-    try {
-      if (targetBookmark) {
-        await reticulumRuntime.deleteNomadBookmark(targetBookmark.id);
-        return;
-      }
+    if (!targetBookmark) {
       const addressToBookmark = formatNomadAddress(
         targetAddress.destinationHash,
         targetAddress.path,
@@ -1049,14 +1049,21 @@
       const suggestedName = $knownDestinations.find((destination) => (
         destination.destinationHash === targetAddress.destinationHash
       ))?.displayName ?? '';
-      if (!await reticulumRuntime.addNomadBookmark(addressToBookmark, suggestedName, false)) {
-        toast.error('nomadnet.bookmark.saveError');
-      }
+      bookmarkEditor = {
+        address: addressToBookmark,
+        currentName: suggestedName,
+        currentIdentifyBeforeLoad: false,
+      };
+      return;
+    }
+    const finishPreservingToolbar = preserveMobileToolbarForBookmarkChange();
+    bookmarkTogglePending = true;
+    try {
+      await reticulumRuntime.deleteNomadBookmark(targetBookmark.id);
     } catch {
       toast.error('nomadnet.directory.error');
     } finally {
-      stopWatchingBookmarkChanges?.();
-      if (stopWatchingBookmarkChanges) beginMobileToolbarViewportPreservation();
+      finishPreservingToolbar?.();
       bookmarkTogglePending = false;
     }
   }
@@ -1084,14 +1091,19 @@
     identifyBeforeLoad: boolean,
   ): Promise<boolean> {
     if (!bookmarkEditor) return false;
-    return bookmarkEditor.bookmarkId
-      ? await reticulumRuntime.updateNomadBookmark(
+    const finishPreservingToolbar = preserveMobileToolbarForBookmarkChange();
+    try {
+      return bookmarkEditor.bookmarkId
+        ? await reticulumRuntime.updateNomadBookmark(
           bookmarkEditor.bookmarkId,
           address,
           name,
           identifyBeforeLoad,
         )
-      : await reticulumRuntime.addNomadBookmark(address, name, identifyBeforeLoad);
+        : await reticulumRuntime.addNomadBookmark(address, name, identifyBeforeLoad);
+    } finally {
+      finishPreservingToolbar?.();
+    }
   }
 
   async function removeBookmark(id: string): Promise<void> {
