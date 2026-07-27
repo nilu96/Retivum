@@ -65,6 +65,7 @@
   let pendingPageRequest = $state<NomadPageRequest>();
   let failedPageRequest = $state<NomadPageRequest>();
   let sharingIdentity = $state(false);
+  let identifiedDestinationKeys = $state<string[]>([]);
   let identityShareConfirmationOpen = $state(false);
   let pageError = $state<'load' | 'link'>();
   let pageErrorCode = $state<string>();
@@ -129,6 +130,10 @@
         && sameRequestData(item.requestData ?? {}, parsedAddress.requestData),
     )
     : undefined);
+  const currentDestinationIdentified = $derived(Boolean(
+    parsedAddress
+      && isDestinationIdentified(parsedAddress.destinationHash),
+  ));
   const normalizedQuery = $derived(query.trim().toLowerCase());
   const nomadDestinations = $derived(destinationsByFullName(
     $knownDestinations,
@@ -540,6 +545,46 @@
     openDirectoryDestination(target.destinationHash, target.path, target.requestData);
   }
 
+  function setNomadAddress(nextAddress: string): void {
+    address = nextAddress;
+  }
+
+  function identifiedDestinationKey(identityId: string, destinationHash: string): string {
+    return `${identityId}\u0000${destinationHash.toLowerCase()}`;
+  }
+
+  function isDestinationIdentified(destinationHash: string): boolean {
+    const identityId = $activeIdentity?.id;
+    return Boolean(
+      identityId
+      && identifiedDestinationKeys.includes(
+        identifiedDestinationKey(identityId, destinationHash),
+      ),
+    );
+  }
+
+  function rememberIdentifiedDestination(destinationHash: string): void {
+    const identityId = $activeIdentity?.id;
+    if (!identityId) return;
+    const key = identifiedDestinationKey(identityId, destinationHash);
+    if (!identifiedDestinationKeys.includes(key)) {
+      identifiedDestinationKeys = [...identifiedDestinationKeys, key];
+    }
+  }
+
+  function forgetIdentifiedDestination(destinationHash: string): void {
+    const identityId = $activeIdentity?.id;
+    if (!identityId) return;
+    const key = identifiedDestinationKey(identityId, destinationHash);
+    identifiedDestinationKeys = identifiedDestinationKeys.filter((item) => item !== key);
+  }
+
+  function handleAddressInput(event: Event): void {
+    if (event.currentTarget instanceof HTMLInputElement) {
+      setNomadAddress(event.currentTarget.value);
+    }
+  }
+
   async function copyDestinationHash(destinationHash: string): Promise<void> {
     closeDestinationActions();
     if (await copyText(destinationHash)) toast.success('common.copied');
@@ -570,7 +615,9 @@
     // Values read back from Svelte state can be proxies, which cannot be sent
     // through Worker.postMessage. Keep the runtime boundary cloneable.
     const plainRequestData = { ...requestData };
-    address = formatNomadAddress(destinationHash, requestPath, plainRequestData);
+    setNomadAddress(formatNomadAddress(destinationHash, requestPath, plainRequestData));
+    const identifyThisLoad = identifyBeforeLoad
+      || isDestinationIdentified(destinationHash);
     const previousPage = loadedPage;
     const sequence = ++navigationSequence;
     const request: NomadPageRequest = {
@@ -592,7 +639,7 @@
     try {
       const onUpdate = (update: NomadPageLoadUpdate) => handlePageLoadUpdate(sequence, update);
       const nextPage = freshLink
-        ? identifyBeforeLoad
+        ? identifyThisLoad
           ? await reticulumRuntime.requestNomadPage(
               destinationHash,
               requestPath,
@@ -608,7 +655,7 @@
               onUpdate,
               true,
             )
-        : identifyBeforeLoad
+        : identifyThisLoad
           ? await reticulumRuntime.requestNomadPage(
               destinationHash,
               requestPath,
@@ -645,8 +692,15 @@
         }].slice(-maximumNavigationHistoryEntries);
       }
       resetPageViewport();
+      if (identifyThisLoad && $activeIdentity) {
+        rememberIdentifiedDestination(nextPage.destinationHash);
+      }
       loadedPage = { ...nextPage, requestData: nextRequestData, identifyBeforeLoad };
-      address = formatNomadAddress(nextPage.destinationHash, nextPage.path, nextRequestData);
+      setNomadAddress(formatNomadAddress(
+        nextPage.destinationHash,
+        nextPage.path,
+        nextRequestData,
+      ));
       return true;
     } catch {
       if (sequence === navigationSequence) {
@@ -731,6 +785,7 @@
       identifyBeforeLoad: loadedPage.identifyBeforeLoad === true,
     } : undefined);
     if (!target) return;
+    forgetIdentifiedDestination(target.destinationHash);
     void openDestination(
       target.destinationHash,
       target.path,
@@ -746,10 +801,24 @@
     sharingIdentity = true;
     try {
       const identifiedPage = loadedPage;
-      const identityResult = reticulumRuntime.identifyNomadLink(identifiedPage.destinationHash)
+      let identified = await reticulumRuntime.identifyNomadLink(identifiedPage.destinationHash)
         .catch(() => false);
+      if (!identified) {
+        const established = await reticulumRuntime
+          .establishNomadLink(identifiedPage.destinationHash)
+          .catch(() => false);
+        if (established) {
+          identified = await reticulumRuntime.identifyNomadLink(identifiedPage.destinationHash)
+            .catch(() => false);
+        }
+      }
+      if (!identified) {
+        toast.error('nomadnet.page.identityShareError');
+        return;
+      }
+      rememberIdentifiedDestination(identifiedPage.destinationHash);
       await new Promise<void>((resolve) => setTimeout(resolve, identityReloadDelayMs));
-      const reloadResult = openDestination(
+      const reloaded = await openDestination(
         identifiedPage.destinationHash,
         identifiedPage.path,
         'replace',
@@ -757,11 +826,6 @@
         false,
         identifiedPage.identifyBeforeLoad === true,
       ).catch(() => false);
-      const [identified, reloaded] = await Promise.all([identityResult, reloadResult]);
-      if (!identified) {
-        toast.error('nomadnet.page.identityShareError');
-        return;
-      }
       if (!reloaded) toast.error(pageErrorCode === 'NOMAD_IDENTITY_SHARE_FAILED'
         ? 'nomadnet.page.identityShareError'
         : 'nomadnet.page.identitySharedReloadError');
@@ -777,6 +841,41 @@
     void shareIdentity();
   }
 
+  function reconcileRestoredPageIdentification(
+    page: LoadedNomadPage,
+    expectedNavigationSequence: number,
+  ): void {
+    const bookmark = bookmarkForPage(
+      page.destinationHash,
+      page.path,
+      page.requestData ?? {},
+    );
+    if (bookmark?.identifyBeforeLoad === true) {
+      rememberIdentifiedDestination(page.destinationHash);
+      return;
+    }
+    void reticulumRuntime.queryNomadLinkStatus(page.destinationHash)
+      .then((status) => {
+        if (
+          navigationSequence !== expectedNavigationSequence
+          || parseNomadAddress(address)?.destinationHash !== page.destinationHash
+        ) return;
+        if (status?.active && status.identified) {
+          rememberIdentifiedDestination(page.destinationHash);
+        } else {
+          forgetIdentifiedDestination(page.destinationHash);
+        }
+      })
+      .catch(() => {
+        if (
+          navigationSequence === expectedNavigationSequence
+          && parseNomadAddress(address)?.destinationHash === page.destinationHash
+        ) {
+          forgetIdentifiedDestination(page.destinationHash);
+        }
+      });
+  }
+
   function goBack(): void {
     if (cancelPendingPageLoad()) return;
     if (pageError === 'load' && failedPageRequest && loadedPage) {
@@ -784,15 +883,16 @@
       failedPageRequest = undefined;
       pageError = undefined;
       pageErrorCode = undefined;
-      address = formatNomadAddress(
+      setNomadAddress(formatNomadAddress(
         loadedPage.destinationHash,
         loadedPage.path,
         loadedPage.requestData ?? {},
-      );
+      ));
       return;
     }
     const previous = navigationHistory.at(-1);
     if (!previous) return;
+    const currentDestinationHash = loadedPage?.destinationHash;
     navigationSequence += 1;
     navigationHistory = navigationHistory.slice(0, -1);
     pendingPageRequest = undefined;
@@ -805,7 +905,14 @@
       ...previous,
       requestData: { ...(previous.requestData ?? {}) },
     };
-    address = formatNomadAddress(previous.destinationHash, previous.path, previous.requestData ?? {});
+    setNomadAddress(formatNomadAddress(
+      previous.destinationHash,
+      previous.path,
+      previous.requestData ?? {},
+    ));
+    if (previous.destinationHash !== currentDestinationHash) {
+      reconcileRestoredPageIdentification(previous, navigationSequence);
+    }
   }
 
   function cancelPendingPageLoad(): boolean {
@@ -818,11 +925,11 @@
     pageErrorCode = undefined;
     resetPageViewport();
     if (loadedPage) {
-      address = formatNomadAddress(
+      setNomadAddress(formatNomadAddress(
         loadedPage.destinationHash,
         loadedPage.path,
         loadedPage.requestData ?? {},
-      );
+      ));
     }
     return true;
   }
@@ -1015,10 +1122,15 @@
     {#if !mobileViewport}
       <div class="header-actions">
         <button
-          class="icon-button"
-          aria-label={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
-          title={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
-          disabled={!loadedPage || loadingPage || sharingIdentity}
+          class="icon-button nomad-identify-button"
+          class:identified={currentDestinationIdentified}
+          aria-label={$t(currentDestinationIdentified
+            ? 'nomadnet.page.identityShared'
+            : sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          title={$t(currentDestinationIdentified
+            ? 'nomadnet.page.identityShared'
+            : sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          disabled={!loadedPage || loadingPage || sharingIdentity || currentDestinationIdentified}
           onclick={() => { identityShareConfirmationOpen = true; }}
         ><Icon name="fingerprint" size={19} /></button>
         <button
@@ -1075,11 +1187,16 @@
           onclick={reloadPage}
         ><Icon name="sync" size={19} /></button>
         <button
-          class="icon-button"
+          class="icon-button nomad-identify-button"
+          class:identified={currentDestinationIdentified}
           type="button"
-          aria-label={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
-          title={$t(sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
-          disabled={!loadedPage || loadingPage || sharingIdentity}
+          aria-label={$t(currentDestinationIdentified
+            ? 'nomadnet.page.identityShared'
+            : sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          title={$t(currentDestinationIdentified
+            ? 'nomadnet.page.identityShared'
+            : sharingIdentity ? 'nomadnet.page.sharingIdentity' : 'nomadnet.page.shareIdentity')}
+          disabled={!loadedPage || loadingPage || sharingIdentity || currentDestinationIdentified}
           onclick={() => { identityShareConfirmationOpen = true; }}
         ><Icon name="fingerprint" size={19} /></button>
         <button
@@ -1146,7 +1263,13 @@
         <label>
           <span class="sr-only">{$t('nomadnet.address.label')}</span>
           <Icon name="nomadnet" size={19} />
-          <input bind:value={address} placeholder={$t('nomadnet.address.placeholder')} autocapitalize="none" spellcheck="false" />
+          <input
+            value={address}
+            placeholder={$t('nomadnet.address.placeholder')}
+            autocapitalize="none"
+            spellcheck="false"
+            oninput={handleAddressInput}
+          />
         </label>
         <button
           class="button primary nomad-open-button"

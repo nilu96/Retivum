@@ -572,7 +572,9 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .nomad-address label { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 45px; padding-inline: 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-subtle); background: var(--surface-1); }
 .nomad-address label:focus-within { border-color: var(--accent); }
 .nomad-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
-.nomad-bookmark-button.bookmarked { color: var(--accent-strong); }
+.nomad-bookmark-button.bookmarked,
+.nomad-identify-button.identified { color: var(--accent-strong); }
+.nomad-identify-button.identified:disabled { cursor: default; opacity: 1; }
 .nomad-canvas { position: relative; display: grid; min-height: 0; grid-column: 2; grid-row: 3; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .conversation-empty > .empty-state,
 .nomad-canvas > .empty-state { width: min(378px, 100%); }

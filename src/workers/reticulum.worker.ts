@@ -115,7 +115,18 @@ interface NomadLinkState {
   linkId: Uint8Array;
   established: boolean;
   everEstablished: boolean;
+  identified: boolean;
   lastUsedAt: number;
+}
+
+interface NomadLinkEstablishmentJob {
+  requestId: string;
+  destinationHash: string;
+  publicKey?: string;
+  startedAt: number;
+  pathTimer?: ReturnType<typeof setTimeout>;
+  deadlineTimer?: ReturnType<typeof setTimeout>;
+  deadlineAt?: number;
 }
 
 interface ProvisioningJob {
@@ -200,6 +211,7 @@ const drivers = new Map<string, InterfaceDriver>();
 const activeLinkIds = new Set<string>();
 const nomadPendingJobs = new Map<string, NomadPageJob[]>();
 const nomadRequests = new Map<string, NomadPageJob>();
+const nomadLinkEstablishmentJobs = new Map<string, NomadLinkEstablishmentJob[]>();
 const nomadLinksByDestination = new Map<string, NomadLinkState>();
 const nomadLinksById = new Map<string, NomadLinkState>();
 const provisioningPendingJobs = new Map<string, ProvisioningJob[]>();
@@ -385,6 +397,14 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
 
     if (command.type === 'requestNomadPage') {
       requestNomadPage(command);
+      return;
+    }
+    if (command.type === 'establishNomadLink') {
+      establishNomadLink(command);
+      return;
+    }
+    if (command.type === 'queryNomadLinkStatus') {
+      queryNomadLinkStatus(command);
       return;
     }
     if (command.type === 'identifyNomadLink') {
@@ -1823,7 +1843,9 @@ function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomad
   }
   try {
     const destinationBytes = hexToBytes(destinationHash);
-    if (job.publicKey && node.hasPath(destinationBytes)) beginNomadLink(job);
+    if (job.publicKey && node.hasPath(destinationBytes)) {
+      beginNomadLink(job.destinationHash, job.publicKey);
+    }
     else {
       emitNomadPageProgress(job, 'findingPath');
       armNomadPathDiscoveryTimeout(job);
@@ -1837,6 +1859,7 @@ function requestNomadPage(command: Extract<RuntimeCommand, { type: 'requestNomad
     }
   } catch {
     failNomadDestination(destinationHash, 'NOMAD_PATH_REQUEST_FAILED');
+    failNomadLinkEstablishmentDestination(destinationHash, 'NOMAD_PATH_REQUEST_FAILED');
   }
 }
 
@@ -1876,6 +1899,74 @@ function cancelNomadPage(destination: string, closeLink: boolean): void {
   });
 }
 
+function establishNomadLink(
+  command: Extract<RuntimeCommand, { type: 'establishNomadLink' }>,
+): void {
+  const destinationHash = normalizeDestinationHash(command.destinationHash);
+  if (!destinationHash || !node || !identity) {
+    emit({
+      type: 'nomadLinkResult',
+      requestId: command.requestId,
+      ok: false,
+      code: 'NOMAD_DESTINATION_UNKNOWN',
+    });
+    return;
+  }
+
+  sweepNomadLinks();
+  const activeLink = nomadLinksByDestination.get(destinationHash);
+  if (activeLink?.established) {
+    activeLink.lastUsedAt = Date.now();
+    emit({ type: 'nomadLinkResult', requestId: command.requestId, ok: true });
+    return;
+  }
+
+  const knownPublicKey = knownDestinationPublicKeys.get(destinationHash);
+  const job: NomadLinkEstablishmentJob = {
+    requestId: command.requestId,
+    destinationHash,
+    publicKey: knownPublicKey ? bytesToHex(knownPublicKey) : undefined,
+    startedAt: Date.now(),
+  };
+  let knownHops: number | undefined;
+  try {
+    const destinationBytes = hexToBytes(destinationHash);
+    if (node.hasPath(destinationBytes)) knownHops = node.hopsTo(destinationBytes);
+  } catch {
+    // Validation and path failures are reported below.
+  }
+  armNomadLinkEstablishmentDeadline(job, knownHops);
+  const pending = nomadLinkEstablishmentJobs.get(destinationHash) ?? [];
+  pending.push(job);
+  nomadLinkEstablishmentJobs.set(destinationHash, pending);
+
+  // A page request may already be establishing this destination's link. The
+  // link-established event resolves both kinds of waiter without sending an
+  // additional page request.
+  if (activeLink) return;
+  if (pending.length > 1) {
+    armNomadLinkEstablishmentPathTimeout(job);
+    return;
+  }
+
+  try {
+    const destinationBytes = hexToBytes(destinationHash);
+    if (job.publicKey && node.hasPath(destinationBytes)) {
+      beginNomadLink(destinationHash, job.publicKey);
+    } else {
+      armNomadLinkEstablishmentPathTimeout(job);
+      processOutput(node.requestPath(destinationBytes) as WasmOutput);
+      log('debug', 'wasm', 'RETICULUM_PATH_REQUESTED', {
+        destinationHash,
+        purpose: 'nomadLink',
+        reason: 'noCachedPath',
+      });
+    }
+  } catch {
+    failNomadLinkEstablishment(job, 'NOMAD_PATH_REQUEST_FAILED');
+  }
+}
+
 function identifyNomadLink(command: Extract<RuntimeCommand, { type: 'identifyNomadLink' }>): void {
   const destinationHash = normalizeDestinationHash(command.destinationHash);
   if (!destinationHash || !node || !identity) {
@@ -1889,6 +1980,7 @@ function identifyNomadLink(command: Extract<RuntimeCommand, { type: 'identifyNom
   }
   try {
     processOutput(node.identifyLink(link.linkId) as WasmOutput);
+    link.identified = true;
     link.lastUsedAt = Date.now();
     log('info', 'wasm', 'NOMAD_IDENTITY_SHARED', {
       destinationHash,
@@ -1908,19 +2000,38 @@ function identifyNomadLink(command: Extract<RuntimeCommand, { type: 'identifyNom
   }
 }
 
-function beginNomadLink(job: NomadPageJob): void {
-  if (!node || !job.publicKey || nomadLinksByDestination.has(job.destinationHash)) return;
-  for (const pending of nomadPendingJobs.get(job.destinationHash) ?? []) {
+function queryNomadLinkStatus(
+  command: Extract<RuntimeCommand, { type: 'queryNomadLinkStatus' }>,
+): void {
+  const destinationHash = normalizeDestinationHash(command.destinationHash);
+  const link = destinationHash
+    ? nomadLinksByDestination.get(destinationHash)
+    : undefined;
+  emit({
+    type: 'nomadLinkStatus',
+    requestId: command.requestId,
+    active: link?.established === true,
+    identified: link?.established === true && link.identified,
+  });
+}
+
+function beginNomadLink(destinationHash: string, publicKey: string): void {
+  if (!node || nomadLinksByDestination.has(destinationHash)) return;
+  for (const pending of nomadPendingJobs.get(destinationHash) ?? []) {
     clearNomadJobTimer(pending);
     emitNomadPageProgress(pending, 'establishingLink');
   }
+  for (const pending of nomadLinkEstablishmentJobs.get(destinationHash) ?? []) {
+    clearNomadLinkEstablishmentPathTimer(pending);
+  }
   try {
-    const result = connectReticulumDestination(job.destinationHash, job.publicKey);
+    const result = connectReticulumDestination(destinationHash, publicKey);
     const state: NomadLinkState = {
-      destinationHash: job.destinationHash,
+      destinationHash,
       linkId: new Uint8Array(result.linkId),
       established: false,
       everEstablished: false,
+      identified: false,
       lastUsedAt: Date.now(),
     };
     nomadLinksByDestination.set(state.destinationHash, state);
@@ -1931,7 +2042,8 @@ function beginNomadLink(job: NomadPageJob): void {
       linkId: bytesToHex(state.linkId),
     });
   } catch {
-    failNomadDestination(job.destinationHash, 'NOMAD_LINK_FAILED');
+    failNomadDestination(destinationHash, 'NOMAD_LINK_FAILED');
+    failNomadLinkEstablishmentDestination(destinationHash, 'NOMAD_LINK_FAILED');
   }
 }
 
@@ -1949,9 +2061,10 @@ function connectReticulumDestination(
 function sendNomadRequest(link: NomadLinkState, job: NomadPageJob): void {
   if (!node) return failNomadJob(job, 'NOMAD_RUNTIME_UNAVAILABLE');
   clearNomadJobTimer(job);
-  if (job.identifyBeforeLoad) {
+  if (job.identifyBeforeLoad && !link.identified) {
     try {
       processOutput(node.identifyLink(link.linkId) as WasmOutput);
+      link.identified = true;
       link.lastUsedAt = Date.now();
       log('info', 'wasm', 'NOMAD_BOOKMARK_IDENTITY_SHARED', {
         destinationHash: job.destinationHash,
@@ -1992,6 +2105,74 @@ function sendNomadRequest(link: NomadLinkState, job: NomadPageJob): void {
     });
   } catch {
     failNomadJob(job, 'NOMAD_REQUEST_FAILED');
+  }
+}
+
+function clearNomadLinkEstablishmentPathTimer(job: NomadLinkEstablishmentJob): void {
+  if (job.pathTimer === undefined) return;
+  clearTimeout(job.pathTimer);
+  job.pathTimer = undefined;
+}
+
+function clearNomadLinkEstablishmentDeadline(job: NomadLinkEstablishmentJob): void {
+  if (job.deadlineTimer === undefined) return;
+  clearTimeout(job.deadlineTimer);
+  job.deadlineTimer = undefined;
+}
+
+function clearNomadLinkEstablishmentTimers(job: NomadLinkEstablishmentJob): void {
+  clearNomadLinkEstablishmentPathTimer(job);
+  clearNomadLinkEstablishmentDeadline(job);
+}
+
+function armNomadLinkEstablishmentPathTimeout(job: NomadLinkEstablishmentJob): void {
+  clearNomadLinkEstablishmentPathTimer(job);
+  job.pathTimer = setTimeout(
+    () => failNomadLinkEstablishment(
+      job,
+      job.publicKey ? 'NOMAD_PATH_REQUEST_TIMEOUT' : 'NOMAD_DESTINATION_UNKNOWN',
+    ),
+    pathRequestTimeoutMs,
+  );
+}
+
+function armNomadLinkEstablishmentDeadline(
+  job: NomadLinkEstablishmentJob,
+  hops?: number,
+): void {
+  const deadlineAt = job.startedAt + nomadPageLoadDeadlineMs(hops);
+  if (job.deadlineAt !== undefined && job.deadlineAt >= deadlineAt) return;
+  clearNomadLinkEstablishmentDeadline(job);
+  job.deadlineAt = deadlineAt;
+  job.deadlineTimer = setTimeout(
+    () => failNomadLinkEstablishment(job, 'NOMAD_LINK_ESTABLISHMENT_FAILED'),
+    Math.max(0, deadlineAt - Date.now()),
+  );
+}
+
+function failNomadLinkEstablishment(job: NomadLinkEstablishmentJob, code: string): void {
+  clearNomadLinkEstablishmentTimers(job);
+  const pending = nomadLinkEstablishmentJobs.get(job.destinationHash) ?? [];
+  const remaining = pending.filter((item) => item !== job);
+  if (remaining.length) nomadLinkEstablishmentJobs.set(job.destinationHash, remaining);
+  else nomadLinkEstablishmentJobs.delete(job.destinationHash);
+  closeIdleNomadLink(job.destinationHash);
+  emit({ type: 'nomadLinkResult', requestId: job.requestId, ok: false, code });
+  log('warning', 'wasm', code, { destinationHash: job.destinationHash });
+}
+
+function failNomadLinkEstablishmentDestination(destinationHash: string, code: string): void {
+  const jobs = nomadLinkEstablishmentJobs.get(destinationHash) ?? [];
+  nomadLinkEstablishmentJobs.delete(destinationHash);
+  for (const job of jobs) failNomadLinkEstablishment(job, code);
+}
+
+function finishNomadLinkEstablishment(destinationHash: string): void {
+  const jobs = nomadLinkEstablishmentJobs.get(destinationHash) ?? [];
+  nomadLinkEstablishmentJobs.delete(destinationHash);
+  for (const job of jobs) {
+    clearNomadLinkEstablishmentTimers(job);
+    emit({ type: 'nomadLinkResult', requestId: job.requestId, ok: true });
   }
 }
 
@@ -2068,6 +2249,7 @@ function removeNomadJobFromQueues(job: NomadPageJob): void {
 
 function nomadDestinationHasJobs(destinationHash: string): boolean {
   if ((nomadPendingJobs.get(destinationHash)?.length ?? 0) > 0) return true;
+  if ((nomadLinkEstablishmentJobs.get(destinationHash)?.length ?? 0) > 0) return true;
   return Array.from(nomadRequests.values()).some((job) => job.destinationHash === destinationHash);
 }
 
@@ -2135,7 +2317,9 @@ function recoverNomadJob(
         reason,
         recoveryAttempt: job.recoveryAttempts,
       });
-    } else beginNomadLink(job);
+    } else if (job.publicKey) {
+      beginNomadLink(job.destinationHash, job.publicKey);
+    }
     log('warning', 'wasm', 'NOMAD_LINK_RECOVERY_STARTED', {
       destinationHash: job.destinationHash,
       path: job.path,
@@ -2166,13 +2350,19 @@ function clearNomadState(code: string): void {
   const jobs = new Set<NomadPageJob>();
   for (const pending of nomadPendingJobs.values()) pending.forEach((job) => jobs.add(job));
   for (const job of nomadRequests.values()) jobs.add(job);
+  const linkEstablishmentJobs = Array.from(nomadLinkEstablishmentJobs.values()).flat();
   nomadPendingJobs.clear();
   nomadRequests.clear();
+  nomadLinkEstablishmentJobs.clear();
   nomadLinksByDestination.clear();
   nomadLinksById.clear();
   for (const job of jobs) {
     clearNomadJobTimers(job);
     emit({ type: 'nomadPageFailed', requestId: job.requestId, code });
+  }
+  for (const job of linkEstablishmentJobs) {
+    clearNomadLinkEstablishmentTimers(job);
+    emit({ type: 'nomadLinkResult', requestId: job.requestId, ok: false, code });
   }
 }
 
@@ -2836,10 +3026,16 @@ function handlePropagationSyncComplete(event: Record<string, unknown>): void {
 function handleNomadPathFound(event: Record<string, unknown>): void {
   const destinationHash = eventBytes(event, 'destinationHash');
   if (!destinationHash) return;
-  const pending = nomadPendingJobs.get(bytesToHex(destinationHash));
+  const destinationHashHex = bytesToHex(destinationHash);
+  const pending = nomadPendingJobs.get(destinationHashHex);
+  const pendingLinkEstablishments = nomadLinkEstablishmentJobs.get(destinationHashHex);
   const hops = node?.hopsTo(destinationHash);
   for (const job of pending ?? []) armNomadPageDeadline(job, hops);
-  if (pending?.[0]?.publicKey) beginNomadLink(pending[0]);
+  for (const job of pendingLinkEstablishments ?? []) {
+    armNomadLinkEstablishmentDeadline(job, hops);
+  }
+  const publicKey = pending?.[0]?.publicKey ?? pendingLinkEstablishments?.[0]?.publicKey;
+  if (publicKey) beginNomadLink(destinationHashHex, publicKey);
 }
 
 function handleNomadLinkEstablished(event: Record<string, unknown>): void {
@@ -2849,6 +3045,7 @@ function handleNomadLinkEstablished(event: Record<string, unknown>): void {
   if (!link) return;
   link.established = true;
   link.everEstablished = true;
+  finishNomadLinkEstablishment(link.destinationHash);
   const jobs = nomadPendingJobs.get(link.destinationHash) ?? [];
   nomadPendingJobs.delete(link.destinationHash);
   for (const job of jobs) sendNomadRequest(link, job);
@@ -2869,6 +3066,10 @@ function handleNomadLinkRecovered(event: Record<string, unknown>): void {
   if (!link) return;
   link.established = true;
   link.everEstablished = true;
+  finishNomadLinkEstablishment(link.destinationHash);
+  const jobs = nomadPendingJobs.get(link.destinationHash) ?? [];
+  nomadPendingJobs.delete(link.destinationHash);
+  for (const job of jobs) sendNomadRequest(link, job);
 }
 
 function handleNomadLinkClosed(event: Record<string, unknown>): void {
@@ -2880,6 +3081,10 @@ function handleNomadLinkClosed(event: Record<string, unknown>): void {
   const canRecover = link.everEstablished;
   nomadLinksById.delete(linkHex);
   nomadLinksByDestination.delete(link.destinationHash);
+  failNomadLinkEstablishmentDestination(
+    link.destinationHash,
+    canRecover ? 'NOMAD_LINK_CLOSED' : 'NOMAD_LINK_ESTABLISHMENT_FAILED',
+  );
   const affectedJobs = new Set(nomadPendingJobs.get(link.destinationHash) ?? []);
   nomadPendingJobs.delete(link.destinationHash);
   for (const [requestId, job] of Array.from(nomadRequests.entries())) {
@@ -3265,9 +3470,13 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
       metadata: {},
     });
     const pending = nomadPendingJobs.get(destinationHashHex) ?? [];
-    if (publicKeyHex && pending.length) {
+    const pendingLinkEstablishments = nomadLinkEstablishmentJobs.get(destinationHashHex) ?? [];
+    if (publicKeyHex && (pending.length || pendingLinkEstablishments.length)) {
       for (const job of pending) job.publicKey = publicKeyHex;
-      if (node?.hasPath(destinationHash)) beginNomadLink(pending[0]);
+      for (const job of pendingLinkEstablishments) job.publicKey = publicKeyHex;
+      if (node?.hasPath(destinationHash)) {
+        beginNomadLink(destinationHashHex, publicKeyHex);
+      }
     }
     return;
   }

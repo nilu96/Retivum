@@ -470,6 +470,56 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(onUpdate).toHaveBeenCalledWith({ type: 'failed', code: 'NOMAD_DESTINATION_UNKNOWN' });
   });
 
+  it('establishes a NomadNet link without requesting a page', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '3'.repeat(32);
+
+    const pending = reticulumRuntime.establishNomadLink(destinationHash);
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'establishNomadLink',
+      requestId: command.requestId,
+      destinationHash,
+    });
+    expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'requestNomadPage',
+    }));
+
+    await internals.handleEvent({
+      type: 'nomadLinkResult',
+      requestId: command.requestId,
+      ok: true,
+    });
+    await expect(pending).resolves.toBe(true);
+  });
+
+  it('queries whether a NomadNet link is active and identified', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const destinationHash = '4'.repeat(32);
+
+    const pending = reticulumRuntime.queryNomadLinkStatus(destinationHash);
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'queryNomadLinkStatus',
+      requestId: command.requestId,
+      destinationHash,
+    });
+
+    await internals.handleEvent({
+      type: 'nomadLinkStatus',
+      requestId: command.requestId,
+      active: true,
+      identified: true,
+    });
+    await expect(pending).resolves.toEqual({ active: true, identified: true });
+  });
+
   it('leaves NomadNet identity lookup to the worker after the active identity changes', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();

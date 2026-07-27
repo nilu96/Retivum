@@ -67,6 +67,11 @@ export interface RuntimeStatusDetails {
   interfaces: InterfaceStatusDetails[];
 }
 
+export interface NomadLinkStatus {
+  active: boolean;
+  identified: boolean;
+}
+
 export interface RuntimeConfiguration {
   preferences: AppPreferences;
   interfaces: InterfaceConfig[];
@@ -182,6 +187,16 @@ export type RuntimeCommand =
       requestData: NomadRequestData;
       freshLink?: boolean;
       identifyBeforeLoad?: boolean;
+    }
+  | {
+      type: 'establishNomadLink';
+      requestId: string;
+      destinationHash: string;
+    }
+  | {
+      type: 'queryNomadLinkStatus';
+      requestId: string;
+      destinationHash: string;
     }
   | {
       type: 'identifyNomadLink';
@@ -332,6 +347,8 @@ export type RuntimeEvent =
       progress?: number;
       dataSize?: number;
     }
+  | { type: 'nomadLinkResult'; requestId: string; ok: boolean; code?: string }
+  | ({ type: 'nomadLinkStatus'; requestId: string } & NomadLinkStatus)
   | { type: 'nomadIdentityResult'; requestId: string; ok: boolean; code?: string }
   | { type: 'nomadPageFailed'; requestId: string; code: string }
   | {

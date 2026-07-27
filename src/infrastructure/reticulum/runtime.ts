@@ -39,7 +39,12 @@ import type {
   NomadRequestData,
 } from '../../domain/nomadnet';
 import type { ProvisioningBookmark, ProvisioningNode } from '../../domain/provisioning';
-import { formatNomadAddress, nomadRequestPath, parseNomadAddress } from '../../domain/nomadnet';
+import {
+  formatNomadAddress,
+  nomadPageLoadDeadlineMs,
+  nomadRequestPath,
+  parseNomadAddress,
+} from '../../domain/nomadnet';
 import {
   defaultAppPreferences,
   normalizeDestinationHash,
@@ -64,6 +69,7 @@ import type {
   LocalDestinationEntry,
   InterfaceRuntimeState,
   LxmfPropagationSyncResult,
+  NomadLinkStatus,
   PathTableEntry,
   ProbeResult,
   RuntimeCommand,
@@ -175,6 +181,11 @@ class ReticulumRuntimeController {
     resolve: (page: NomadPage | undefined) => void;
     onUpdate?: (update: NomadPageLoadUpdate) => void;
   }>();
+  private readonly nomadLinkWaiters = new Map<string, (ok: boolean) => void>();
+  private readonly nomadLinkStatusWaiters = new Map<
+    string,
+    (status: NomadLinkStatus | undefined) => void
+  >();
   private readonly nomadIdentityWaiters = new Map<string, (ok: boolean) => void>();
   private readonly provisioningWaiters = new Map<string, {
     resolve: (data: Uint8Array) => void;
@@ -908,6 +919,44 @@ class ReticulumRuntimeController {
     }
   }
 
+  async establishNomadLink(destinationHash: string): Promise<boolean> {
+    const normalizedDestination = normalizeDestinationHash(destinationHash);
+    if (!this.worker || !get(activeIdentity) || !normalizedDestination) return false;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        this.nomadLinkWaiters.delete(requestId);
+        resolve(false);
+      }, nomadPageLoadDeadlineMs(Number.MAX_SAFE_INTEGER) + 5_000);
+      this.nomadLinkWaiters.set(requestId, (ok) => {
+        window.clearTimeout(timeout);
+        resolve(ok);
+      });
+      this.post({ type: 'establishNomadLink', requestId, destinationHash: normalizedDestination });
+    });
+  }
+
+  async queryNomadLinkStatus(destinationHash: string): Promise<NomadLinkStatus | undefined> {
+    const normalizedDestination = normalizeDestinationHash(destinationHash);
+    if (!this.worker || !get(activeIdentity) || !normalizedDestination) return undefined;
+    const requestId = crypto.randomUUID();
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(() => {
+        this.nomadLinkStatusWaiters.delete(requestId);
+        resolve(undefined);
+      }, 5_000);
+      this.nomadLinkStatusWaiters.set(requestId, (status) => {
+        window.clearTimeout(timeout);
+        resolve(status);
+      });
+      this.post({
+        type: 'queryNomadLinkStatus',
+        requestId,
+        destinationHash: normalizedDestination,
+      });
+    });
+  }
+
   async identifyNomadLink(destinationHash: string): Promise<boolean> {
     const normalizedDestination = normalizeDestinationHash(destinationHash);
     if (!this.worker || !get(activeIdentity) || !normalizedDestination) return false;
@@ -1168,6 +1217,10 @@ class ReticulumRuntimeController {
     this.destinationDirectoryReconciled = false;
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
+    for (const resolve of this.nomadLinkWaiters.values()) resolve(false);
+    this.nomadLinkWaiters.clear();
+    for (const resolve of this.nomadLinkStatusWaiters.values()) resolve(undefined);
+    this.nomadLinkStatusWaiters.clear();
     for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
     this.provisioningWaiters.clear();
     for (const resolve of this.nomadIdentityWaiters.values()) resolve(false);
@@ -1346,6 +1399,24 @@ class ReticulumRuntimeController {
       waiter?.onUpdate?.({ type: 'failed', code: event.code });
       waiter?.resolve(undefined);
       this.nomadPageWaiters.delete(event.requestId);
+      return;
+    }
+    if (event.type === 'nomadLinkResult') {
+      appendLocalLog('debug', 'runtime', 'NOMAD_LINK_RESULT_RECEIVED', {
+        requestId: event.requestId,
+        ok: event.ok,
+      });
+      this.nomadLinkWaiters.get(event.requestId)?.(event.ok);
+      this.nomadLinkWaiters.delete(event.requestId);
+      if (!event.ok) appendLocalLog('warning', 'runtime', event.code ?? 'NOMAD_LINK_ESTABLISHMENT_FAILED');
+      return;
+    }
+    if (event.type === 'nomadLinkStatus') {
+      this.nomadLinkStatusWaiters.get(event.requestId)?.({
+        active: event.active,
+        identified: event.identified,
+      });
+      this.nomadLinkStatusWaiters.delete(event.requestId);
       return;
     }
     if (event.type === 'nomadIdentityResult') {

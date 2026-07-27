@@ -606,8 +606,14 @@ describe('NomadNetView', () => {
     expect(window.scrollTo).toHaveBeenCalledWith(0, 0);
   });
 
-  it('uses the exact bookmark identification policy when opening an announced page', async () => {
+  it('marks a successful identify-on-load bookmark navigation as identified', async () => {
     const destinationHash = '3'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
     setNomadDestinations([{
       id: destinationHash,
       destinationHash,
@@ -621,14 +627,29 @@ describe('NomadNetView', () => {
       path: '/page/index.mu',
       requestData: {},
       identifyBeforeLoad: true,
+      label: 'Identified bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
-    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Identified bookmark page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Identified hard reload',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      });
     render(NomadNetView);
 
-    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
-    await fireEvent.click(screen.getByRole('button', { name: /Identified node/ }));
+    await fireEvent.click(screen.getByRole('button', { name: /Identified bookmark/ }));
 
+    expect(await screen.findByText('Identified bookmark page')).toBeInTheDocument();
     expect(requestPage).toHaveBeenCalledWith(
       destinationHash,
       '/page/index.mu',
@@ -637,6 +658,26 @@ describe('NomadNetView', () => {
       false,
       true,
     );
+    const identifiedButton = screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    });
+    expect(identifiedButton).toBeDisabled();
+    expect(identifiedButton).toHaveClass('identified');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
+    expect(await screen.findByText('Identified hard reload')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      2,
+      destinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+      true,
+      true,
+    );
+    expect(screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    })).toBeDisabled();
   });
 
   it('keeps an announced destination active on its subpages while bookmarks remain path-specific', async () => {
@@ -1535,9 +1576,22 @@ describe('NomadNetView', () => {
 
   it('shares the active identity over the NomadNet link and reloads the page', async () => {
     const destinationHash = '7'.repeat(32);
+    const otherDestinationHash = '9'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
     setNomadDestinations([{
       id: destinationHash,
       destinationHash,
+      displayName: 'Identified node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }, {
+      id: otherDestinationHash,
+      destinationHash: otherDestinationHash,
+      displayName: 'Other node',
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
@@ -1554,8 +1608,24 @@ describe('NomadNetView', () => {
         requestData: {},
         content: '> Identified page',
         receivedAt: '2026-07-16T10:02:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/another.mu',
+        requestData: {},
+        content: '> Identified subpage',
+        receivedAt: '2026-07-16T10:03:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash: otherDestinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Other anonymous page',
+        receivedAt: '2026-07-16T10:04:00.000Z',
       });
     const identify = vi.spyOn(reticulumRuntime, 'identifyNomadLink').mockResolvedValue(true);
+    const queryLinkStatus = vi.spyOn(reticulumRuntime, 'queryNomadLinkStatus')
+      .mockResolvedValue({ active: true, identified: true });
     const cancelPage = vi.spyOn(reticulumRuntime, 'cancelNomadPage');
     render(NomadNetView);
 
@@ -1579,14 +1649,187 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Share identity' }));
     expect(identify).toHaveBeenCalledWith(destinationHash);
     expect(await screen.findByText('Identified page')).toBeInTheDocument();
+    const identifiedButton = screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    });
+    expect(identifiedButton).toBeDisabled();
+    expect(identifiedButton).toHaveClass('identified');
     expect(requestPage).toHaveBeenNthCalledWith(
       2,
       destinationHash,
       '/page/index.mu',
       {},
       expect.any(Function),
+      false,
+      true,
     );
     expect(cancelPage).not.toHaveBeenCalled();
+
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Destination and path' }), {
+      target: { value: `${destinationHash}:/page/another.mu` },
+    });
+    expect(screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    })).toBeDisabled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
+    expect(await screen.findByText('Identified subpage')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      3,
+      destinationHash,
+      '/page/another.mu',
+      {},
+      expect.any(Function),
+      false,
+      true,
+    );
+    expect(screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    })).toBeDisabled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
+    expect(screen.getByText('Identified page')).toBeInTheDocument();
+    expect(queryLinkStatus).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    })).toBeDisabled();
+
+    await fireEvent.click(screen.getByRole('button', { name: /Other node/ }));
+    expect(await screen.findByText('Other anonymous page')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      4,
+      otherDestinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+    );
+    expect(screen.queryByRole('button', {
+      name: 'Identity shared with this destination',
+    })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Share identity with this page' })).toBeEnabled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
+    expect(screen.getByText('Identified page')).toBeInTheDocument();
+    await waitFor(() => expect(queryLinkStatus).toHaveBeenCalledWith(destinationHash));
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    })).toBeDisabled());
+  });
+
+  it('uses the bookmark policy before link status when reconciling identification on Back', async () => {
+    const identifiedHash = '4'.repeat(32);
+    const otherHash = '5'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    setNomadDestinations([{
+      destinationHash: otherHash,
+      displayName: 'Other history node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    nomadBookmarks.set([{
+      id: 'identity:auto-history',
+      identityId: 'identity',
+      destinationHash: identifiedHash,
+      path: '/page/index.mu',
+      identifyBeforeLoad: true,
+      label: 'Auto-identify history page',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(
+      async (destinationHash) => ({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: destinationHash === identifiedHash
+          ? '> Auto-identified history page'
+          : '> Other history page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      }),
+    );
+    const queryLinkStatus = vi.spyOn(reticulumRuntime, 'queryNomadLinkStatus')
+      .mockResolvedValue({ active: false, identified: false });
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Auto-identify history page/ }));
+    expect(await screen.findByText('Auto-identified history page')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Other history node/ }));
+    expect(await screen.findByText('Other history page')).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
+    expect(screen.getByText('Auto-identified history page')).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Identity shared with this destination',
+    })).toBeDisabled();
+    expect(queryLinkStatus).not.toHaveBeenCalled();
+
+    await fireEvent.click(screen.getByRole('button', { name: /Other history node/ }));
+    expect(await screen.findByText('Other history page')).toBeInTheDocument();
+    nomadBookmarks.set([]);
+    await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
+
+    await waitFor(() => expect(queryLinkStatus).toHaveBeenCalledWith(identifiedHash));
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Share identity with this page',
+    })).toBeEnabled());
+  });
+
+  it('establishes and identifies a missing NomadNet link before reloading the page', async () => {
+    const destinationHash = '6'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    setNomadDestinations([{
+      id: destinationHash,
+      destinationHash,
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Anonymous page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Identified replacement link',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      });
+    const establish = vi.spyOn(reticulumRuntime, 'establishNomadLink').mockResolvedValue(true);
+    const identify = vi.spyOn(reticulumRuntime, 'identifyNomadLink')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(destinationHash) }));
+    expect(await screen.findByText('Anonymous page')).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Share identity with this page' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Share identity' }));
+
+    expect(establish).toHaveBeenCalledWith(destinationHash);
+    expect(identify).toHaveBeenNthCalledWith(1, destinationHash);
+    await waitFor(() => expect(identify).toHaveBeenNthCalledWith(2, destinationHash));
+    expect(await screen.findByText('Identified replacement link')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      2,
+      destinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+      false,
+      true,
+    );
   });
 
   it('restores cached history when navigating back and returns to the announced home page', async () => {

@@ -276,6 +276,7 @@
   "nomadnet.page.reload": "Reload page",
   "nomadnet.page.shareIdentity": "Share identity with this page",
   "nomadnet.page.sharingIdentity": "Sharing identity…",
+  "nomadnet.page.identityShared": "Identity shared with this destination",
   "nomadnet.page.identityShareDialog.title": "Share identity?",
   "nomadnet.page.identityShareDialog.description": "Are you sure you want to identify yourself to this NomadNetwork Node? The page will reload after your identity has been sent.",
   "nomadnet.page.identityShareDialog.confirm": "Share identity",
