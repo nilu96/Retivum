@@ -503,7 +503,7 @@ describe('NomadNetView', () => {
     expect(browser).not.toHaveClass('at-sticky-edge');
   });
 
-  it('turns the mobile Home action into Cancel while loading', async () => {
+  it('turns the mobile Back action into Cancel while loading', async () => {
     useMobileViewport();
     const destinationHash = '9'.repeat(32);
     vi.spyOn(reticulumRuntime, 'requestNomadPage').mockImplementation(() => new Promise(() => {}));
@@ -516,8 +516,11 @@ describe('NomadNetView', () => {
     });
     await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
 
-    expect(within(toolbar).queryByRole('button', { name: 'Open announced home page' })).not.toBeInTheDocument();
-    const cancel = within(toolbar).getByRole('button', { name: 'Cancel page loading' });
+    expect(within(toolbar).queryByRole('button', { name: 'Back one page' })).not.toBeInTheDocument();
+    const [cancel, home] = within(toolbar).getAllByRole('button');
+    expect(cancel).toHaveAccessibleName('Cancel page loading');
+    expect(home).toHaveAccessibleName('Open announced home page');
+    expect(home).toBeEnabled();
     expect(cancel).toBeEnabled();
     await fireEvent.click(cancel);
     expect(cancelPage).toHaveBeenCalledWith(destinationHash);
@@ -1533,7 +1536,7 @@ describe('NomadNetView', () => {
     finishDetails?.(undefined);
   });
 
-  it('shows a cancel action in the Home slot while loading and restores the cached page', async () => {
+  it('shows a cancel action in the Back slot while loading and restores the cached page', async () => {
     const destinationHash = '3'.repeat(32);
     setNomadDestinations([{
       id: destinationHash,
@@ -1560,6 +1563,8 @@ describe('NomadNetView', () => {
 
     await fireEvent.click(screen.getByRole('link', { name: 'Open slow page' }));
     expect(screen.getByText('Loading NomadNet page')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Back one page' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open announced home page' })).toBeEnabled();
     const cancelLoading = screen.getByRole('button', { name: 'Cancel page loading' });
     expect(cancelLoading).toBeEnabled();
 
@@ -1572,7 +1577,7 @@ describe('NomadNetView', () => {
     finishSlowPage?.(undefined);
   });
 
-  it('cancels an initial page load from the Home slot', async () => {
+  it('cancels an initial page load from the Back slot', async () => {
     const destinationHash = '5'.repeat(32);
     setNomadDestinations([{
       id: destinationHash,

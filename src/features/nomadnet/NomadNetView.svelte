@@ -1016,14 +1016,6 @@
     );
   }
 
-  function homeOrCancel(): void {
-    if (loadingPage) {
-      cancelPendingPageLoad();
-      return;
-    }
-    goHome();
-  }
-
   async function toggleCurrentBookmark(): Promise<void> {
     const targetAddress = parsedAddress;
     const targetBookmark = currentBookmark;
@@ -1164,21 +1156,22 @@
     {#if mobileViewport}
       <nav class="nomad-mobile-toolbar" aria-label={$t('nomadnet.page.actions.label')}>
         <button
-          class="icon-button nomad-back-button"
+          class="icon-button"
+          class:nomad-back-button={!loadingPage}
           type="button"
-          aria-label={$t('nomadnet.page.back')}
-          title={$t('nomadnet.page.back')}
-          disabled={!canGoBack}
+          aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.back')}
+          title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.back')}
+          disabled={!loadingPage && !canGoBack}
           onclick={goBack}
-        ><Icon name="arrow-left" size={19} /></button>
+        ><Icon name={loadingPage ? 'close' : 'arrow-left'} size={19} /></button>
         <button
           class="icon-button"
           type="button"
-          aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
-          title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
-          disabled={!loadingPage && !canGoHome}
-          onclick={homeOrCancel}
-        ><Icon name={loadingPage ? 'close' : 'home'} size={19} /></button>
+          aria-label={$t('nomadnet.page.home')}
+          title={$t('nomadnet.page.home')}
+          disabled={!canGoHome}
+          onclick={goHome}
+        ><Icon name="home" size={19} /></button>
         <button
           class="icon-button"
           type="button"
@@ -1246,19 +1239,19 @@
             <button
               class="icon-button"
               type="button"
-              aria-label={$t('nomadnet.page.back')}
-              title={$t('nomadnet.page.back')}
-              disabled={!canGoBack}
+              aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.back')}
+              title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.back')}
+              disabled={!loadingPage && !canGoBack}
               onclick={goBack}
-            ><Icon name="arrow-left" size={19} /></button>
+            ><Icon name={loadingPage ? 'close' : 'arrow-left'} size={19} /></button>
             <button
               class="icon-button"
               type="button"
-              aria-label={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
-              title={$t(loadingPage ? 'nomadnet.page.cancelLoading' : 'nomadnet.page.home')}
-              disabled={!loadingPage && !canGoHome}
-              onclick={homeOrCancel}
-            ><Icon name={loadingPage ? 'close' : 'home'} size={19} /></button>
+              aria-label={$t('nomadnet.page.home')}
+              title={$t('nomadnet.page.home')}
+              disabled={!canGoHome}
+              onclick={goHome}
+            ><Icon name="home" size={19} /></button>
           </div>
         {/if}
         <label>
