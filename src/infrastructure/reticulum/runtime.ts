@@ -91,6 +91,7 @@ import {
   blockedChatDestinations,
   chatContacts,
   chatMessages,
+  emitAutomaticPropagationSyncComplete,
   emitIncomingChatMessage,
   forgetUnreadChatMessages,
   markChatMessagesRead,
@@ -1640,6 +1641,10 @@ class ReticulumRuntimeController {
       const result = event.ok
         ? { received: event.received ?? 0, duplicates: event.duplicates ?? 0 }
         : undefined;
+      if (event.requestId.startsWith('automatic:')) {
+        if (result) emitAutomaticPropagationSyncComplete(result);
+        return;
+      }
       this.propagationSyncWaiters.get(event.requestId)?.(result);
       this.propagationSyncWaiters.delete(event.requestId);
       return;

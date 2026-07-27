@@ -20,6 +20,7 @@
     runtimeStatus,
   } from '../../infrastructure/reticulum/runtime';
   import {
+    onAutomaticPropagationSyncComplete,
     onIncomingChatMessage,
     unreadChatMessageCount,
   } from '../../infrastructure/reticulum/chat-state';
@@ -107,6 +108,19 @@
         dismissToastsByMessageKey('chat.notification.messageReceived');
         openChatConversationFromNotification(message.sourceHash);
       },
+    );
+  }));
+
+  onMount(() => onAutomaticPropagationSyncComplete((result) => {
+    const notificationMode = $appPreferences.chat.inAppNotificationMode;
+    if (notificationMode === 'never' || document.visibilityState !== 'visible') return;
+    const newMessages = Math.max(0, result.received - result.duplicates);
+    if (newMessages === 0) return;
+    toast.success(
+      newMessages === 1
+        ? 'chat.propagationSync.complete.one'
+        : 'chat.propagationSync.complete.many',
+      newMessages === 1 ? undefined : { count: newMessages },
     );
   }));
 

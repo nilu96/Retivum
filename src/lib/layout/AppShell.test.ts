@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { navigationLayer } from '../../app/router';
 import { defaultAppPreferences } from '../../domain/settings';
 import {
+  emitAutomaticPropagationSyncComplete,
   emitIncomingChatMessage,
   markChatMessagesRead,
   noteUnreadChatMessage,
@@ -393,6 +394,21 @@ describe('AppShell Chat unread indicator', () => {
     emitIncomingChatMessage(incomingMessage(destinationHash, 'direct', 'direct'));
     expect(get(toasts).at(-1)).toMatchObject({
       messageKey: 'chat.notification.messageReceived',
+    });
+  });
+
+  it('shows one aggregate toast only when an automatic propagation sync adds messages', () => {
+    render(AppShell, { current: 'tools', children: emptyChildren });
+
+    emitAutomaticPropagationSyncComplete({ received: 2, duplicates: 2 });
+    expect(get(toasts)).toEqual([]);
+
+    emitAutomaticPropagationSyncComplete({ received: 5, duplicates: 2 });
+    expect(get(toasts)).toHaveLength(1);
+    expect(get(toasts)[0]).toMatchObject({
+      kind: 'success',
+      messageKey: 'chat.propagationSync.complete.many',
+      parameters: { count: 3 },
     });
   });
 

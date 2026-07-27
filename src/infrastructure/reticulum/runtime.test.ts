@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   blockedChatDestinations,
   chatMessages,
+  onAutomaticPropagationSyncComplete,
   onIncomingChatMessage,
 } from './chat-state';
 import {
@@ -66,6 +67,32 @@ describe('ReticulumRuntimeController chat deletion', () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     internals.worker = undefined;
     internals.destinationDirectoryReconciled = false;
+  });
+
+  it('publishes successful automatic propagation sync results without publishing failures', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const results: Array<{ received: number; duplicates: number }> = [];
+    const unsubscribe = onAutomaticPropagationSyncComplete((result) => results.push(result));
+
+    try {
+      await internals.handleEvent({
+        type: 'lxmfPropagationSyncResult',
+        requestId: 'automatic:success',
+        ok: true,
+        received: 4,
+        duplicates: 1,
+      });
+      await internals.handleEvent({
+        type: 'lxmfPropagationSyncResult',
+        requestId: 'automatic:failure',
+        ok: false,
+        code: 'LXMF_PROPAGATION_SYNC_NO_PATH',
+      });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(results).toEqual([{ received: 4, duplicates: 1 }]);
   });
 
   it('replaces a Nomad bookmark identity when its address changes', async () => {

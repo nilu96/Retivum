@@ -1,5 +1,6 @@
 import { derived, writable } from 'svelte/store';
 import type { ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
+import type { LxmfPropagationSyncResult } from './protocol';
 
 // Keep the UI-facing directory state independent from the runtime controller.
 // This prevents Vite/Svelte hot replacement of runtime.ts from leaving a
@@ -22,6 +23,8 @@ export const unreadChatMessageCount = derived(
 
 type IncomingChatMessageListener = (message: ChatMessage) => void;
 const incomingChatMessageListeners = new Set<IncomingChatMessageListener>();
+type AutomaticPropagationSyncListener = (result: LxmfPropagationSyncResult) => void;
+const automaticPropagationSyncListeners = new Set<AutomaticPropagationSyncListener>();
 
 export function onIncomingChatMessage(listener: IncomingChatMessageListener): () => void {
   incomingChatMessageListeners.add(listener);
@@ -34,6 +37,23 @@ export function emitIncomingChatMessage(message: ChatMessage): void {
       listener(message);
     } catch {
       // Foreground notification listeners must not disrupt message handling.
+    }
+  }
+}
+
+export function onAutomaticPropagationSyncComplete(
+  listener: AutomaticPropagationSyncListener,
+): () => void {
+  automaticPropagationSyncListeners.add(listener);
+  return () => automaticPropagationSyncListeners.delete(listener);
+}
+
+export function emitAutomaticPropagationSyncComplete(result: LxmfPropagationSyncResult): void {
+  for (const listener of automaticPropagationSyncListeners) {
+    try {
+      listener(result);
+    } catch {
+      // Foreground notification listeners must not disrupt sync result handling.
     }
   }
 }
