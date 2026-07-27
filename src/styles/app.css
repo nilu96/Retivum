@@ -565,7 +565,7 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 
 .nomad-page { display: grid; max-width: 1320px; grid-template-columns: minmax(270px, 330px) minmax(0, 1fr); grid-template-rows: auto auto minmax(430px, 1fr); gap: 23px 14px; }
 .nomad-header, .nomad-address { grid-column: 1 / -1; }
-.nomad-mobile-browser, .nomad-browser-panel { display: contents; }
+.nomad-mobile-browser, .nomad-browser-panel, .nomad-browser-panel-content { display: contents; }
 .nomad-mobile-toolbar { display: none; }
 .nomad-address { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; }
 .nomad-browser-actions { display: flex; gap: 7px; }
@@ -1423,15 +1423,19 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .nomad-mobile-toolbar .nomad-panel-toggle svg { transition: transform .22s cubic-bezier(.22, .8, .3, 1); }
   .nomad-mobile-browser.expanded .nomad-panel-toggle svg { transform: rotate(180deg); }
   .nomad-browser-panel {
-    display: grid;
+    display: block;
     min-width: 0;
     min-height: 0;
     flex: 1 1 auto;
+    margin: 0 7px 7px;
+    overflow: hidden;
+  }
+  .nomad-browser-panel-content {
+    display: grid;
+    min-width: 0;
     grid-template-rows: auto auto;
     gap: 12px;
-    margin: 0 7px 7px;
     padding: 12px 5px 5px;
-    overflow: hidden;
   }
   .nomad-mobile-browser.expanded.stuck .nomad-browser-panel:not(.scrollable) { overflow: visible; }
   .nomad-mobile-browser.expanded.stuck .nomad-browser-panel.scrollable {
@@ -1446,11 +1450,20 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .nomad-address {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 45px;
+    align-items: start;
     gap: 8px;
     padding: 0;
     border: 0;
   }
-  .nomad-open-button { width: 45px; min-height: 45px; padding: 0; }
+  .nomad-address label,
+  .nomad-open-button {
+    height: 45px;
+    min-height: 45px;
+    max-height: 45px;
+    align-self: start;
+  }
+  .nomad-address input { min-height: 0; }
+  .nomad-open-button { width: 45px; padding: 0; }
   .nomad-open-button > span { display: none; }
   .nomad-directory {
     height: auto;

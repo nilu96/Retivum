@@ -1043,6 +1043,7 @@
       style:--nomad-panel-scroll-end-inset={`${mobilePanelScrollEndInset}px`}
       transition:slide={{ axis: 'y', duration: reducedMotion ? 0 : mobileToolbarTransitionDurationMs }}
     >
+      <div class="nomad-browser-panel-content">
       <form class="nomad-address" onsubmit={submitAddress}>
         {#if !mobileViewport}
           <div class="nomad-browser-actions">
@@ -1193,6 +1194,7 @@
         {/if}
       </div>
     </aside>
+    </div>
     </div>
     {/if}
   </div>
