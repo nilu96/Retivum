@@ -145,6 +145,7 @@ The repository owns the small Electron main/preload boundary. It loads the built
 - Production packages load assets through a registered secure local scheme (for example `app://`) with correct JavaScript/WASM MIME types and a stable origin. No localhost server is started in production.
 - While transport mode is enabled, the app applies `backgroundThrottling: false` through the platform's window-created hook and retains a hidden window. Closing the last visible window hides the app to the tray/menu instead of quitting; explicit Quit performs a final snapshot and clean shutdown. With transport disabled, default throttling remains in force and Close exits normally.
 - Deny unexpected navigation, new-window creation, permission requests, and downloads. Validated external links open through the narrow external-navigation adapter.
+- Permit sanitized clipboard writes only from the trusted top-level renderer so explicit user copy actions work. Clipboard reads, untrusted contents, and subframe clipboard requests remain denied.
 
 Packaging work must preserve these security and lifecycle settings. Any proposed desktop-platform replacement requires a new ADR and must update this architecture, source tree, CI commands, package/license inventories, and packaging tests rather than weakening the requirements.
 

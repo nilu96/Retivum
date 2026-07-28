@@ -1,32 +1,19 @@
 import { randomUUID } from 'node:crypto';
 import { systemPreferences } from 'electron';
+import {
+  permissionCheckAllowed,
+  permissionRequestDecision,
+  requestedMediaTypes,
+} from './permission-policy.mjs';
 
 const REQUEST_CHANNEL = 'retivum:device:selection-request';
 const RESPONSE_CHANNEL = 'retivum:device:selection-response';
 const PAIRING_REQUEST_CHANNEL = 'retivum:device:pairing-request';
 const PAIRING_RESPONSE_CHANNEL = 'retivum:device:pairing-response';
-const WEB_PERMISSIONS = new Set(['bluetooth', 'serial']);
 const PAIRING_KINDS = new Set(['confirm', 'confirmPin', 'providePin']);
 
 function isTrustedWebContents(window, webContents) {
   return webContents?.id === window.webContents.id;
-}
-
-function isMediaCheck(permission, details) {
-  return permission === 'media'
-    && details?.isMainFrame === true
-    && (details.mediaType === 'audio' || details.mediaType === 'video');
-}
-
-function requestedMediaTypes(permission, details) {
-  if (permission !== 'media'
-    || details?.isMainFrame !== true
-    || !Array.isArray(details.mediaTypes)
-    || details.mediaTypes.length === 0
-    || !details.mediaTypes.every((mediaType) => mediaType === 'audio' || mediaType === 'video')) {
-    return undefined;
-  }
-  return new Set(details.mediaTypes);
 }
 
 async function requestNativeMediaAccess(mediaTypes) {
@@ -40,16 +27,8 @@ async function requestNativeMediaAccess(mediaTypes) {
   return true;
 }
 
-function isMediaRequest(permission, details) {
-  return permission === 'media'
-    && details?.isMainFrame === true
-    && Array.isArray(details.mediaTypes)
-    && details.mediaTypes.length > 0
-    && details.mediaTypes.every((mediaType) => mediaType === 'audio' || mediaType === 'video');
-}
-
 /**
- * Installs the Electron-specific half of Web Bluetooth and Web Serial.
+ * Installs Electron-specific device selection and renderer permissions.
  * Device candidates are shown by the localized Svelte chooser through a
  * narrow IPC exchange; no generic ipcRenderer surface reaches the page.
  */
@@ -156,19 +135,23 @@ export function installDeviceAccess(window, ipcMain) {
   session.on('select-serial-port', selectSerial);
   session.setDevicePermissionHandler((details) => details.deviceType === 'serial' && details.origin.startsWith('file://'));
   session.setPermissionCheckHandler((webContents, permission, _origin, details) => (
-    isTrustedWebContents(window, webContents)
-      && (WEB_PERMISSIONS.has(permission) || isMediaCheck(permission, details))
+    permissionCheckAllowed(
+      isTrustedWebContents(window, webContents),
+      permission,
+      details,
+    )
   ));
   session.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    if (!isTrustedWebContents(window, webContents)) {
-      callback(false);
-      return;
-    }
-    if (WEB_PERMISSIONS.has(permission)) {
+    const decision = permissionRequestDecision(
+      isTrustedWebContents(window, webContents),
+      permission,
+      details,
+    );
+    if (decision === 'allow') {
       callback(true);
       return;
     }
-    if (!isMediaRequest(permission, details)) {
+    if (decision === 'deny') {
       callback(false);
       return;
     }
