@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { InterfaceConfig } from '../../domain/settings';
-import { resolveProbeRoute } from './path-route';
+import { resolvePathRoute, resolveProbeRoute } from './path-route';
 
 const destinationHash = '12'.repeat(16);
 const nextHopHash = '34'.repeat(16);
@@ -31,6 +31,23 @@ describe('resolveProbeRoute', () => {
       interfaceType: 'websocket',
     });
     expect(stableInterfaceId).toHaveBeenCalledWith(7);
+  });
+
+  it('retains path hops and the stable interface ID for message snapshots', () => {
+    expect(resolvePathRoute({
+      paths: [{
+        destinationHash: Uint8Array.from({ length: 16 }, () => 0x12),
+        hops: 3,
+        interfaceIndex: 7,
+        nextHop: Uint8Array.from({ length: 16 }, () => 0x34),
+      }],
+    }, destinationHash, [interfaceConfig], () => interfaceConfig.id)).toEqual({
+      hops: 3,
+      viaHash: nextHopHash,
+      interfaceId: interfaceConfig.id,
+      interfaceName: 'Community Hub',
+      interfaceType: 'websocket',
+    });
   });
 
   it('uses a directly connected destination as its own next hop', () => {

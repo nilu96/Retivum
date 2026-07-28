@@ -1,4 +1,5 @@
 import type { KnownDestinationRecord } from './known-destination';
+import type { InterfaceType } from './settings';
 
 export interface ChatContact {
   id: string;
@@ -19,6 +20,25 @@ export interface ChatBlockedDestination {
 export type ChatMessageDirection = 'incoming' | 'outgoing';
 export type ChatMessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'failed';
 export type ChatDeliveryRepresentation = 'opportunisticPacket' | 'directPacket' | 'directResource' | 'propagated';
+export type ChatMessageStampStatus =
+  | 'requiredAccepted'
+  | 'ticket'
+  | 'notRequired'
+  | 'notEvaluatedSourceUnknown'
+  | 'calculating'
+  | 'calculated';
+
+export interface ChatMessageStamp {
+  status: ChatMessageStampStatus;
+  cost?: number;
+}
+
+export interface ChatMessagePathSnapshot {
+  hops: number;
+  interfaceId?: string;
+  interfaceName?: string;
+  interfaceType?: InterfaceType;
+}
 
 export interface ChatMessageOrdering {
   /**
@@ -64,6 +84,7 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   method?: string;
   verification?: string;
+  stamp?: ChatMessageStamp;
   direction?: ChatMessageDirection;
   status?: ChatMessageStatus;
   attempts?: number;
@@ -74,6 +95,7 @@ export interface ChatMessage {
   propagationFallbackPending?: boolean;
   timestamp?: number;
   receivedAt: string;
+  path?: ChatMessagePathSnapshot;
   ordering?: ChatMessageOrdering;
 }
 

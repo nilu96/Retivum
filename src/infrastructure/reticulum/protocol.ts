@@ -3,7 +3,11 @@ import type { PersistedNetworkStateRecord } from '../../domain/network-state';
 import type { ReticulumLogEntry } from '../../domain/logging';
 import type { NomadPageLoadStage, NomadRequestData } from '../../domain/nomadnet';
 import type { AppPreferences, InterfaceConfig, InterfaceType, RNodeConnectionType } from '../../domain/settings';
-import type { ChatAttachment } from '../../domain/chat';
+import type {
+  ChatAttachment,
+  ChatMessageStamp,
+  ChatMessagePathSnapshot,
+} from '../../domain/chat';
 import type {
   KnownDestinationRecord,
   KnownFullDestinationName,
@@ -285,6 +289,9 @@ export type RuntimeEvent =
       content: string;
       attachments?: ChatAttachment[];
       method: string;
+      verification?: string;
+      stamp?: ChatMessageStamp;
+      path?: ChatMessagePathSnapshot;
       propagationFallbackPending: boolean;
       replacesMessageId?: string;
       timestamp: number;
@@ -311,6 +318,8 @@ export type RuntimeEvent =
       attempts: number;
       maxAttempts: number;
       progress: number;
+      stamp?: ChatMessageStamp;
+      path?: ChatMessagePathSnapshot;
     }
   | {
       type: 'chatInboundTransfer';
@@ -389,6 +398,8 @@ export type RuntimeEvent =
       attachments?: ChatAttachment[];
       method?: string;
       verification?: string;
+      stamp?: ChatMessageStamp;
+      path?: ChatMessagePathSnapshot;
       timestamp?: number;
       receivedAt: string;
     }

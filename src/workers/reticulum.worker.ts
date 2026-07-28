@@ -14,7 +14,15 @@ import {
   normalizeChatAttachments,
   safeAttachmentName,
 } from '../domain/chat-attachments';
-import type { ChatAttachment } from '../domain/chat';
+import type {
+  ChatAttachment,
+  ChatMessageStamp,
+  ChatMessagePathSnapshot,
+} from '../domain/chat';
+import {
+  inboundChatMessageStamp,
+  outboundChatMessageStamp,
+} from '../domain/chat-stamps';
 import type { ReticulumLogEntry, ReticulumLogLevel } from '../domain/logging';
 import { parseLxmaAddress } from '../domain/lxmf';
 import { normalizeInDestinationHashes } from '../infrastructure/reticulum/in-destination-hashes';
@@ -46,7 +54,7 @@ import type {
 import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
 import { isSuppressedAnnounce } from '../infrastructure/reticulum/announce-output';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
-import { resolveProbeRoute } from '../infrastructure/reticulum/path-route';
+import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
 import { requiresReticulumRuntimeRebuild } from '../infrastructure/reticulum/runtime-configuration';
 import { computeRNodeBitrate, InterfaceTelemetryTracker } from '../infrastructure/reticulum/interface-telemetry';
@@ -1037,6 +1045,13 @@ function emitLxmfOutboundProgress(): void {
   if (!node || !identity) return;
   const outbound = node.lxmfOutbound() as unknown;
   if (!Array.isArray(outbound)) return;
+  let networkSnapshot: unknown;
+  try {
+    networkSnapshot = node.exportNetworkPersistentState();
+  } catch {
+    // Delivery progress remains useful when route presentation is unavailable.
+    networkSnapshot = { paths: [] };
+  }
   const active = new Set<string>();
   for (const value of outbound) {
     if (!value || typeof value !== 'object') continue;
@@ -1048,11 +1063,24 @@ function emitLxmfOutboundProgress(): void {
     const attempts = eventNumber(summary, 'attempts');
     const maxAttempts = eventNumber(summary, 'maxAttempts');
     const progress = eventNumber(summary, 'progress');
+    const destinationHash = eventBytes(summary, 'destinationHash');
+    const hasStamp = eventBoolean(summary, 'hasStamp') === true;
     if (!messageIdBytes || !state || !method || !representation
       || attempts === undefined || maxAttempts === undefined || progress === undefined) continue;
     const messageId = bytesToHex(messageIdBytes);
+    const destinationHashHex = destinationHash?.byteLength === 16
+      ? bytesToHex(destinationHash)
+      : undefined;
+    const path = destinationHashHex
+      ? currentChatMessagePath(destinationHashHex, networkSnapshot)
+      : undefined;
+    const stamp = destinationHashHex
+      ? currentOutboundChatMessageStamp(destinationHashHex, hasStamp)
+      : undefined;
     active.add(messageId);
-    const signature = `${state}:${method}:${representation}:${attempts}:${maxAttempts}:${progress}`;
+    const signature = `${state}:${method}:${representation}:${attempts}:${maxAttempts}:${progress}`
+      + `:${path?.hops ?? ''}:${path?.interfaceId ?? ''}:${path?.interfaceName ?? ''}`
+      + `:${stamp?.status ?? ''}:${stamp?.cost ?? ''}`;
     if (lxmfOutboundStatusCache.get(messageId) === signature) continue;
     lxmfOutboundStatusCache.set(messageId, signature);
     emit({
@@ -1065,6 +1093,8 @@ function emitLxmfOutboundProgress(): void {
       attempts,
       maxAttempts,
       progress,
+      stamp,
+      path,
     });
   }
   for (const messageId of lxmfOutboundStatusCache.keys()) {
@@ -1226,6 +1256,7 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
     }
   }
 
+  const stamp = currentOutboundChatMessageStamp(destinationHash, false);
   emit({
     type: 'chatMessageQueued',
     requestId: command.requestId,
@@ -1237,6 +1268,9 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
     content,
     attachments,
     method: attempt.method,
+    verification: 'valid',
+    ...(stamp ? { stamp } : {}),
+    path: currentChatMessagePath(destinationHash),
     propagationFallbackPending: !isPropagationFallback && attempt.method !== 'propagated' && deliveryPlan.tryPropagation,
     replacesMessageId: command.replacesMessageId,
     timestamp: attempt.timestamp,
@@ -3667,6 +3701,12 @@ function handleReceivedLxmfMessage(event: Record<string, unknown>): void {
     attachments: eventChatAttachments(event),
     method: eventString(event, 'method'),
     verification: eventString(event, 'verification'),
+    stamp: inboundChatMessageStamp({
+      requiredCost: configuration?.preferences.lxmf.inboundStampCost ?? 0,
+      stampLength: eventBytes(event, 'stamp')?.byteLength,
+      verification: eventString(event, 'verification'),
+    }),
+    path: currentChatMessagePath(sourceHashHex),
     timestamp: eventNumber(event, 'timestamp'),
     receivedAt: new Date().toISOString(),
   });
@@ -3763,6 +3803,47 @@ function eventString(event: Record<string, unknown>, camelName: string): string 
 
 function stableInterfaceId(runtimeId: number | undefined): string | undefined {
   return Array.from(drivers.values()).find((driver) => driver.hasRuntimeId(runtimeId))?.stableId;
+}
+
+function currentChatMessagePath(
+  destinationHash: string,
+  networkSnapshot?: unknown,
+): ChatMessagePathSnapshot | undefined {
+  if (!node || !configuration) return undefined;
+  try {
+    const route = resolvePathRoute(
+      networkSnapshot ?? node.exportNetworkPersistentState(),
+      destinationHash,
+      configuration.interfaces,
+      stableInterfaceId,
+    );
+    if (route.hops === undefined) return undefined;
+    return {
+      hops: route.hops,
+      ...(route.interfaceId ? { interfaceId: route.interfaceId } : {}),
+      ...(route.interfaceName ? { interfaceName: route.interfaceName } : {}),
+      ...(route.interfaceType ? { interfaceType: route.interfaceType } : {}),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function currentOutboundChatMessageStamp(
+  destinationHash: string,
+  hasStamp: boolean,
+): ChatMessageStamp | undefined {
+  if (!node) return undefined;
+  try {
+    const destination = hexToBytes(destinationHash);
+    return outboundChatMessageStamp({
+      hasStamp,
+      hasTicket: node.hasLxmfOutboundTicket(destination),
+      targetCost: node.lxmfOutboundStampCost(destination),
+    });
+  } catch {
+    return undefined;
+  }
 }
 
 function eventBoolean(event: Record<string, unknown>, camelName: string): boolean | undefined {

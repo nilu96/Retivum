@@ -801,6 +801,51 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
+  it('persists the first available route snapshot with outbound progress', async () => {
+    const destinationHash = 'c'.repeat(32);
+    chatMessages.set([{
+      id: 'identity-1:path-progress',
+      identityId: 'identity-1',
+      messageId: 'path-progress',
+      sourceHash: 'e'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Capture route',
+      direction: 'outgoing',
+      status: 'queued',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const persist = vi.spyOn(internals.chatRepository, 'saveMessage').mockResolvedValue();
+    const path = {
+      hops: 3,
+      interfaceId: 'community-hub',
+      interfaceName: 'Community Hub',
+      interfaceType: 'websocket',
+    };
+
+    await internals.handleEvent({
+      type: 'chatMessageProgress',
+      identityId: 'identity-1',
+      messageId: 'path-progress',
+      state: 'sending',
+      method: 'direct',
+      representation: 'directPacket',
+      attempts: 1,
+      maxAttempts: 5,
+      progress: 0.5,
+      stamp: { status: 'calculated', cost: 12 },
+      path,
+    });
+
+    expect(get(chatMessages)[0]).toMatchObject({
+      attempts: 1,
+      stamp: { status: 'calculated', cost: 12 },
+      path,
+    });
+    expect(persist).toHaveBeenCalledWith(expect.objectContaining({ path }));
+  });
+
   it('persists a block and cancels pending outbound deliveries for that destination', async () => {
     const destinationHash = 'c'.repeat(32);
     chatMessages.set([{
@@ -895,7 +940,17 @@ describe('ReticulumRuntimeController chat deletion', () => {
       destinationHash: 'a'.repeat(32),
       title: '',
       content: 'New message',
+      method: 'direct',
+      verification: 'valid',
+      stamp: { status: 'requiredAccepted', cost: 12 },
+      timestamp: 1_753_525_200,
       receivedAt: '2026-07-26T10:01:00.000Z',
+      path: {
+        hops: 2,
+        interfaceId: 'rnode-home',
+        interfaceName: 'Home RNode',
+        interfaceType: 'rnode',
+      },
     };
 
     try {
@@ -907,6 +962,14 @@ describe('ReticulumRuntimeController chat deletion', () => {
         id: 'identity-1:new-inbound',
         sourceHash,
         direction: 'incoming',
+        method: 'direct',
+        verification: 'valid',
+        stamp: { status: 'requiredAccepted', cost: 12 },
+        path: expect.objectContaining({
+          hops: 2,
+          interfaceName: 'Home RNode',
+          interfaceType: 'rnode',
+        }),
       }));
     } finally {
       unsubscribe();

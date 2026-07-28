@@ -252,10 +252,11 @@ describe('LXMF delivery preferences', () => {
     }).chat.inAppNotificationMode).toBe('all');
   });
 
-  it('defaults inbound stamp enforcement to zero and accepts Python-compatible costs', () => {
-    expect(normalizeAppPreferences({ lxmf: {} }).lxmf.inboundStampCost).toBe(0);
+  it('defaults inbound stamp enforcement to eight and accepts Python-compatible costs', () => {
+    expect(normalizeAppPreferences({ lxmf: {} }).lxmf.inboundStampCost).toBe(8);
+    expect(normalizeAppPreferences({ lxmf: { inboundStampCost: 0 } }).lxmf.inboundStampCost).toBe(0);
     expect(normalizeAppPreferences({ lxmf: { inboundStampCost: 12 } }).lxmf.inboundStampCost).toBe(12);
-    expect(normalizeAppPreferences({ lxmf: { inboundStampCost: 255 } }).lxmf.inboundStampCost).toBe(0);
+    expect(normalizeAppPreferences({ lxmf: { inboundStampCost: 255 } }).lxmf.inboundStampCost).toBe(8);
   });
 
   it('defaults contact-only reception off and restores an enabled preference', () => {

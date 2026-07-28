@@ -136,6 +136,8 @@ export const rnodeBandwidths = [
   7_800, 10_400, 15_600, 20_800, 31_250, 41_700, 62_500, 125_000, 250_000, 500_000,
 ] as const;
 
+const DEFAULT_INBOUND_STAMP_COST = 8;
+
 export const defaultAppPreferences: AppPreferences = {
   schemaVersion: 9,
   transportEnabled: false,
@@ -151,7 +153,7 @@ export const defaultAppPreferences: AppPreferences = {
     defaultDeliveryMethod: 'direct',
     acceptMessagesFromContactsOnly: false,
     propagationEnabled: false,
-    inboundStampCost: 0,
+    inboundStampCost: DEFAULT_INBOUND_STAMP_COST,
     propagationSyncIntervalMinutes: 0,
     autoAnnounceIntervalMinutes: 0,
   },
@@ -272,7 +274,9 @@ export function normalizeMessageRetentionDays(value: unknown): MessageRetentionD
 }
 
 export function normalizeInboundStampCost(value: unknown): number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 255 ? value : 0;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value < 255
+    ? value
+    : DEFAULT_INBOUND_STAMP_COST;
 }
 
 export function normalizePropagationSyncInterval(value: unknown): PropagationSyncIntervalMinutes {

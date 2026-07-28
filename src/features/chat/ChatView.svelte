@@ -73,6 +73,7 @@
   import ChatDeleteConfirmation from './ChatDeleteConfirmation.svelte';
   import NewConversationEditor from './NewConversationEditor.svelte';
   import MessageAttachment from './MessageAttachment.svelte';
+  import MessageDetailsDialog from './MessageDetailsDialog.svelte';
   import { recordingPulseLevel } from './recording-level';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { liveActivity, toast } from '../../lib/notifications/toasts';
@@ -162,6 +163,7 @@
     guardOpeningRelease: boolean;
   } | undefined>();
   let messageActionPending = $state(false);
+  let messageDetails = $state<ChatMessage | undefined>();
   let chatActionPending = $state(false);
   let blockActionPending = $state(false);
   let deleteConfirmation = $state<
@@ -731,6 +733,11 @@
     messageActions = undefined;
     if (await copyText(messageText(message))) toast.success('common.copied');
     else toast.error('common.copyFailed');
+  }
+
+  function openMessageDetails(message: ChatMessage): void {
+    messageActions = undefined;
+    messageDetails = message;
   }
 
   function probeDestination(destinationHash: string, displayName: string): void {
@@ -1661,6 +1668,9 @@
     >
       <Icon name="copy" size={17} />{$t('chat.message.actions.copyText')}
     </button>
+    <button role="menuitem" onclick={() => openMessageDetails(messageActions!.message)}>
+      <Icon name="info" size={17} />{$t('chat.message.actions.details')}
+    </button>
     {#if chatMessageDirection(messageActions.message) === 'outgoing'
       && (chatMessageDisplayStatus(messageActions.message) === 'queued'
         || chatMessageDisplayStatus(messageActions.message) === 'sending')}
@@ -1767,6 +1777,13 @@
       : deleteConfirmation?.kind === 'conversation'
         ? deleteConversation(deleteConfirmation.destinationHash)
         : Promise.resolve()}
+  />
+{/if}
+
+{#if messageDetails}
+  <MessageDetailsDialog
+    message={messageDetails}
+    onclose={() => { messageDetails = undefined; }}
   />
 {/if}
 

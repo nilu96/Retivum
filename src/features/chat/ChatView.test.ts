@@ -1030,6 +1030,114 @@ describe('ChatView', () => {
     }
   });
 
+  it('opens persisted protocol and delivery details directly below the copy action', async () => {
+    const sourceHash = '7'.repeat(32);
+    const destinationHash = '8'.repeat(32);
+    const messageId = '9'.repeat(64);
+    chatMessages.set([{
+      id: `identity:${messageId}`,
+      identityId: 'identity',
+      messageId,
+      sourceHash,
+      destinationHash,
+      title: '',
+      content: 'Inspect this message',
+      method: 'direct',
+      verification: 'valid',
+      stamp: { status: 'requiredAccepted', cost: 12 },
+      direction: 'incoming',
+      status: 'delivered',
+      attempts: 2,
+      timestamp: 1_753_525_200,
+      receivedAt: '2025-07-27T10:01:00.000Z',
+      path: {
+        hops: 2,
+        interfaceId: 'rnode-home',
+        interfaceName: 'Home RNode',
+        interfaceType: 'rnode',
+      },
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Inspect this message/ }));
+    await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Inspect this message'), {
+      clientX: 100,
+      clientY: 100,
+    });
+    const actions = screen.getAllByRole('menuitem');
+    expect(actions[0]).toHaveAccessibleName('Copy message text');
+    expect(actions[1]).toHaveAccessibleName('Message details');
+    await fireEvent.click(actions[1]);
+
+    const dialog = screen.getByRole('dialog', { name: 'Message details' });
+    const details = within(dialog);
+    expect(details.getByText(messageId)).toBeInTheDocument();
+    expect(details.getByText(sourceHash)).toBeInTheDocument();
+    expect(details.getByText(destinationHash)).toBeInTheDocument();
+    expect(details.getByText('Direct')).toBeInTheDocument();
+    expect(details.getByText('Incoming')).toBeInTheDocument();
+    expect(details.getByText('2 hops')).toBeInTheDocument();
+    expect(details.getByText('Home RNode (RNode)')).toBeInTheDocument();
+    expect(details.getByText('Verified')).toBeInTheDocument();
+    expect(details.getByText('Required and accepted — cost 12')).toBeInTheDocument();
+    expect(details.getByText('2025-07-26T10:20:00.000Z')).toBeInTheDocument();
+    expect(details.getByText('2025-07-27T10:01:00.000Z')).toBeInTheDocument();
+    const detailLabels = Array.from(dialog.querySelectorAll('dt'), (item) => item.textContent);
+    expect(detailLabels.slice(-5)).toEqual([
+      'Path interface',
+      'Path hops',
+      'Delivery attempts',
+      'Signature',
+      'Delivery stamp',
+    ]);
+    expect(details.getByText('Path interface').parentElement).toHaveClass('message-details-wide');
+    expect(details.getByText('Path hops').parentElement).toHaveClass('message-details-pair');
+    expect(details.getByText('Delivery attempts').parentElement).toHaveClass('message-details-pair');
+    expect(details.getByText('Signature').parentElement).toHaveClass('message-details-pair');
+    expect(details.getByText('Delivery stamp').parentElement).toHaveClass('message-details-pair');
+    expect(screen.queryByRole('menu', { name: 'Message actions' })).not.toBeInTheDocument();
+
+    await fireEvent.click(details.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('dialog', { name: 'Message details' })).not.toBeInTheDocument();
+  });
+
+  it('shows outbound attempts without claiming to know the receiver timestamp', async () => {
+    const destinationHash = 'a'.repeat(32);
+    chatMessages.set([{
+      id: 'identity:outbound-details',
+      identityId: 'identity',
+      messageId: 'b'.repeat(64),
+      sourceHash: 'c'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Outbound details',
+      method: 'opportunistic',
+      verification: 'valid',
+      stamp: { status: 'calculated', cost: 12 },
+      direction: 'outgoing',
+      status: 'sent',
+      attempts: 2,
+      timestamp: 1_753_525_200,
+      receivedAt: '2025-07-26T10:20:00.000Z',
+    }]);
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Outbound details/ }));
+    await fireEvent.contextMenu(screen.getByLabelText('Open actions for message: Outbound details'), {
+      clientX: 100,
+      clientY: 100,
+    });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Message details' }));
+
+    const details = within(screen.getByRole('dialog', { name: 'Message details' }));
+    expect(details.getByText('Outgoing')).toBeInTheDocument();
+    expect(details.getByText('Opportunistic')).toBeInTheDocument();
+    expect(details.getByText('2 attempts')).toBeInTheDocument();
+    expect(details.getByText('Signed locally')).toBeInTheDocument();
+    expect(details.getByText('Not available to the sender')).toBeInTheDocument();
+    expect(details.getByText('Calculated — cost 12')).toBeInTheDocument();
+  });
+
   it('shows but disables copying for an attachment-only message', async () => {
     const destinationHash = '5'.repeat(32);
     chatMessages.set([{

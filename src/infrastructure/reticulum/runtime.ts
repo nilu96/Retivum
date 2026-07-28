@@ -1473,10 +1473,12 @@ class ReticulumRuntimeController {
         attachments: event.attachments,
         method: event.method,
         verification: event.verification,
+        stamp: event.stamp,
         direction: 'incoming',
         status: 'delivered',
         timestamp: event.timestamp,
         receivedAt: event.receivedAt,
+        path: event.path,
       };
       const isNewMessage = !get(chatMessages).some((item) => item.id === message.id);
       const orderedMessage = assignChatMessageOrdering(get(chatMessages), message);
@@ -1515,11 +1517,14 @@ class ReticulumRuntimeController {
         content: event.content,
         attachments: event.attachments,
         method: event.method,
+        verification: event.verification,
+        stamp: event.stamp,
         direction: 'outgoing',
         status: 'queued',
         propagationFallbackPending: event.propagationFallbackPending,
         timestamp: event.timestamp,
         receivedAt: event.queuedAt,
+        path: event.path,
       };
       const orderedMessage = assignChatMessageOrdering(get(chatMessages), message, {
         replacesMessageId: previousId,
@@ -1595,6 +1600,8 @@ class ReticulumRuntimeController {
         attempts: event.attempts,
         maxAttempts: event.maxAttempts,
         progress: event.progress,
+        stamp: event.stamp ?? existing.stamp,
+        path: existing.path ?? event.path,
         sentUnconfirmed,
         status,
       };

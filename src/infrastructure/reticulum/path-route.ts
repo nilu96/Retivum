@@ -3,12 +3,17 @@ import type { ProbeResult } from './protocol';
 
 export type ProbeRouteDetails = Pick<ProbeResult, 'viaHash' | 'interfaceName' | 'interfaceType'>;
 
-export function resolveProbeRoute(
+export interface PathRouteDetails extends ProbeRouteDetails {
+  hops?: number;
+  interfaceId?: string;
+}
+
+export function resolvePathRoute(
   snapshot: unknown,
   destinationHash: string,
   interfaces: readonly InterfaceConfig[],
   stableInterfaceId: (runtimeId: number | undefined) => string | undefined,
-): ProbeRouteDetails {
+): PathRouteDetails {
   if (!snapshot || typeof snapshot !== 'object') return {};
   const paths = (snapshot as Record<string, unknown>).paths;
   if (!Array.isArray(paths)) return {};
@@ -22,16 +27,38 @@ export function resolveProbeRoute(
 
   const record = path as Record<string, unknown>;
   const nextHop = fieldBytes(record, 'nextHop');
+  const hops = fieldNumber(record, 'hops');
   const runtimeId = fieldNumber(record, 'interfaceIndex');
   const interfaceId = stableInterfaceId(runtimeId);
   const interfaceConfig = interfaces.find((item) => item.id === interfaceId);
 
   return {
+    ...(hops !== undefined ? { hops } : {}),
     viaHash: nextHop?.byteLength === 16 ? bytesToHex(nextHop) : destinationHash,
+    ...(interfaceId ? { interfaceId } : {}),
     ...(interfaceConfig ? {
       interfaceName: interfaceConfig.name,
       interfaceType: interfaceConfig.type,
     } : {}),
+  };
+}
+
+export function resolveProbeRoute(
+  snapshot: unknown,
+  destinationHash: string,
+  interfaces: readonly InterfaceConfig[],
+  stableInterfaceId: (runtimeId: number | undefined) => string | undefined,
+): ProbeRouteDetails {
+  const { viaHash, interfaceName, interfaceType } = resolvePathRoute(
+    snapshot,
+    destinationHash,
+    interfaces,
+    stableInterfaceId,
+  );
+  return {
+    ...(viaHash ? { viaHash } : {}),
+    ...(interfaceName ? { interfaceName } : {}),
+    ...(interfaceType ? { interfaceType } : {}),
   };
 }
 

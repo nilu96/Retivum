@@ -37,7 +37,18 @@ describe('BrowserChatRepository', () => {
       destinationHash: 'd'.repeat(32),
       title: '',
       content: 'Stored once',
+      method: 'direct',
+      direction: 'incoming',
+      attempts: 1,
+      verification: 'valid',
+      stamp: { status: 'requiredAccepted', cost: 12 },
       receivedAt: '2026-07-16T10:01:00.000Z',
+      path: {
+        hops: 2,
+        interfaceId: 'rnode-home',
+        interfaceName: 'Home RNode',
+        interfaceType: 'rnode',
+      },
     });
     await repository.saveContact({
       id: `identity-1:${destinationHash}`,
@@ -53,6 +64,19 @@ describe('BrowserChatRepository', () => {
     expect(matching.contacts[0].name).toBe('Local Alice');
     expect(matching.messages).toHaveLength(1);
     expect(matching.messages[0].content).toBe('Stored once');
+    expect(matching.messages[0]).toMatchObject({
+      method: 'direct',
+      direction: 'incoming',
+      attempts: 1,
+      verification: 'valid',
+      stamp: { status: 'requiredAccepted', cost: 12 },
+      path: {
+        hops: 2,
+        interfaceId: 'rnode-home',
+        interfaceName: 'Home RNode',
+        interfaceType: 'rnode',
+      },
+    });
     expect(await repository.load('identity-2')).toEqual({
       contacts: [],
       messages: [],
