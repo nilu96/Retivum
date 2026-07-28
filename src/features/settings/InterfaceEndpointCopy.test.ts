@@ -36,10 +36,10 @@ describe('interface endpoint copy actions', () => {
     });
 
     const copy = screen.getByRole('button', { name: 'Copy endpoint address' });
-    expect(copy).toHaveTextContent('ws://localhost:8765/');
+    expect(copy).toHaveTextContent('ws://localhost:45236/');
     await fireEvent.click(copy);
 
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('ws://localhost:8765/'));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('ws://localhost:45236/'));
   });
 
   it('copies the TCP endpoint preview', async () => {

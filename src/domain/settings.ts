@@ -302,7 +302,7 @@ export function createWebSocketInterfaceDraft(id: string = crypto.randomUUID()):
     connection: {
       scheme: 'ws',
       host: 'localhost',
-      port: 8765,
+      port: 45236,
       path: '/',
     },
   };

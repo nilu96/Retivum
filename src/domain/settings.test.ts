@@ -57,7 +57,7 @@ describe('WebSocket interface configuration', () => {
   it('renders an IPv6 endpoint safely', () => {
     const draft = createWebSocketInterfaceDraft('interface-id');
     draft.connection.host = '::1';
-    expect(websocketUrl(draft)).toBe('ws://[::1]:8765/');
+    expect(websocketUrl(draft)).toBe('ws://[::1]:45236/');
   });
 });
 
