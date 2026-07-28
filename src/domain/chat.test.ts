@@ -10,6 +10,11 @@ import {
   upsertChatContact,
   upsertChatMessage,
 } from './chat';
+import {
+  assignChatMessageOrdering,
+  assignChatMessageOrderings,
+  compareChatMessageTimeline,
+} from './chat-ordering';
 
 function message(overrides: Partial<ChatMessage>): ChatMessage {
   return {
@@ -88,6 +93,30 @@ describe('chatConversationSummaries', () => {
     expect(summaries[0]).toMatchObject({ destinationHash, displayName: 'Local name' });
   });
 
+  it('uses local receipt order for the latest conversation message', () => {
+    const destinationHash = 'f'.repeat(32);
+    const messages = assignChatMessageOrderings([
+      message({
+        id: 'identity:sent-later',
+        messageId: 'sent-later',
+        sourceHash: destinationHash,
+        content: 'Received first',
+        timestamp: 300,
+        receivedAt: '2026-07-16T10:00:00.000Z',
+      }),
+      message({
+        id: 'identity:sent-earlier',
+        messageId: 'sent-earlier',
+        sourceHash: destinationHash,
+        content: 'Received second',
+        timestamp: 100,
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      }),
+    ]);
+
+    expect(chatConversationSummaries(messages, [])[0].latestMessage.content).toBe('Received second');
+  });
+
   it('uses propagation fallback only for a failed outgoing primary attempt that opted in', () => {
     const outbound = message({ direction: 'outgoing', status: 'sending', propagationFallbackPending: true });
     expect(shouldUsePropagationFallback(outbound, 'failed')).toBe(true);
@@ -144,5 +173,133 @@ describe('upsertChatContact', () => {
       alphaLaterAddress,
       beta,
     ]);
+  });
+});
+
+describe('chat message timeline ordering', () => {
+  const peerHash = 'a'.repeat(32);
+  const localHash = 'b'.repeat(32);
+
+  function incoming(
+    messageId: string,
+    timestamp: number,
+    receivedAt: string,
+  ): ChatMessage {
+    return message({
+      id: `identity:${messageId}`,
+      messageId,
+      sourceHash: peerHash,
+      destinationHash: localHash,
+      direction: 'incoming',
+      timestamp,
+      receivedAt,
+    });
+  }
+
+  function outgoing(
+    messageId: string,
+    timestamp: number,
+    receivedAt: string,
+  ): ChatMessage {
+    return message({
+      id: `identity:${messageId}`,
+      messageId,
+      sourceHash: localHash,
+      destinationHash: peerHash,
+      direction: 'outgoing',
+      timestamp,
+      receivedAt,
+    });
+  }
+
+  function ingest(items: ChatMessage[], candidate: ChatMessage): ChatMessage[] {
+    return [...items, assignChatMessageOrdering(items, candidate)];
+  }
+
+  it('sorts incoming messages by sender time inside their local receipt segment', () => {
+    let items: ChatMessage[] = [];
+    items = ingest(items, incoming('arrived-first', 200, '2026-07-16T10:00:00.000Z'));
+    items = ingest(items, incoming('arrived-second', 100, '2026-07-16T10:01:00.000Z'));
+
+    expect([...items].sort(compareChatMessageTimeline).map((item) => item.messageId)).toEqual([
+      'arrived-second',
+      'arrived-first',
+    ]);
+    expect(items.map((item) => item.ordering?.segment)).toEqual([0, 0]);
+  });
+
+  it('never moves a delayed incoming message across a local outgoing boundary', () => {
+    let items: ChatMessage[] = [];
+    items = ingest(items, incoming('before-reply', 200, '2026-07-16T10:00:00.000Z'));
+    items = ingest(items, outgoing('reply', 300, '2026-07-16T10:01:00.000Z'));
+    items = ingest(items, incoming('delayed', 100, '2026-07-16T10:02:00.000Z'));
+
+    expect([...items].sort(compareChatMessageTimeline).map((item) => item.messageId)).toEqual([
+      'before-reply',
+      'reply',
+      'delayed',
+    ]);
+    expect(items.map((item) => item.ordering)).toEqual([
+      { segment: 0, receivedSequence: 0 },
+      { segment: 1, receivedSequence: 1, boundaryReason: 'outgoing' },
+      { segment: 1, receivedSequence: 2 },
+    ]);
+  });
+
+  it('uses the local receive sequence when sender timestamps are equal', () => {
+    let items: ChatMessage[] = [];
+    items = ingest(items, incoming('first', 100, '2026-07-16T10:00:00.000Z'));
+    items = ingest(items, incoming('second', 100, '2026-07-16T10:01:00.000Z'));
+
+    expect([...items].sort(compareChatMessageTimeline).map((item) => item.messageId)).toEqual([
+      'first',
+      'second',
+    ]);
+  });
+
+  it('allows additional boundary rules without enabling one by default', () => {
+    const first = assignChatMessageOrdering([], incoming(
+      'first',
+      100,
+      '2026-07-16T10:00:00.000Z',
+    ));
+    const defaultOrdered = assignChatMessageOrdering([first], incoming(
+      'default',
+      200,
+      '2026-07-16T10:01:00.000Z',
+    ));
+    const policyOrdered = assignChatMessageOrdering([first], incoming(
+      'policy',
+      300,
+      '2026-07-16T10:02:00.000Z',
+    ), {
+      policy: {
+        additionalBoundaries: [() => ({ reason: 'test-boundary' })],
+      },
+    });
+
+    expect(defaultOrdered.ordering).toMatchObject({ segment: 0 });
+    expect(policyOrdered.ordering).toEqual({
+      segment: 1,
+      receivedSequence: 1,
+      boundaryReason: 'test-boundary',
+    });
+  });
+
+  it('assigns deterministic segments to legacy records from local receipt order', () => {
+    const normalized = assignChatMessageOrderings([
+      incoming('after-reply', 100, '2026-07-16T10:02:00.000Z'),
+      outgoing('reply', 300, '2026-07-16T10:01:00.000Z'),
+      incoming('before-reply', 200, '2026-07-16T10:00:00.000Z'),
+    ]);
+    const byId = new Map(normalized.map((item) => [item.messageId, item.ordering]));
+
+    expect(byId.get('before-reply')).toEqual({ segment: 0, receivedSequence: 0 });
+    expect(byId.get('reply')).toEqual({
+      segment: 1,
+      receivedSequence: 1,
+      boundaryReason: 'outgoing',
+    });
+    expect(byId.get('after-reply')).toEqual({ segment: 1, receivedSequence: 2 });
   });
 });

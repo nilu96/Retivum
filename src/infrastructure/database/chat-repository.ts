@@ -1,5 +1,10 @@
 import type { ChatBlockedDestination, ChatContact, ChatMessage } from '../../domain/chat';
-import { compareChatContacts, messageTime } from '../../domain/chat';
+import {
+  chatMessageActivityTime,
+  compareChatMessageActivity,
+  compareChatContacts,
+} from '../../domain/chat';
+import { assignChatMessageOrderings } from '../../domain/chat-ordering';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
 export interface ChatDirectory {
@@ -26,9 +31,9 @@ export class BrowserChatRepository {
         contacts: contacts
           .filter((item) => item.identityId === identityId)
           .sort(compareChatContacts),
-        messages: messages
-          .filter((item) => item.identityId === identityId)
-          .sort((left, right) => messageTime(right) - messageTime(left)),
+        messages: assignChatMessageOrderings(
+          messages.filter((item) => item.identityId === identityId),
+        ).sort((left, right) => compareChatMessageActivity(right, left)),
         blockedDestinations: blockedDestinations
           .filter((item) => item.identityId === identityId)
           .sort((left, right) => Date.parse(right.blockedAt) - Date.parse(left.blockedAt)),
@@ -80,7 +85,7 @@ export class BrowserChatRepository {
       const store = transaction.objectStore('chatMessages');
       const messages = await requestResult<ChatMessage[]>(store.getAll());
       const expiredIds = messages.filter((message) => {
-        const timestamp = messageTime(message);
+        const timestamp = chatMessageActivityTime(message);
         return message.identityId === identityId && Number.isFinite(timestamp) && timestamp < before;
       }).map((message) => message.id);
       for (const id of expiredIds) store.delete(id);

@@ -5,6 +5,7 @@
     navigationLayer,
     openChatConversation,
   } from '../../app/router';
+  import { compareChatMessageTimeline } from '../../domain/chat-ordering';
   import {
     chatConversationSummaries,
     chatMessageDisplayStatus,
@@ -246,7 +247,7 @@
   ));
   const selectedMessages = $derived($chatMessages
     .filter((message) => chatMessagePeerHash(message) === selectedDestination)
-    .sort((left, right) => messageTime(left) - messageTime(right)));
+    .sort(compareChatMessageTimeline));
   const selectedInboundTransfers = $derived($chatInboundTransfers.filter(
     (transfer) => transfer.destinationHash === selectedDestination,
   ));

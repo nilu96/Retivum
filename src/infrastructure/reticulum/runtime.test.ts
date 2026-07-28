@@ -980,6 +980,11 @@ describe('ReticulumRuntimeController chat deletion', () => {
       status: 'failed',
       timestamp: 1_752_660_000,
       receivedAt: '2026-07-16T10:00:00.000Z',
+      ordering: {
+        segment: 4,
+        receivedSequence: 9,
+        boundaryReason: 'outgoing',
+      },
     }]);
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();
@@ -1021,6 +1026,11 @@ describe('ReticulumRuntimeController chat deletion', () => {
         messageId: 'fresh-direct-message',
         method: 'direct',
         status: 'queued',
+        ordering: {
+          segment: 4,
+          receivedSequence: 9,
+          boundaryReason: 'outgoing',
+        },
       }),
     );
     expect(get(chatMessages)).toEqual([

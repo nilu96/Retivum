@@ -7,14 +7,15 @@ import type {
   ChatMessage,
 } from '../../domain/chat';
 import { normalizeChatAttachments } from '../../domain/chat-attachments';
+import { assignChatMessageOrdering } from '../../domain/chat-ordering';
 import {
+  chatMessageActivityTime,
   chatDeliveryRepresentation,
   chatMessageDisplayStatus,
   chatMessagePeerHash,
   chatMessageProgressStatus,
   chatMessageStatusForState,
   isUnconfirmedPacket,
-  messageTime,
   shouldUsePropagationFallback,
   upsertChatBlockedDestination,
   upsertChatContact,
@@ -1478,17 +1479,22 @@ class ReticulumRuntimeController {
         receivedAt: event.receivedAt,
       };
       const isNewMessage = !get(chatMessages).some((item) => item.id === message.id);
-      chatMessages.update((items) => upsertChatMessage(items, message));
+      const orderedMessage = assignChatMessageOrdering(get(chatMessages), message);
+      chatMessages.update((items) => upsertChatMessage(items, orderedMessage));
       if (isNewMessage) {
-        noteUnreadChatMessage(message.sourceHash, message.id);
-        emitIncomingChatMessage(message);
+        noteUnreadChatMessage(orderedMessage.sourceHash, orderedMessage.id);
+        emitIncomingChatMessage(orderedMessage);
       }
       try {
-        await this.chatRepository.saveMessage(message);
-        appendLocalLog('debug', 'persistence', 'CHAT_MESSAGE_PERSISTED', { messageId: message.messageId });
+        await this.chatRepository.saveMessage(orderedMessage);
+        appendLocalLog('debug', 'persistence', 'CHAT_MESSAGE_PERSISTED', {
+          messageId: orderedMessage.messageId,
+        });
       } catch {
         runtimeErrorCode.set('RUNTIME_CHAT_PERSIST_FAILED');
-        appendLocalLog('error', 'persistence', 'CHAT_MESSAGE_PERSIST_FAILED', { messageId: message.messageId });
+        appendLocalLog('error', 'persistence', 'CHAT_MESSAGE_PERSIST_FAILED', {
+          messageId: orderedMessage.messageId,
+        });
       }
       return;
     }
@@ -1515,16 +1521,21 @@ class ReticulumRuntimeController {
         timestamp: event.timestamp,
         receivedAt: event.queuedAt,
       };
+      const orderedMessage = assignChatMessageOrdering(get(chatMessages), message, {
+        replacesMessageId: previousId,
+      });
       chatMessages.update((items) => upsertChatMessage(
-        previousId && previousId !== message.id ? items.filter((item) => item.id !== previousId) : items,
-        message,
+        previousId && previousId !== orderedMessage.id
+          ? items.filter((item) => item.id !== previousId)
+          : items,
+        orderedMessage,
       ));
       try {
-        if (previousId) await this.chatRepository.replaceMessage(previousId, message);
-        else await this.chatRepository.saveMessage(message);
+        if (previousId) await this.chatRepository.replaceMessage(previousId, orderedMessage);
+        else await this.chatRepository.saveMessage(orderedMessage);
         appendLocalLog('debug', 'persistence', event.replacesMessageId
           ? 'CHAT_OUTBOUND_PROPAGATION_FALLBACK_PERSISTED'
-          : 'CHAT_OUTBOUND_PERSISTED', { messageId: message.messageId });
+          : 'CHAT_OUTBOUND_PERSISTED', { messageId: orderedMessage.messageId });
       } catch {
         runtimeErrorCode.set('RUNTIME_CHAT_PERSIST_FAILED');
       }
@@ -1834,8 +1845,8 @@ class ReticulumRuntimeController {
     const cutoff = Date.now() - retentionDays * 24 * 60 * 60 * 1_000;
     const expiredCurrentMessages = get(chatMessages).filter((message) => (
       message.identityId === identity.id
-      && Number.isFinite(messageTime(message))
-      && messageTime(message) < cutoff
+      && Number.isFinite(chatMessageActivityTime(message))
+      && chatMessageActivityTime(message) < cutoff
     ));
     const pendingMessages = expiredCurrentMessages.filter((message) => {
       const status = chatMessageDisplayStatus(message);

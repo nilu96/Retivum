@@ -88,6 +88,89 @@ describe('BrowserChatRepository', () => {
     ]);
   });
 
+  it('migrates legacy messages into stable receipt segments', async () => {
+    const peerHash = 'a'.repeat(32);
+    const localHash = 'b'.repeat(32);
+    const request = indexedDB.open('retivum', 13);
+    await new Promise<void>((resolve, reject) => {
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore('chatMessages', { keyPath: 'id' });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('chatMessages', 'readwrite');
+        const store = transaction.objectStore('chatMessages');
+        store.put({
+          id: 'identity-1:before-reply',
+          identityId: 'identity-1',
+          messageId: 'before-reply',
+          sourceHash: peerHash,
+          destinationHash: localHash,
+          title: '',
+          content: 'Before',
+          direction: 'incoming',
+          timestamp: 200,
+          receivedAt: '2026-07-16T10:00:00.000Z',
+        });
+        store.put({
+          id: 'identity-1:reply',
+          identityId: 'identity-1',
+          messageId: 'reply',
+          sourceHash: localHash,
+          destinationHash: peerHash,
+          title: '',
+          content: 'Reply',
+          direction: 'outgoing',
+          timestamp: 300,
+          receivedAt: '2026-07-16T10:01:00.000Z',
+        });
+        store.put({
+          id: 'identity-1:delayed',
+          identityId: 'identity-1',
+          messageId: 'delayed',
+          sourceHash: peerHash,
+          destinationHash: localHash,
+          title: '',
+          content: 'Delayed',
+          direction: 'incoming',
+          timestamp: 100,
+          receivedAt: '2026-07-16T10:02:00.000Z',
+        });
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+
+    const restored = await new BrowserChatRepository().load('identity-1');
+    const byId = new Map(restored.messages.map((message) => [message.messageId, message.ordering]));
+
+    expect(byId.get('before-reply')).toEqual({ segment: 0, receivedSequence: 0 });
+    expect(byId.get('reply')).toEqual({
+      segment: 1,
+      receivedSequence: 1,
+      boundaryReason: 'outgoing',
+    });
+    expect(byId.get('delayed')).toEqual({ segment: 1, receivedSequence: 2 });
+
+    const database = await openRetivumDatabase();
+    try {
+      const transaction = database.transaction('chatMessages', 'readonly');
+      const [persisted] = await Promise.all([
+        requestResult<Record<string, unknown>>(
+          transaction.objectStore('chatMessages').get('identity-1:delayed'),
+        ),
+        transactionDone(transaction),
+      ]);
+      expect(persisted.ordering).toEqual({ segment: 1, receivedSequence: 2 });
+    } finally {
+      database.close();
+    }
+  });
+
   it('migrates announce names into the global destination directory', async () => {
     const request = indexedDB.open('retivum', 10);
     await new Promise<void>((resolve, reject) => {

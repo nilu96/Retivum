@@ -20,6 +20,22 @@ export type ChatMessageDirection = 'incoming' | 'outgoing';
 export type ChatMessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'failed';
 export type ChatDeliveryRepresentation = 'opportunisticPacket' | 'directPacket' | 'directResource' | 'propagated';
 
+export interface ChatMessageOrdering {
+  /**
+   * Locally assigned conversation segment. Outgoing messages and optional
+   * policy rules start a new segment; remote timestamps never move a message
+   * across a segment boundary.
+   */
+  segment: number;
+  /**
+   * Monotonic, conversation-local ingestion sequence used as a stable
+   * fallback for missing or equal sender timestamps.
+   */
+  receivedSequence: number;
+  /** Records why this message started its segment. */
+  boundaryReason?: string;
+}
+
 export type ChatAttachmentKind = 'image' | 'audio' | 'file';
 
 export interface ChatAttachment {
@@ -58,6 +74,7 @@ export interface ChatMessage {
   propagationFallbackPending?: boolean;
   timestamp?: number;
   receivedAt: string;
+  ordering?: ChatMessageOrdering;
 }
 
 export function chatMessagePreview(message: ChatMessage): string {
@@ -95,10 +112,10 @@ export function chatConversationSummaries(
       continue;
     }
     current.messageCount += 1;
-    if (messageTime(message) > messageTime(current.latestMessage)) current.latestMessage = message;
+    if (compareChatMessageActivity(message, current.latestMessage) > 0) current.latestMessage = message;
   }
   return Array.from(conversations.values()).sort(
-    (left, right) => messageTime(right.latestMessage) - messageTime(left.latestMessage),
+    (left, right) => compareChatMessageActivity(right.latestMessage, left.latestMessage),
   );
 }
 
@@ -173,9 +190,45 @@ export function messageTime(message: ChatMessage): number {
   return Date.parse(message.receivedAt);
 }
 
+export function chatMessageActivityTime(message: ChatMessage): number {
+  const receivedAt = Date.parse(message.receivedAt);
+  return Number.isFinite(receivedAt) ? receivedAt : messageTime(message);
+}
+
+export function compareChatMessageActivity(left: ChatMessage, right: ChatMessage): number {
+  if (sameChatConversation(left, right)
+    && validChatMessageOrdering(left.ordering)
+    && validChatMessageOrdering(right.ordering)) {
+    return left.ordering.receivedSequence - right.ordering.receivedSequence
+      || left.id.localeCompare(right.id);
+  }
+  return finiteTime(chatMessageActivityTime(left)) - finiteTime(chatMessageActivityTime(right))
+    || finiteTime(messageTime(left)) - finiteTime(messageTime(right))
+    || left.id.localeCompare(right.id);
+}
+
 export function upsertChatMessage(items: ChatMessage[], message: ChatMessage): ChatMessage[] {
   return [message, ...items.filter((item) => item.id !== message.id)]
-    .sort((left, right) => messageTime(right) - messageTime(left));
+    .sort((left, right) => compareChatMessageActivity(right, left));
+}
+
+function validChatMessageOrdering(
+  value: ChatMessageOrdering | undefined,
+): value is ChatMessageOrdering {
+  return value !== undefined
+    && Number.isSafeInteger(value.segment)
+    && value.segment >= 0
+    && Number.isSafeInteger(value.receivedSequence)
+    && value.receivedSequence >= 0;
+}
+
+function sameChatConversation(left: ChatMessage, right: ChatMessage): boolean {
+  return left.identityId === right.identityId
+    && chatMessagePeerHash(left) === chatMessagePeerHash(right);
+}
+
+function finiteTime(value: number): number {
+  return Number.isFinite(value) ? value : 0;
 }
 
 export function compareChatContacts(left: ChatContact, right: ChatContact): number {

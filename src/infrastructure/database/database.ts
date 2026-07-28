@@ -1,7 +1,9 @@
 import type { KnownDestinationRecord } from '../../domain/known-destination';
+import type { ChatMessage } from '../../domain/chat';
+import { assignChatMessageOrderings } from '../../domain/chat-ordering';
 
 const databaseName = 'retivum';
-const databaseVersion = 13;
+const databaseVersion = 14;
 
 export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -47,8 +49,20 @@ export async function openRetivumDatabase(): Promise<IDBDatabase> {
     } else if (database.objectStoreNames.contains('propagationNodes')) {
       database.deleteObjectStore('propagationNodes');
     }
+    if (event.oldVersion > 0 && event.oldVersion < 14) migrateChatMessageOrdering(request);
   };
   return requestResult(request);
+}
+
+function migrateChatMessageOrdering(request: IDBOpenDBRequest): void {
+  const transaction = request.transaction;
+  if (!transaction) return;
+  const store = transaction.objectStore('chatMessages');
+  const messagesRequest = store.getAll();
+  messagesRequest.onsuccess = () => {
+    const messages = assignChatMessageOrderings(messagesRequest.result as ChatMessage[]);
+    for (const message of messages) store.put(message);
+  };
 }
 
 function migrateDestinationDirectories(
