@@ -1217,7 +1217,16 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .udp-endpoint-section > small { color: var(--text-subtle); font-size: .68rem; line-height: 1.4; }
 .udp-endpoint-grid { grid-template-columns: minmax(0, 1fr) 105px; }
 .udp-endpoint-grid .port-field { grid-column: auto; }
-.endpoint-preview { overflow: hidden; padding: 10px 12px; border-radius: 8px; color: var(--accent-strong); background: var(--accent-soft); font-family: "SFMono-Regular", Consolas, monospace; font-size: .72rem; text-overflow: ellipsis; white-space: nowrap; }
+.endpoint-preview { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 10px 12px; border: 0; border-radius: 8px; color: var(--accent-strong); background: var(--accent-soft); font-family: "SFMono-Regular", Consolas, monospace; font-size: .72rem; text-align: start; }
+.endpoint-preview svg { flex: none; }
+.endpoint-preview code { min-width: 0; overflow: hidden; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) and (pointer: fine) {
+  .endpoint-preview:hover { background: color-mix(in srgb, var(--accent-soft), var(--accent) 8%); }
+}
+@media (hover: none) and (pointer: coarse) {
+  .endpoint-preview { -webkit-tap-highlight-color: transparent; }
+  .endpoint-preview:active { background: color-mix(in srgb, var(--accent-soft), var(--accent) 8%); }
+}
 .interface-editor .toggle-row { min-height: 36px; }
 .interface-editor-final-settings { display: grid; width: 100%; gap: 2px; }
 .interface-advanced-settings { display: grid; width: 100%; gap: 10px; }

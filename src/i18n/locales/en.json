@@ -510,6 +510,7 @@
   "interface.editor.host.placeholder": "localhost",
   "interface.editor.port": "Port",
   "interface.editor.path": "Path",
+  "interface.editor.endpoint.copy": "Copy endpoint address",
   "interface.editor.enabled": "Enable after saving",
   "interface.editor.advanced.show": "Show advanced settings",
   "interface.editor.advanced.hide": "Hide advanced settings",

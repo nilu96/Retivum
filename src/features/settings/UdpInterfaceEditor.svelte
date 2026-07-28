@@ -10,6 +10,7 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import ModalDialog from '../../lib/components/ModalDialog.svelte';
+  import EndpointPreview from './EndpointPreview.svelte';
   import InterfaceAdvancedSettings from './InterfaceAdvancedSettings.svelte';
 
   let { config, oncancel, onsave }: {
@@ -86,7 +87,7 @@
         </div>
         <small>{$t('interface.editor.udp.forwardHelp')}</small>
       </div>
-      <div class="endpoint-preview">{udpAddress(draft)}</div>
+      <EndpointPreview address={udpAddress(draft)} />
       <div class="interface-editor-final-settings">
         <label class="toggle-row">
           <span><strong>{$t('interface.editor.enabled')}</strong></span>

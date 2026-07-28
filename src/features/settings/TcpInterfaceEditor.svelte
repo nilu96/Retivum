@@ -3,6 +3,7 @@
   import { t } from '../../i18n';
   import Icon from '../../lib/components/Icon.svelte';
   import ModalDialog from '../../lib/components/ModalDialog.svelte';
+  import EndpointPreview from './EndpointPreview.svelte';
   import InterfaceAdvancedSettings from './InterfaceAdvancedSettings.svelte';
 
   let { config, oncancel, onsave }: {
@@ -39,7 +40,7 @@
         <label class="field host-field"><span>{$t('interface.editor.host')}</span><input bind:value={draft.connection.host} autocapitalize="none" spellcheck="false" /></label>
         <label class="field port-field"><span>{$t('interface.editor.port')}</span><input type="number" min="1" max="65535" bind:value={draft.connection.port} /></label>
       </div>
-      <div class="endpoint-preview">{tcpAddress(draft)}</div>
+      <EndpointPreview address={tcpAddress(draft)} />
       <div class="interface-editor-final-settings">
         <label class="toggle-row"><span><strong>{$t('interface.editor.enabled')}</strong></span><input type="checkbox" role="switch" bind:checked={draft.enabled} /></label>
         <InterfaceAdvancedSettings
