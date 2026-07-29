@@ -3,7 +3,7 @@ import {
   knownDestinationDirectory,
   knownIdentityMetadata,
   normalizeKnownDestination,
-  reconcileKnownDestinations,
+  orphanedKnownDestinationHashes,
   upsertKnownDestination,
 } from './known-destination';
 
@@ -110,26 +110,16 @@ describe('known destination directory', () => {
     });
   });
 
-  it('reconciles once against the remote Leviculum inventory', () => {
+  it('finds enrichment records missing from the complete Leviculum identity inventory', () => {
     const retainedHash = 'd'.repeat(32);
     const removedHash = 'e'.repeat(32);
-    const discoveredHash = 'f'.repeat(32);
-    expect(reconcileKnownDestinations([
+    expect(orphanedKnownDestinationHashes([
       { destinationHash: retainedHash, displayName: 'Retained' },
       { destinationHash: removedHash },
     ], [
-      { destinationHash: retainedHash },
-      {
-        destinationHash: discoveredHash,
-        fullDestinationName: 'rnstransport.probe',
-      },
-    ])).toEqual([
-      { destinationHash: retainedHash, displayName: 'Retained' },
-      {
-        destinationHash: discoveredHash,
-        fullDestinationName: 'rnstransport.probe',
-      },
-    ]);
+      retainedHash.toUpperCase(),
+      'not-a-destination',
+    ])).toEqual([removedHash]);
   });
 
   it('derives shared names only from NomadNet destinations with matching public keys', () => {

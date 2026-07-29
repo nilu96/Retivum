@@ -366,7 +366,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
         log('info', 'persistence', 'IDENTITY_GENERATED');
       }
 
-      await rebuildRuntime();
+      await rebuildRuntime(false, command.startupId);
       return;
     }
 
@@ -637,7 +637,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
   }
 }
 
-async function rebuildRuntime(persistCurrent = false): Promise<void> {
+async function rebuildRuntime(persistCurrent = false, startupId?: string): Promise<void> {
   if (!identity || !privateKey || !configuration) return;
   if (persistCurrent && node) await persistSnapshot();
   cleanupRuntime();
@@ -645,9 +645,13 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
   let legacyPersistentState: unknown;
   let networkPersistentState: unknown;
   let identityPersistentState: unknown;
-  if (persistedNetworkState?.encryptedSnapshot) {
+  const encryptedNetworkSnapshot = persistedNetworkState?.encryptedSnapshot;
+  const hasPersistedNetworkSnapshot = encryptedNetworkSnapshot !== undefined;
+  let networkInventoryComplete = !hasPersistedNetworkSnapshot;
+  if (encryptedNetworkSnapshot) {
     try {
-      networkPersistentState = decodeSnapshot(await decrypt(persistedNetworkState.encryptedSnapshot));
+      networkPersistentState = decodeSnapshot(await decrypt(encryptedNetworkSnapshot));
+      networkInventoryComplete = true;
     } catch {
       emit({ type: 'runtimeError', code: 'RUNTIME_NETWORK_SNAPSHOT_RESTORE_FAILED' });
     }
@@ -655,9 +659,10 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
   if (identity.encryptedSnapshot) {
     try {
       const decoded = decodeSnapshot(await decrypt(identity.encryptedSnapshot));
-      if (networkPersistentState) identityPersistentState = decoded;
+      if (hasPersistedNetworkSnapshot && networkInventoryComplete) identityPersistentState = decoded;
       else legacyPersistentState = decoded;
     } catch {
+      if (!hasPersistedNetworkSnapshot) networkInventoryComplete = false;
       emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_RESTORE_FAILED' });
     }
   }
@@ -682,6 +687,8 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
     localLxmfDeliveryDestinationHash = bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash));
   }
   applyBlockedDestinationPolicy();
+
+  if (startupId && networkInventoryComplete) emitCompleteKnownIdentityInventory(startupId);
 
   for (const interfaceConfig of configuration.interfaces) {
     if (!interfaceConfig.enabled) {
@@ -738,6 +745,29 @@ function restoreKnownDestinationPublicKeys(state: unknown): void {
   }
 }
 
+function emitCompleteKnownIdentityInventory(startupId: string): void {
+  if (!node) return;
+  let snapshot: Record<string, unknown>;
+  try {
+    snapshot = node.exportNetworkPersistentState() as Record<string, unknown>;
+  } catch {
+    return;
+  }
+  const identities = snapshot.knownIdentities ?? snapshot.known_identities;
+  const destinationHashes = Array.from(new Set(arrayRecords(identities).flatMap((entry) => {
+    const destinationHash = eventBytes(entry, 'destinationHash');
+    const publicKey = eventBytes(entry, 'publicKey');
+    return destinationHash?.byteLength === 16 && publicKey?.byteLength === 64
+      ? [bytesToHex(destinationHash)]
+      : [];
+  }))).sort();
+  emit({
+    type: 'knownIdentityInventoryReady',
+    startupId,
+    destinationHashes,
+  });
+}
+
 function emitKnownDestinationSnapshot(): void {
   let snapshot: Record<string, unknown> | undefined;
   let inDestinationHashes: string[] = [];
@@ -753,13 +783,12 @@ function emitKnownDestinationSnapshot(): void {
       // A malformed runtime result must not prevent remote destination updates.
     }
   }
-  emitPathManagementSnapshot(snapshot, inDestinationHashes, true);
+  emitPathManagementSnapshot(snapshot, inDestinationHashes);
 }
 
 function emitPathManagementSnapshot(
   snapshot: Record<string, unknown> | undefined,
   inDestinationHashes: string[],
-  reconcileDirectory = false,
 ): void {
   const persistentState = snapshot ?? {};
   const lastAnnouncedAtByHash = new Map<string, string>();
@@ -872,7 +901,6 @@ function emitPathManagementSnapshot(
     paths,
     remoteDestinations,
     localDestinations,
-    ...(reconcileDirectory ? { reconcileDirectory: true } : {}),
   });
 }
 

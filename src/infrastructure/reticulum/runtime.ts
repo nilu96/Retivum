@@ -28,7 +28,7 @@ import type {
 } from '../../domain/identity';
 import { identitySummary, upsertIdentitySummary as upsertSummaryInList } from '../../domain/identity';
 import {
-  reconcileKnownDestinations,
+  orphanedKnownDestinationHashes,
   upsertKnownDestination,
   type KnownDestinationRecord,
 } from '../../domain/known-destination';
@@ -173,7 +173,8 @@ class ReticulumRuntimeController {
   private readonly knownDestinationRepository = new BrowserKnownDestinationRepository();
   private readonly interfaceAnnounceHistoryRepository = new BrowserInterfaceAnnounceHistoryRepository();
   private interfaceAnnounceHistoryPersistenceQueue = Promise.resolve();
-  private destinationDirectoryReconciled = false;
+  private knownDestinationPersistenceQueue = Promise.resolve();
+  private expectedKnownIdentityInventoryStartupId?: string;
   private readonly platformInterfaceHost = new PlatformInterfaceHost(
     (command) => this.post(command),
     (code, details) => appendLocalLog('debug', 'runtime', code, details),
@@ -243,7 +244,7 @@ class ReticulumRuntimeController {
         this.settingsRepository.load(),
         this.networkStateRepository.load(),
         this.provisioningRepository.loadBookmarks(),
-        this.knownDestinationRepository.loadAll(),
+        this.enqueueKnownDestinationPersistence(() => this.knownDestinationRepository.loadAll()),
       ]);
       identities.set(storedIdentities.map(identitySummary));
       appPreferences.set(structuredClone(settings.preferences));
@@ -251,11 +252,13 @@ class ReticulumRuntimeController {
       this.scheduleMessageRetention();
       provisioningBookmarks.set(storedProvisioningBookmarks);
       knownDestinations.set(storedKnownDestinations);
-      this.destinationDirectoryReconciled = false;
+      const startupId = crypto.randomUUID();
+      this.expectedKnownIdentityInventoryStartupId = startupId;
       const worker = new Worker(new URL('../../workers/reticulum.worker.ts', import.meta.url), { type: 'module' });
       this.worker = worker;
       worker.onmessage = (message: MessageEvent<RuntimeEvent>) => void this.handleEvent(message.data);
       worker.onerror = () => {
+        this.expectedKnownIdentityInventoryStartupId = undefined;
         runtimeErrorCode.set('RUNTIME_WORKER_FAILED');
         runtimeStatus.set('error');
         propagationSyncActive.set(false);
@@ -295,6 +298,7 @@ class ReticulumRuntimeController {
 
       this.post({
         type: 'initialize',
+        startupId,
         wrappingKey,
         identity,
         networkState,
@@ -312,6 +316,7 @@ class ReticulumRuntimeController {
         },
       });
     } catch {
+      this.expectedKnownIdentityInventoryStartupId = undefined;
       if (this.messageRetentionTimer !== undefined) {
         window.clearInterval(this.messageRetentionTimer);
         this.messageRetentionTimer = undefined;
@@ -502,7 +507,9 @@ class ReticulumRuntimeController {
       destinationHash,
     );
     if (!forgotten) return false;
-    await this.knownDestinationRepository.delete(destinationHash);
+    await this.enqueueKnownDestinationPersistence(
+      () => this.knownDestinationRepository.delete(destinationHash),
+    );
     knownDestinations.update((records) => (
       records.filter((record) => record.destinationHash !== destinationHash)
     ));
@@ -512,7 +519,9 @@ class ReticulumRuntimeController {
   async clearKnownDestinations(): Promise<boolean> {
     const cleared = await this.performPathManagementOperation('clearKnownDestinations');
     if (!cleared) return false;
-    await this.knownDestinationRepository.clear();
+    await this.enqueueKnownDestinationPersistence(
+      () => this.knownDestinationRepository.clear(),
+    );
     knownDestinations.set([]);
     return true;
   }
@@ -1185,7 +1194,6 @@ class ReticulumRuntimeController {
       this.interfaceAnnounceHistoryRepository.load(identityId),
     ]);
     const requestId = crypto.randomUUID();
-    this.destinationDirectoryReconciled = false;
     return this.waitForIdentityOperation(requestId, {
       type: 'activateIdentity',
       requestId,
@@ -1249,7 +1257,7 @@ class ReticulumRuntimeController {
     pathTableEntries.set([]);
     remoteDestinationInventory.set([]);
     localDestinationInventory.set([]);
-    this.destinationDirectoryReconciled = false;
+    this.expectedKnownIdentityInventoryStartupId = undefined;
     for (const waiter of this.nomadPageWaiters.values()) waiter.resolve(undefined);
     this.nomadPageWaiters.clear();
     for (const resolve of this.nomadLinkWaiters.values()) resolve(false);
@@ -1349,18 +1357,22 @@ class ReticulumRuntimeController {
       pathTableEntries.set(event.paths);
       remoteDestinationInventory.set(event.remoteDestinations);
       localDestinationInventory.set(event.localDestinations);
-      if (event.reconcileDirectory === true && !this.destinationDirectoryReconciled) {
-        this.destinationDirectoryReconciled = true;
-        const reconciled = reconcileKnownDestinations(
-          get(knownDestinations),
-          event.remoteDestinations,
+      return;
+    }
+    if (event.type === 'knownIdentityInventoryReady') {
+      if (event.startupId !== this.expectedKnownIdentityInventoryStartupId) return;
+      this.expectedKnownIdentityInventoryStartupId = undefined;
+      const current = get(knownDestinations);
+      const orphanedHashes = orphanedKnownDestinationHashes(current, event.destinationHashes);
+      if (orphanedHashes.length === 0) return;
+      const orphaned = new Set(orphanedHashes);
+      knownDestinations.set(current.filter((record) => !orphaned.has(record.destinationHash)));
+      try {
+        await this.enqueueKnownDestinationPersistence(
+          () => this.knownDestinationRepository.deleteMany(orphanedHashes),
         );
-        knownDestinations.set(reconciled);
-        try {
-          await this.knownDestinationRepository.replaceAll(reconciled);
-        } catch {
-          runtimeErrorCode.set('RUNTIME_KNOWN_DESTINATION_PERSIST_FAILED');
-        }
+      } catch {
+        runtimeErrorCode.set('RUNTIME_KNOWN_DESTINATION_PERSIST_FAILED');
       }
       return;
     }
@@ -1394,7 +1406,9 @@ class ReticulumRuntimeController {
       knownDestinations.set(updated);
       if (!record) return;
       try {
-        await this.knownDestinationRepository.save(record);
+        await this.enqueueKnownDestinationPersistence(
+          () => this.knownDestinationRepository.save(record),
+        );
       } catch {
         runtimeErrorCode.set('RUNTIME_KNOWN_DESTINATION_PERSIST_FAILED');
         appendLocalLog('error', 'persistence', 'KNOWN_DESTINATION_PERSIST_FAILED', {
@@ -1788,6 +1802,12 @@ class ReticulumRuntimeController {
       return;
     }
     this.worker?.postMessage(command);
+  }
+
+  private enqueueKnownDestinationPersistence<T>(operation: () => Promise<T>): Promise<T> {
+    const pending = this.knownDestinationPersistenceQueue.then(operation);
+    this.knownDestinationPersistenceQueue = pending.then(() => undefined, () => undefined);
+    return pending;
   }
 
   private performPathManagementOperation(

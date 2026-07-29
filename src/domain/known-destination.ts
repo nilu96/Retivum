@@ -178,26 +178,21 @@ export function upsertKnownDestination(
 }
 
 /**
- * Startup-only reconciliation against Leviculum's authoritative destination
- * inventory. Local destinations are runtime-owned and are not persisted here.
+ * Returns enrichment records that no longer have a public identity in
+ * Leviculum's complete startup inventory. The inventory contains hashes only;
+ * public keys remain owned and persisted exclusively by Leviculum.
  */
-export function reconcileKnownDestinations(
+export function orphanedKnownDestinationHashes(
   records: readonly KnownDestinationRecord[],
-  inventory: readonly KnownDestinationInventoryEntry[],
-): KnownDestinationRecord[] {
-  const knownHashes = new Set(inventory.map((entry) => entry.destinationHash));
-  let reconciled = records.filter((record) => knownHashes.has(record.destinationHash));
-  for (const entry of inventory) {
-    const fullDestinationName = isKnownFullDestinationName(entry.fullDestinationName)
-      ? entry.fullDestinationName
-      : undefined;
-    reconciled = upsertKnownDestination(reconciled, {
-      destinationHash: entry.destinationHash,
-      ...(fullDestinationName ? { fullDestinationName } : {}),
-      ...(entry.lastAnnouncedAt ? { lastAnnouncedAt: entry.lastAnnouncedAt } : {}),
-    });
-  }
-  return sortKnownDestinations(reconciled);
+  knownIdentityDestinationHashes: readonly string[],
+): string[] {
+  const knownHashes = new Set(knownIdentityDestinationHashes.flatMap((value) => {
+    const normalized = value.trim().toLowerCase();
+    return /^[0-9a-f]{32}$/.test(normalized) ? [normalized] : [];
+  }));
+  return records
+    .filter((record) => !knownHashes.has(record.destinationHash))
+    .map((record) => record.destinationHash);
 }
 
 export function normalizeKnownDestination(

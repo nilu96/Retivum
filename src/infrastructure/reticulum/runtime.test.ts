@@ -25,7 +25,8 @@ type RuntimeInternals = {
   cancelChatMessageDelivery(messageId: string): Promise<boolean>;
   handleEvent(event: unknown): Promise<void>;
   queuePropagationFallback(message: unknown): void;
-  destinationDirectoryReconciled: boolean;
+  expectedKnownIdentityInventoryStartupId?: string;
+  knownDestinationPersistenceQueue: Promise<void>;
   worker?: { postMessage(command: unknown): void };
   provisioningRepository: {
     saveBookmark(bookmark: unknown): Promise<void>;
@@ -36,7 +37,7 @@ type RuntimeInternals = {
   };
   knownDestinationRepository: {
     save(record: unknown): Promise<void>;
-    replaceAll(records: unknown[]): Promise<void>;
+    deleteMany(destinationHashes: readonly string[]): Promise<void>;
     delete(destinationHash: string): Promise<void>;
     clear(): Promise<void>;
   };
@@ -70,7 +71,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
     propagationSyncStatus.set({ syncing: false });
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     internals.worker = undefined;
-    internals.destinationDirectoryReconciled = false;
+    internals.expectedKnownIdentityInventoryStartupId = undefined;
+    internals.knownDestinationPersistenceQueue = Promise.resolve();
   });
 
   it('publishes successful automatic propagation sync results without publishing failures', async () => {
@@ -218,14 +220,15 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(internals.knownDestinationRepository.save).toHaveBeenCalledTimes(3);
   });
 
-  it('reconciles the persistent directory only against the remote worker inventory', async () => {
+  it('prunes enrichment only from the matching complete startup identity inventory', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
-    const replaceAll = vi.spyOn(internals.knownDestinationRepository, 'replaceAll')
+    const deleteMany = vi.spyOn(internals.knownDestinationRepository, 'deleteMany')
       .mockResolvedValue(undefined);
     const retainedHash = '3'.repeat(32);
+    const removedHash = '4'.repeat(32);
     knownDestinations.set([
       { destinationHash: retainedHash, displayName: 'Retained peer' },
-      { destinationHash: '4'.repeat(32), displayName: 'Removed peer' },
+      { destinationHash: removedHash, displayName: 'Removed peer' },
     ]);
 
     await internals.handleEvent({
@@ -238,13 +241,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
         destinationHash: '5'.repeat(32),
         fullDestinationName: 'lxmf.delivery',
       }],
-      reconcileDirectory: true,
     });
-    expect(get(knownDestinations)).toEqual([{
-      destinationHash: retainedHash,
-      fullDestinationName: 'lxmf.delivery',
-      displayName: 'Retained peer',
-    }]);
+    expect(get(knownDestinations)).toHaveLength(2);
     expect(get(remoteDestinationInventory)).toEqual([
       { destinationHash: retainedHash, fullDestinationName: 'lxmf.delivery' },
     ]);
@@ -252,17 +250,80 @@ describe('ReticulumRuntimeController chat deletion', () => {
       destinationHash: '5'.repeat(32),
       fullDestinationName: 'lxmf.delivery',
     }]);
-    expect(replaceAll).toHaveBeenCalledOnce();
+    expect(deleteMany).not.toHaveBeenCalled();
+
+    internals.expectedKnownIdentityInventoryStartupId = 'current-startup';
+    await internals.handleEvent({
+      type: 'knownIdentityInventoryReady',
+      startupId: 'stale-startup',
+      destinationHashes: [],
+    });
+    expect(get(knownDestinations)).toHaveLength(2);
 
     await internals.handleEvent({
-      type: 'pathManagementSnapshot',
-      paths: [],
-      remoteDestinations: [],
-      localDestinations: [],
-      reconcileDirectory: true,
+      type: 'knownIdentityInventoryReady',
+      startupId: 'current-startup',
+      destinationHashes: [retainedHash],
+    });
+    expect(get(knownDestinations)).toEqual([{
+      destinationHash: retainedHash,
+      displayName: 'Retained peer',
+    }]);
+    expect(deleteMany).toHaveBeenCalledOnce();
+    expect(deleteMany).toHaveBeenCalledWith([removedHash]);
+
+    await internals.handleEvent({
+      type: 'knownIdentityInventoryReady',
+      startupId: 'current-startup',
+      destinationHashes: [],
     });
     expect(get(knownDestinations)).toHaveLength(1);
-    expect(replaceAll).toHaveBeenCalledOnce();
+    expect(deleteMany).toHaveBeenCalledOnce();
+  });
+
+  it('serializes startup pruning before a concurrent announce save', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const retainedHash = '5'.repeat(32);
+    const announcedHash = '6'.repeat(32);
+    let finishDelete = () => {};
+    const deletePending = new Promise<void>((resolve) => {
+      finishDelete = resolve;
+    });
+    const deleteMany = vi.spyOn(internals.knownDestinationRepository, 'deleteMany')
+      .mockReturnValue(deletePending);
+    const save = vi.spyOn(internals.knownDestinationRepository, 'save')
+      .mockResolvedValue(undefined);
+    knownDestinations.set([
+      { destinationHash: retainedHash, displayName: 'Retained peer' },
+      { destinationHash: announcedHash, displayName: 'Old name' },
+    ]);
+    internals.expectedKnownIdentityInventoryStartupId = 'startup';
+
+    const pruning = internals.handleEvent({
+      type: 'knownIdentityInventoryReady',
+      startupId: 'startup',
+      destinationHashes: [retainedHash],
+    });
+    await Promise.resolve();
+    expect(deleteMany).toHaveBeenCalledWith([announcedHash]);
+
+    const observing = internals.handleEvent({
+      type: 'knownDestinationObserved',
+      destinationHash: announcedHash,
+      fullDestinationName: 'lxmf.delivery',
+      displayName: 'Fresh name',
+      lastAnnouncedAt: '2026-07-29T20:00:00.000Z',
+    });
+    await Promise.resolve();
+    expect(save).not.toHaveBeenCalled();
+
+    finishDelete();
+    await Promise.all([pruning, observing]);
+    expect(save).toHaveBeenCalledOnce();
+    expect(get(knownDestinations)).toContainEqual(expect.objectContaining({
+      destinationHash: announcedHash,
+      displayName: 'Fresh name',
+    }));
   });
 
   it('returns the destination only after the worker verifies and imports an LXMA peer', async () => {

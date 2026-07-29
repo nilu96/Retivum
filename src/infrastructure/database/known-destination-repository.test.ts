@@ -29,7 +29,7 @@ describe('BrowserKnownDestinationRepository', () => {
     expect(await repository.loadAll()).toEqual([record]);
   });
 
-  it('replaces and removes directory records atomically', async () => {
+  it('removes only targeted directory records atomically', async () => {
     const repository = new BrowserKnownDestinationRepository();
     const first = { destinationHash: 'a'.repeat(32) };
     const second = {
@@ -37,10 +37,11 @@ describe('BrowserKnownDestinationRepository', () => {
       fullDestinationName: 'nomadnetwork.node' as const,
     };
 
-    await repository.replaceAll([first, second]);
+    await repository.save(first);
+    await repository.save(second);
     expect(await repository.loadAll()).toEqual([first, second]);
 
-    await repository.delete(first.destinationHash);
+    await repository.deleteMany([first.destinationHash, 'invalid']);
     expect(await repository.loadAll()).toEqual([second]);
 
     await repository.clear();

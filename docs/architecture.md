@@ -623,7 +623,7 @@ The generic request/resource API is necessary but does not by itself prove Nomad
 
 ### 9.4 Remote node provisioning
 
-Retivum can provision compatible microReticulum nodes through Reticulum itself instead of requiring the firmware web console's `rnsapid` WebSocket adapter. The worker recognizes verified announces for `rnstransport.remote.management`, persists the destination hash/public key and latest route observation globally, and opens an ordinary Reticulum link to the management destination. It sends `LINKIDENTIFY` before requesting `/provision`, because the firmware management destination uses an identity allow-list.
+Retivum can provision compatible microReticulum nodes through Reticulum itself instead of requiring the firmware web console's `rnsapid` WebSocket adapter. The worker recognizes verified announces for `rnstransport.remote.management`; Leviculum persists the public identity in its encrypted global network checkpoint, while Retivum persists only destination enrichment such as the aspect and latest observation. The worker then opens an ordinary Reticulum link to the management destination. It sends `LINKIDENTIFY` before requesting `/provision`, because the firmware management destination uses an identity allow-list.
 
 The application-level provisioning codec mirrors the firmware protocol: MessagePack request/response envelopes, optional heatshrink-compressed payloads, schema discovery, state reads, staged state updates, commit/discard, reboot, and factory reset. KISS and WebSocket framing from the standalone web console are deliberately absent; configured Retivum interfaces already carry the resulting Reticulum packets. This feature consumes Leviculum's existing generic path, link, identity, request, response, and Resource APIs and does not add provisioning behavior to Reticulum Core or LXMF.
 
@@ -869,15 +869,21 @@ entry is created for public keys without a NomadNet name.
 
 At runtime, Leviculum remains authoritative for known identities, public keys,
 raw announces, and paths. Retivum loads its directory and reconciles it once
-against Leviculum's complete remote destination inventory after worker
-startup. Later valid announces update both the worker state and the matching
-directory record. Explicit forget and clear operations update Leviculum first
-and then remove the corresponding Retivum records. Ordinary path loss does not
-remove a directory record. Local inbound destinations are not persisted in
-this directory. Worker snapshots expose remote and local destination
-inventories as separate arrays: reconciliation and remote operations consume
-only the remote array, while tools that need local destinations join the
-worker's local array only into their final presentation.
+after successful worker startup against a dedicated complete membership
+inventory containing only destination hashes for which Leviculum has a stored
+public key. The worker emits this startup-token-matched inventory before
+opening interfaces; failed snapshot restoration emits no inventory and
+therefore cannot prune Retivum state. Reconciliation performs targeted orphan
+deletions and is serialized with announce saves. It never copies public keys
+into Retivum or creates records from inventory entries. Runtime rebuilds,
+identity activation, and ordinary path snapshots do not reconcile or delete
+directory records. Later valid announces update both the worker state and the
+matching directory record. Explicit forget and clear operations update
+Leviculum first and then remove the corresponding Retivum records. Ordinary
+path loss does not remove a directory record. Local inbound destinations are
+not persisted in this directory. Worker snapshots expose remote and local
+destination inventories as separate arrays for read-only presentation and
+runtime operations only.
 
 ### 12.3 Persistence protocol
 

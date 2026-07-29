@@ -174,6 +174,7 @@ export type ProvisioningRequestStage = 'findingPath' | 'establishingLink' | 'ide
 export type RuntimeCommand =
   | {
       type: 'initialize';
+      startupId: string;
       wrappingKey: CryptoKey;
       identity?: PersistedIdentityRecord;
       networkState?: PersistedNetworkStateRecord;
@@ -368,6 +369,11 @@ export type RuntimeEvent =
   | { type: 'platformInterfaceWrite'; id: string; data: Uint8Array; highPriority?: boolean }
   | ({ type: 'knownDestinationObserved' } & KnownDestinationRecord)
   | {
+      type: 'knownIdentityInventoryReady';
+      startupId: string;
+      destinationHashes: string[];
+    }
+  | {
       type: 'nomadPageLoaded';
       requestId: string;
       destinationHash: string;
@@ -402,7 +408,6 @@ export type RuntimeEvent =
       paths: PathTableEntry[];
       remoteDestinations: KnownDestinationEntry[];
       localDestinations: LocalDestinationEntry[];
-      reconcileDirectory?: boolean;
     }
   | {
       type: 'pathManagementOperationResult';
