@@ -53,6 +53,7 @@ import type {
 } from '../infrastructure/reticulum/protocol';
 import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
 import { isSuppressedAnnounce } from '../infrastructure/reticulum/announce-output';
+import { diagnosticErrorMessage } from '../infrastructure/reticulum/diagnostic-error';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
@@ -3543,7 +3544,7 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
         });
         return;
       }
-    } catch {
+    } catch (error) {
       emit({
         type: 'knownDestinationObserved',
         destinationHash: destinationHashHex,
@@ -3552,6 +3553,8 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
       });
       log('warning', 'wasm', 'LXMF_PROPAGATION_ANNOUNCE_PARSE_FAILED', {
         destinationHash: bytesToHex(destinationHash),
+        appDataBytes: appData.byteLength,
+        message: diagnosticErrorMessage(error),
       });
       return;
     }
