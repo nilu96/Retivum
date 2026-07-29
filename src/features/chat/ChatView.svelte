@@ -244,6 +244,22 @@
     (conversation) => conversation.destinationHash === chatActions?.destinationHash,
   ));
   const selectedName = $derived(selectedContact?.name ?? selectedAnnounce?.displayName);
+  const selectedPathStatus = $derived(
+    selectedDestination ? $destinationPathStatuses[selectedDestination] : undefined,
+  );
+  const selectedHopsLabel = $derived(
+    selectedPathStatus?.hasPath && selectedPathStatus.hops !== undefined
+      ? $t(selectedPathStatus.hops === 1 ? 'announce.hops.one' : 'announce.hops.other', {
+        count: selectedPathStatus.hops,
+      })
+      : $t('chat.conversation.path.unknown'),
+  );
+  const selectedStampCost = $derived(selectedAnnounce?.metadata?.stampCost);
+  const selectedStampLabel = $derived(
+    selectedStampCost === undefined
+      ? $t('chat.conversation.stamp.unknown')
+      : $t('chat.conversation.stamp.cost', { cost: selectedStampCost }),
+  );
   const selectedDestinationBlocked = $derived(Boolean(
     selectedDestination && blockedDestinationHashes.has(selectedDestination),
   ));
@@ -1380,6 +1396,17 @@
         >
           <strong>{selectedName ?? shortHash(selectedDestination)}</strong>
           <code>{selectedDestination}</code>
+          <span class="conversation-peer-metadata">
+            <span>
+              <Icon name={selectedPathStatus?.hasPath ? 'route' : 'route-off'} size={13} />
+              {selectedHopsLabel}
+            </span>
+            <span class="conversation-peer-metadata-separator" aria-hidden="true">·</span>
+            <span>
+              <Icon name="ticket" size={13} />
+              {selectedStampLabel}
+            </span>
+          </span>
         </button>
         <button
           class="icon-button conversation-block-button"

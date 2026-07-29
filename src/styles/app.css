@@ -436,6 +436,10 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .conversation-header strong, .conversation-header code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conversation-header strong { font-size: .9rem; }
 .conversation-header code { color: var(--text-subtle); font-size: .68rem; }
+.conversation-peer-metadata { display: flex; min-width: 0; align-items: center; gap: 5px; overflow: hidden; color: var(--text-subtle); font-size: .62rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.conversation-peer-metadata > span:not(.conversation-peer-metadata-separator) { display: inline-flex; min-width: 0; align-items: center; gap: 4px; overflow: hidden; text-overflow: ellipsis; }
+.conversation-peer-metadata svg { flex: none; }
+.conversation-peer-metadata-separator { flex: none; }
 @media (hover: none) and (pointer: coarse) {
   .conversation-peer { -webkit-tap-highlight-color: transparent; }
   .conversation-peer:active { background: var(--surface-hover); }

@@ -368,6 +368,36 @@ describe('ChatView', () => {
     expect(sync).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { stampCost: 8, label: 'stamp cost 8' },
+    { stampCost: 0, label: 'stamp cost 0' },
+    { stampCost: undefined, label: 'stamp cost unknown' },
+  ])('shows path and stamp metadata in the conversation title for “$label”', async ({
+    stampCost,
+    label,
+  }) => {
+    const destinationHash = '8'.repeat(32);
+    setChatDestinations([{
+      destinationHash,
+      displayName: 'Stamped peer',
+      heardAt: '2026-07-16T10:00:00.000Z',
+      ...(stampCost !== undefined ? { stampCost } : {}),
+    }]);
+    destinationPathStatuses.set({
+      [destinationHash]: { destinationHash, hasPath: true, hops: 3 },
+    });
+    render(ChatView);
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));
+    await fireEvent.click(screen.getByRole('button', { name: /Stamped peer/ }));
+
+    const metadata = document.querySelector('.conversation-peer-metadata');
+    expect(metadata).not.toBeNull();
+    expect(metadata).toHaveTextContent(`3 hops · ${label}`);
+    expect(metadata?.querySelectorAll('svg')).toHaveLength(2);
+    expect(document.querySelector('.conversation-stamp-indicator')).not.toBeInTheDocument();
+  });
+
   it('shows heard LXMF destinations and received messages', async () => {
     const sourceHash = 'a'.repeat(32);
     setChatDestinations([{

@@ -24,6 +24,7 @@
     | 'bookmark-filled'
     | 'history'
     | 'shield'
+    | 'ticket'
     | 'palette'
     | 'info'
     | 'edit'
@@ -142,6 +143,11 @@
   {:else if name === 'shield'}
     <path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z" />
     <path d="m9 12 2 2 4-5" />
+  {:else if name === 'ticket'}
+    <g transform="rotate(90 12 12)">
+      <path d="M4 5h16v4c-1.7 0-3 1.3-3 3s1.3 3 3 3v4H4v-4c1.7 0 3-1.3 3-3S5.7 9 4 9V5Z" />
+      <path d="M12 7.5V9m0 2.25v1.5M12 15v1.5" />
+    </g>
   {:else if name === 'palette'}
     <path d="M12 3a9 9 0 0 0 0 18h1.5a1.8 1.8 0 0 0 0-3.6h-1a1.5 1.5 0 0 1 0-3h2.1A6.4 6.4 0 0 0 21 8c0-2.8-4-5-9-5Z" />
     <circle cx="7.5" cy="9" r=".8" fill="currentColor" /><circle cx="10.5" cy="6.5" r=".8" fill="currentColor" /><circle cx="15" cy="7" r=".8" fill="currentColor" />
