@@ -1511,6 +1511,83 @@ describe('NomadNetView', () => {
     expect(requestPage).toHaveBeenNthCalledWith(2, destinationHash, '/page/index.mu', {}, expect.any(Function), true);
   });
 
+  it('uses a bookmark policy added after the current page loaded when reloading', async () => {
+    const destinationHash = '8'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    setNomadDestinations([{
+      id: destinationHash,
+      destinationHash,
+      displayName: 'Newly bookmarked node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Anonymous first load',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Identified reload',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      });
+    const addBookmark = vi.spyOn(reticulumRuntime, 'addNomadBookmark')
+      .mockImplementation(async (address, label, identifyBeforeLoad) => {
+        nomadBookmarks.set([{
+          id: `identity:${address}`,
+          identityId: 'identity',
+          destinationHash,
+          path: '/page/index.mu',
+          requestData: {},
+          identifyBeforeLoad,
+          label,
+          createdAt: '2026-07-16T10:01:30.000Z',
+        }]);
+        return true;
+      });
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Newly bookmarked node/ }));
+    expect(await screen.findByText('Anonymous first load')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      1,
+      destinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+    );
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Bookmark current address' }));
+    await fireEvent.click(screen.getByRole('switch', { name: /Identify before loading/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
+      `${destinationHash}:/page/index.mu`,
+      'Newly bookmarked node',
+      true,
+    ));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
+    expect(await screen.findByText('Identified reload')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      2,
+      destinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+      true,
+      true,
+    );
+  });
+
   it('replaces an in-progress load with an atomic hard reload', async () => {
     const destinationHash = '6'.repeat(32);
     setNomadDestinations([{

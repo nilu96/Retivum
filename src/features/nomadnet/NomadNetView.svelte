@@ -792,11 +792,20 @@
 
   function reloadPage(): void {
     const activeRequest = pendingPageRequest ?? failedPageRequest;
+    const loadedPageBookmark = loadedPage
+      ? bookmarkForPage(
+          loadedPage.destinationHash,
+          loadedPage.path,
+          loadedPage.requestData ?? {},
+        )
+      : undefined;
     const target = activeRequest ?? (loadedPage ? {
       destinationHash: loadedPage.destinationHash,
       path: loadedPage.path,
       requestData: loadedPage.requestData,
-      identifyBeforeLoad: loadedPage.identifyBeforeLoad === true,
+      identifyBeforeLoad: loadedPageBookmark
+        ? loadedPageBookmark.identifyBeforeLoad === true
+        : loadedPage.identifyBeforeLoad === true,
     } : undefined);
     if (!target) return;
     forgetIdentifiedDestination(target.destinationHash);
