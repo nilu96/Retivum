@@ -26,6 +26,7 @@ export const reticulumnode_hasLxmfMessage: (a: number, b: number, c: number) => 
 export const reticulumnode_hasLxmfOutboundTicket: (a: number, b: number, c: number) => [number, number, number];
 export const reticulumnode_ingestLxmfPaper: (a: number, b: number, c: number) => [number, number, number];
 export const reticulumnode_lxmfDeliveryDestinationHash: (a: number) => [number, number];
+export const reticulumnode_lxmfInboundResources: (a: number) => [number, number, number];
 export const reticulumnode_lxmfOutbound: (a: number) => [number, number, number];
 export const reticulumnode_lxmfOutboundPropagationStampRequest: (a: number, b: number, c: number) => [number, number, number];
 export const reticulumnode_lxmfOutboundStampCost: (a: number, b: number, c: number) => [number, number, number];

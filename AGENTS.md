@@ -97,9 +97,9 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `75cbab96b819046fd6e379ebe28dfd19aa42398b`. The generated WASM below was rebuilt from this `feat/wasm` source plus an uncommitted LXMF 1.1.0 compatibility change that accepts integer- or float-encoded propagation transfer and sync limits while retaining normalized `u64` values. The complete Leviculum working-tree diff has SHA-256 `5272e54b5bedcdcd25589efa9f74c7f6098756b007f6f677f5946dc144f30359`. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, and optional `interfaceIndex` targeting for `announceLxmf()`.
+The local Leviculum checkout currently reports version `0.7.1`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `17fc4cabed5bf54a259b06582fe72e219d92f6a1`. The generated WASM below corresponds to this `feat/wasm` source. It normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, and optional `interfaceIndex` targeting for `announceLxmf()`.
 
-If provenance matters, capture the complete dirty source state or create an immutable commit/archive before publishing a rebuilt artifact.
+Use the immutable Leviculum commit above together with the recorded toolchain, build command, and artifact hashes when publishing or reproducing this generated build.
 
 ## Generated Leviculum WASM
 
@@ -114,10 +114,10 @@ Current fingerprints:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `leviculum_wasm.js` | `bd7039e744a3cecd957081d0ce52fc1411156d65a44668d2084586672240bd3f` |
-| `leviculum_wasm_bg.wasm` | `c925b1e603737edda4efa3cbeae652b88d6327be6b21f0be5b1c00288bbc8d10` |
-| `leviculum_wasm.d.ts` | `d0b9b665935f1d6d78979e3580ecdb0eca62887543f744fd8dbd80cb797e50fc` |
-| `leviculum_wasm_bg.wasm.d.ts` | `c460552a70985d08d4f26be754961453ae42072bdc49c3de6fc07120c98b6aa8` |
+| `leviculum_wasm.js` | `4e010f3aa7d8cf0e91f2de925af7c1ea4f7d5e6eb49d7049605615c830e9f4bf` |
+| `leviculum_wasm_bg.wasm` | `60f35a33484d068c16f9cb21d3fe444be2ad1136ded2462efef24aee314b45f5` |
+| `leviculum_wasm.d.ts` | `7ac63267c93513d83871986eb488fcb7512f75022481be75cbd8fd2ccdbfb581` |
+| `leviculum_wasm_bg.wasm.d.ts` | `5635ac31031a41c4390fa025f0d3262a4bbbc0df803a97ce81d47bd13f7c2671` |
 
 The current build was produced with Rust 1.95.0 and `wasm-bindgen` 0.2.126. From the Leviculum checkout, the documented development build is:
 

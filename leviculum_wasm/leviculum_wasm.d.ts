@@ -6,6 +6,7 @@ export interface LxmfImageAttachment { format: string; data: Uint8Array; }
 export interface LxmfAudioAttachment { mode: 'codec2-450pwb' | 'codec2-450' | 'codec2-700c' | 'codec2-1200' | 'codec2-1300' | 'codec2-1400' | 'codec2-1600' | 'codec2-2400' | 'codec2-3200' | 'opus-ogg' | 'opus-lbw' | 'opus-mbw' | 'opus-ptt' | 'opus-rt-hdx' | 'opus-rt-fdx' | 'opus-standard' | 'opus-hq' | 'opus-broadcast' | 'opus-lossless' | 'custom'; data: Uint8Array; }
 export interface LxmfMessageAttachments { files: LxmfFileAttachment[]; image?: LxmfImageAttachment; audio?: LxmfAudioAttachment; }
 export interface LxmfMessageOptions { destinationHash: Uint8Array; title?: Uint8Array; content?: Uint8Array; fields?: Array<{ key: string; valueMsgpack: Uint8Array }>; attachments?: LxmfMessageAttachments; timestamp?: number; method?: 'opportunistic' | 'direct' | 'propagated' | 'paper'; includeTicket?: boolean; }
+export interface LxmfIncomingResource { linkId: Uint8Array; resourceHash: Uint8Array; transferSize: number; dataSize: number; progress: number; }
 
 
 
@@ -95,6 +96,13 @@ export class ReticulumNode {
     ingestLxmfPaper(uri: string): any;
     linkStats(link_id: Uint8Array): any;
     lxmfDeliveryDestinationHash(): Uint8Array | undefined;
+    /**
+     * Return read-only snapshots of active incoming LXMF Resource transfers.
+     *
+     * Cancelling an already accepted inbound Resource requires a future
+     * `leviculum-core` API and is therefore intentionally not exposed.
+     */
+    lxmfInboundResources(): any;
     lxmfOutbound(): any;
     /**
      * Query the currently prepared propagation work item for a queued
@@ -234,6 +242,7 @@ export interface InitOutput {
     readonly reticulumnode_hasLxmfOutboundTicket: (a: number, b: number, c: number) => [number, number, number];
     readonly reticulumnode_ingestLxmfPaper: (a: number, b: number, c: number) => [number, number, number];
     readonly reticulumnode_lxmfDeliveryDestinationHash: (a: number) => [number, number];
+    readonly reticulumnode_lxmfInboundResources: (a: number) => [number, number, number];
     readonly reticulumnode_lxmfOutbound: (a: number) => [number, number, number];
     readonly reticulumnode_lxmfOutboundPropagationStampRequest: (a: number, b: number, c: number) => [number, number, number];
     readonly reticulumnode_lxmfOutboundStampCost: (a: number, b: number, c: number) => [number, number, number];

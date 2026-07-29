@@ -603,6 +603,20 @@ export class ReticulumNode {
         return v1;
     }
     /**
+     * Return read-only snapshots of active incoming LXMF Resource transfers.
+     *
+     * Cancelling an already accepted inbound Resource requires a future
+     * `leviculum-core` API and is therefore intentionally not exposed.
+     * @returns {any}
+     */
+    lxmfInboundResources() {
+        const ret = wasm.reticulumnode_lxmfInboundResources(this.__wbg_ptr);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return takeFromExternrefTable0(ret[0]);
+    }
+    /**
      * @returns {any}
      */
     lxmfOutbound() {
