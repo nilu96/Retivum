@@ -1092,8 +1092,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
       destinationHash,
       attachments: [attachment],
       replacesMessageId: 'failed-opportunistic',
+      timestamp: 1_752_660_000,
     });
-    expect(command).not.toHaveProperty('timestamp');
 
     await internals.handleEvent({
       type: 'chatMessageQueued',

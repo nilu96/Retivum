@@ -143,6 +143,8 @@
   let deletingContactId = $state<string | undefined>();
   let propagationSyncRequested = $state(false);
   let openedUnreadMessageIds = $state<string[]>([]);
+  let incomingMarkerGroupActive = false;
+  let observedChatDirectoryReady = $chatDirectoryReady;
   let observedIncomingDestination = $state<string | undefined>();
   let observedIncomingMessageIds = new Set<string>();
   let observedInboundTransferDestination: string | undefined;
@@ -324,13 +326,31 @@
   });
 
   $effect(() => {
+    const directoryReady = $chatDirectoryReady;
     const destination = selectedDestination;
     const incomingMessageIds = selectedMessages
       .filter((message) => chatMessageDirection(message) === 'incoming')
       .map((message) => message.id);
+    if (!directoryReady) {
+      observedChatDirectoryReady = false;
+      observedIncomingDestination = destination;
+      observedIncomingMessageIds = new Set(incomingMessageIds);
+      incomingMarkerGroupActive = false;
+      unreadMessagesBelow = 0;
+      return;
+    }
+    if (!observedChatDirectoryReady) {
+      observedChatDirectoryReady = true;
+      observedIncomingDestination = destination;
+      observedIncomingMessageIds = new Set(incomingMessageIds);
+      incomingMarkerGroupActive = false;
+      unreadMessagesBelow = 0;
+      return;
+    }
     if (observedIncomingDestination !== destination) {
       observedIncomingDestination = destination;
       observedIncomingMessageIds = new Set(incomingMessageIds);
+      incomingMarkerGroupActive = false;
       unreadMessagesBelow = 0;
       return;
     }
@@ -339,13 +359,13 @@
     );
     observedIncomingMessageIds = new Set(incomingMessageIds);
     if (!destination || newIncomingMessageIds.length === 0) return;
+    openedUnreadMessageIds = incomingMarkerGroupActive
+      ? [...new Set([...openedUnreadMessageIds, ...newIncomingMessageIds])]
+      : newIncomingMessageIds;
+    incomingMarkerGroupActive = true;
     if (followIncomingMessages) {
-      openedUnreadMessageIds = newIncomingMessageIds;
       void scrollToLatestMessage();
     } else {
-      openedUnreadMessageIds = unreadMessagesBelow === 0
-        ? newIncomingMessageIds
-        : [...new Set([...openedUnreadMessageIds, ...newIncomingMessageIds])];
       unreadMessagesBelow += newIncomingMessageIds.length;
       stopFollowingLatestMessageLayout();
     }
@@ -549,6 +569,7 @@
       .filter((message) => chatMessagePeerHash(message) === destinationHash
         && chatMessageDirection(message) === 'incoming')
       .map((message) => message.id));
+    incomingMarkerGroupActive = false;
     openedUnreadMessageIds = ($unreadChatMessageIds[destinationHash] ?? [])
       .filter((messageId) => incomingMessageIds.has(messageId));
     if (updateNavigation) openChatConversation(destinationHash);
@@ -565,6 +586,7 @@
     stopConversationRecording(selectedDestination);
     storeSelectedConversationDraft();
     openedUnreadMessageIds = [];
+    incomingMarkerGroupActive = false;
     unreadMessagesBelow = 0;
     followIncomingMessages = true;
     selectedDestination = undefined;
@@ -801,6 +823,7 @@
         conversationDrafts.delete(destinationHash);
         if (selectedDestination === destinationHash) {
           openedUnreadMessageIds = [];
+          incomingMarkerGroupActive = false;
           composerContent = '';
           composerAttachments = [];
           attachmentMenuOpen = false;

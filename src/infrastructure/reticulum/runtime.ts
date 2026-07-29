@@ -700,6 +700,7 @@ class ReticulumRuntimeController {
       content: message.content,
       attachments: message.attachments,
       replacesMessageId: message.messageId,
+      timestamp: message.timestamp,
     });
     return new Promise((resolve) => {
       const timeout = window.setTimeout(() => {

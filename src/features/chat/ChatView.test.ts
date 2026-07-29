@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { tick } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { startRouter } from '../../app/router';
+import { openChatConversation, startRouter } from '../../app/router';
 import { defaultAppPreferences } from '../../domain/settings';
 import {
   blockedChatDestinations,
@@ -242,6 +242,29 @@ describe('ChatView', () => {
     });
     expect(screen.getByText('Loaded message')).toBeInTheDocument();
     expect(screen.queryByText('Visible announce')).not.toBeInTheDocument();
+  });
+
+  it('does not mark persisted messages as new when an open conversation finishes loading', async () => {
+    const sourceHash = '5'.repeat(32);
+    chatDirectoryReady.set(false);
+    openChatConversation(sourceHash);
+    render(ChatView);
+
+    chatMessages.set([{
+      id: 'identity:persisted-after-reload',
+      identityId: 'identity',
+      messageId: 'persisted-after-reload',
+      sourceHash,
+      destinationHash: '8'.repeat(32),
+      title: '',
+      content: 'Persisted before reload',
+      direction: 'incoming',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    chatDirectoryReady.set(true);
+
+    expect(await screen.findAllByText('Persisted before reload')).toHaveLength(2);
+    expect(screen.queryByText('New')).not.toBeInTheDocument();
   });
 
   it('falls back from chats to announces when the loaded directory has no conversations or contacts', async () => {
@@ -744,15 +767,27 @@ describe('ChatView', () => {
     await waitFor(() => expect(feed.scrollTop).toBe(500));
     feedHeight = 1300;
 
-    chatMessages.set([firstMessage, {
+    const firstNewMessage = {
       ...firstMessage,
       id: 'identity:follow-new-incoming',
       messageId: 'follow-new-incoming',
       content: 'Follow new incoming',
       receivedAt: '2026-07-16T10:01:00.000Z',
-    }]);
+    };
+    chatMessages.set([firstMessage, firstNewMessage]);
 
     await waitFor(() => expect(feed.scrollTop).toBe(1300));
+    feedHeight = 1500;
+    chatMessages.set([firstMessage, firstNewMessage, {
+      ...firstMessage,
+      id: 'identity:follow-second-new-incoming',
+      messageId: 'follow-second-new-incoming',
+      content: 'Follow second new incoming',
+      receivedAt: '2026-07-16T10:02:00.000Z',
+    }]);
+
+    await waitFor(() => expect(feed.scrollTop).toBe(1500));
+    expect(screen.getAllByText('New')).toHaveLength(2);
     expect(screen.queryByRole('button', {
       name: /unread message/,
     })).not.toBeInTheDocument();
