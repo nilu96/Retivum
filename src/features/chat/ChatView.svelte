@@ -826,8 +826,12 @@
     }
   }
 
-  async function syncPropagationMessages(): Promise<void> {
+  async function syncPropagationMessages(event?: MouseEvent): Promise<void> {
     if (propagationSyncing) return;
+    const pointerButton = event?.detail
+      && event.currentTarget instanceof HTMLButtonElement
+      ? event.currentTarget
+      : undefined;
     propagationSyncRequested = true;
     try {
       const result = await reticulumRuntime.syncLxmfPropagation();
@@ -847,6 +851,10 @@
       toast.error('chat.propagationSync.failed');
     } finally {
       propagationSyncRequested = false;
+      if (pointerButton) {
+        await tick();
+        pointerButton.blur();
+      }
     }
   }
 

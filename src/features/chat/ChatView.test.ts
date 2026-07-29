@@ -318,6 +318,29 @@ describe('ChatView', () => {
     expect(await screen.findByText('Sync complete. 1 new message.')).toBeInTheDocument();
   });
 
+  it('releases pointer focus after propagation sync while preserving keyboard focus', async () => {
+    vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({
+      received: 0,
+      duplicates: 0,
+    });
+    render(ChatView);
+    render(ToastViewport);
+
+    const pointerButton = await screen.findByRole('button', {
+      name: 'Sync messages from the preferred or best available propagation node',
+    });
+    pointerButton.focus();
+    await fireEvent.click(pointerButton, { detail: 1 });
+    await waitFor(() => expect(pointerButton).not.toHaveFocus());
+
+    const keyboardButton = screen.getByRole('button', {
+      name: 'Sync messages from the preferred or best available propagation node',
+    });
+    keyboardButton.focus();
+    await fireEvent.click(keyboardButton, { detail: 0 });
+    await waitFor(() => expect(keyboardButton).toHaveFocus());
+  });
+
   it('reports no new propagation messages when every received message is a duplicate', async () => {
     vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 3, duplicates: 3 });
     render(ChatView);
