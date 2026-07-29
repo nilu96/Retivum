@@ -237,6 +237,8 @@
   "chat.contact.editNamed": "Edit contact {name}",
   "chat.contact.description": "Choose the local name shown for this LXMF destination.",
   "chat.contact.destination": "LXMF destination",
+  "chat.contact.displayName": "Announced name",
+  "chat.contact.copyDisplayName": "Copy announced name",
   "chat.contact.name": "Contact name",
   "chat.contact.name.help": "This name is stored locally and is not shared over Reticulum.",
   "chat.contact.name.required": "Enter a contact name.",

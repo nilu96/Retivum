@@ -25,10 +25,16 @@ describe('ContactEditor', () => {
       render(ContactEditor, {
         address: destinationHash,
         currentName: 'Alice',
+        displayName: 'Announced Alice',
         mode,
         oncancel: vi.fn(),
         onsave: vi.fn().mockResolvedValue(true),
       });
+
+      const displayNameCopyButton = screen.getByRole('button', { name: 'Copy announced name' });
+      expect(displayNameCopyButton).toHaveTextContent('Announced Alice');
+      await fireEvent.click(displayNameCopyButton);
+      await waitFor(() => expect(writeText).toHaveBeenCalledWith('Announced Alice'));
 
       const copyButton = screen.getByRole('button', { name: 'Copy destination hash' });
       expect(copyButton).toHaveTextContent(destinationHash);

@@ -8,12 +8,14 @@
   let {
     address,
     currentName = '',
+    displayName,
     mode = 'add',
     oncancel,
     onsave,
   }: {
     address: string;
     currentName?: string;
+    displayName?: string;
     mode?: 'add' | 'edit';
     oncancel: () => void;
     onsave: (name: string) => Promise<boolean>;
@@ -24,8 +26,8 @@
 
   $effect.pre(() => { name = currentName; });
 
-  async function copyDestination(): Promise<void> {
-    if (await copyText(address)) toast.success('common.copied');
+  async function copyValue(value: string): Promise<void> {
+    if (await copyText(value)) toast.success('common.copied');
     else toast.error('common.copyFailed');
   }
 
@@ -62,9 +64,21 @@
           type="button"
           title={$t('chat.destination.actions.copyHash')}
           aria-label={$t('chat.destination.actions.copyHash')}
-          onclick={copyDestination}
+          onclick={() => { void copyValue(address); }}
         ><code>{address}</code><Icon name="copy" size={17} /></button>
       </div>
+      {#if displayName?.trim()}
+        <div class="bookmark-editor-address">
+          <span>{$t('chat.contact.displayName')}</span>
+          <button
+            class="editor-address-copy"
+            type="button"
+            title={$t('chat.contact.copyDisplayName')}
+            aria-label={$t('chat.contact.copyDisplayName')}
+            onclick={() => { void copyValue(displayName); }}
+          ><span class="editor-copy-value">{displayName}</span><Icon name="copy" size={17} /></button>
+        </div>
+      {/if}
       <label class="field">
         <span>{$t('chat.contact.name')}</span>
         <input bind:value={name} maxlength="128" autocomplete="nickname" />

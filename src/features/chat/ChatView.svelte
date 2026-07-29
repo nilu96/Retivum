@@ -1753,6 +1753,7 @@
   <ContactEditor
     address={contactEditorDestination}
     currentName={contactEditorContact?.name ?? contactEditorAnnounce?.displayName ?? ''}
+    displayName={contactEditorAnnounce?.displayName}
     mode={contactEditorContact ? 'edit' : 'add'}
     oncancel={() => { contactEditorDestination = undefined; }}
     onsave={saveContact}

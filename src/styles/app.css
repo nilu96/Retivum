@@ -950,6 +950,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .bookmark-editor-address { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: .74rem; font-weight: 650; }
 .editor-address-copy { display: grid; width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 11px; border: 0; border-radius: 9px; color: var(--text-subtle); background: var(--surface-2); text-align: start; }
 .editor-address-copy code { min-width: 0; overflow: hidden; color: inherit; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.editor-copy-value { min-width: 0; overflow: hidden; color: inherit; text-overflow: ellipsis; white-space: nowrap; }
 .editor-address-copy svg { flex: none; }
 @media (hover: hover) and (pointer: fine) {
   .editor-address-copy:hover { background: var(--surface-hover); }
