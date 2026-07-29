@@ -68,7 +68,8 @@ import { diagnosticErrorMessage } from '../infrastructure/reticulum/diagnostic-e
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import {
-  transitionPersistentPaths,
+  planRuntimeInterfaceTransition,
+  remapPersistentPaths,
   type RuntimeInterfaceBinding,
 } from '../infrastructure/reticulum/path-interface-transition';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
@@ -230,7 +231,7 @@ interface InterfaceDriver {
   hasRuntimeId(runtimeId: number | undefined): boolean;
   attach(owner: ReticulumNode): void;
   connect(): void;
-  disconnect(): void;
+  disconnect(notifyNode?: boolean): void;
   dispatch(action: WasmAction): boolean;
 }
 
@@ -672,24 +673,35 @@ async function rebuildRuntime(
   pathInterfaceTransition?: PathInterfaceTransition,
 ): Promise<void> {
   if (!identity || !privateKey || !configuration) return;
+  const transitionPlan = pathInterfaceTransition
+    ? planRuntimeInterfaceTransition(
+        pathInterfaceTransition.previousBindings,
+        pathInterfaceTransition.nextInterfaces,
+      )
+    : undefined;
+  if (transitionPlan && node) {
+    for (const runtimeIndex of transitionPlan.unavailableRuntimeIndexes) {
+      processOutput(node.setInterfaceOnline(runtimeIndex, false) as WasmOutput);
+    }
+  }
   const livePersistentState = persistCurrent && node
-    ? await persistSnapshot(pathInterfaceTransition
+    ? await persistSnapshot(transitionPlan
         ? (networkSnapshot) => {
-            const result = transitionPersistentPaths(
+            const result = remapPersistentPaths(
               networkSnapshot,
-              pathInterfaceTransition.previousBindings,
-              pathInterfaceTransition.nextInterfaces,
+              transitionPlan,
             );
             log('info', 'runtime', 'PATHS_RECONCILED_FOR_INTERFACE_CONFIGURATION', {
+              unavailableInterfaces: transitionPlan.unavailableRuntimeIndexes.length,
               retained: result.retained,
-              removed: result.removed,
+              discarded: result.discarded,
               remapped: result.remapped,
             });
             return result.snapshot;
           }
         : undefined)
     : undefined;
-  cleanupRuntime();
+  cleanupRuntime(new Set(transitionPlan?.unavailableRuntimeIndexes ?? []));
 
   let legacyPersistentState: unknown;
   let networkPersistentState: unknown = livePersistentState?.network;
@@ -1088,7 +1100,7 @@ function emitPropagationNodeSnapshot(): void {
   }
 }
 
-function cleanupRuntime(): void {
+function cleanupRuntime(alreadyDownRuntimeIndexes: ReadonlySet<number> = new Set()): void {
   if (tickTimer !== undefined) clearTimeout(tickTimer);
   tickTimer = undefined;
   if (autoAnnounceTimer !== undefined) clearTimeout(autoAnnounceTimer);
@@ -1132,7 +1144,10 @@ function cleanupRuntime(): void {
   }
   observedDestinationPaths.clear();
   destinationPathStatusCache.clear();
-  for (const driver of drivers.values()) driver.disconnect();
+  for (const driver of drivers.values()) {
+    const runtimeIndex = driver.runtimeIndex();
+    driver.disconnect(runtimeIndex === undefined || !alreadyDownRuntimeIndexes.has(runtimeIndex));
+  }
   drivers.clear();
   node?.free();
   node = undefined;
@@ -4489,12 +4504,12 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     emit({ type: 'platformInterfaceOpen', config: this.config });
   }
 
-  disconnect(): void {
+  disconnect(notifyNode = true): void {
     this.closedByRuntime = true;
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     emit({ type: 'platformInterfaceClose', id: this.config.id });
-    this.setOnline(false);
+    if (notifyNode) this.setOnline(false);
     this.setState('offline');
   }
 
@@ -4696,10 +4711,13 @@ class WebSocketDriver {
     }
   }
 
-  disconnect(): void {
+  disconnect(notifyNode = true): void {
     this.closedByRuntime = true;
     if (this.reconnectTimer !== undefined) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
+    if (notifyNode && node && this.runtimeId !== undefined) {
+      processOutput(node.setInterfaceOnline(this.runtimeId, false) as WasmOutput);
+    }
     this.closeSocket();
   }
 

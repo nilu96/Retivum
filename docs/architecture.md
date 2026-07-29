@@ -425,13 +425,15 @@ Interface definitions are durable application configuration. Each record has a s
 Leviculum path snapshots identify their receiving interface by a transient
 numeric runtime index. During a controlled rebuild caused by interface
 configuration, the worker resolves every old path index to the old stable
-application interface ID before destroying the runtime. Paths for removed,
-disabled, or materially changed network interfaces are discarded. Paths for
-unchanged enabled interfaces are retained and their indexes are rewritten to
-the indexes that the new runtime will assign. Comparing numeric indexes alone
-is invalid because removing or disabling an earlier interface shifts every
-later enabled interface. The sanitized checkpoint is both imported into the
-new runtime and persisted, so a removed path cannot be resurrected by the
+application interface ID before destroying the runtime. Retivum reports
+removed, disabled, or materially changed interfaces as down to the old
+Leviculum node before exporting its checkpoint; Leviculum remains responsible
+for deleting their paths and emitting path-loss events. Retivum retains paths
+for unchanged enabled interfaces and rewrites only their indexes to those that
+the new runtime will assign. Comparing numeric indexes alone is invalid
+because removing or disabling an earlier interface shifts every later enabled
+interface. The cleaned and remapped checkpoint is both imported into the new
+runtime and persisted, so a removed path cannot be resurrected by the
 pre-rebuild snapshot.
 
 ### 7.3 WebSocket editor

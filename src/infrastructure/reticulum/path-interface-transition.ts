@@ -7,27 +7,32 @@ export interface RuntimeInterfaceBinding {
   networkFingerprint: string;
 }
 
-export interface PersistentPathTransitionResult {
+export interface RetainedRuntimeInterfaceBinding {
+  interfaceId: string;
+  previousRuntimeIndex: number;
+  nextRuntimeIndex: number;
+}
+
+export interface RuntimeInterfaceTransitionPlan {
+  unavailableRuntimeIndexes: number[];
+  retainedInterfaces: RetainedRuntimeInterfaceBinding[];
+}
+
+export interface PersistentPathRemapResult {
   snapshot: Record<string, unknown>;
   retained: number;
-  removed: number;
+  discarded: number;
   remapped: number;
 }
 
 /**
- * Carries paths across a controlled runtime rebuild without treating
- * Leviculum's transient numeric interface indexes as stable identities.
+ * Determines which old runtime interfaces Retivum must report as down to
+ * Leviculum, and how surviving interfaces will be indexed by the new runtime.
  */
-export function transitionPersistentPaths(
-  snapshot: Record<string, unknown>,
+export function planRuntimeInterfaceTransition(
   previousBindings: readonly RuntimeInterfaceBinding[],
   nextInterfaces: readonly InterfaceConfig[],
-): PersistentPathTransitionResult {
-  const paths = Array.isArray(snapshot.paths) ? snapshot.paths : [];
-  const previousByRuntimeIndex = new Map(previousBindings.map((binding) => [
-    binding.runtimeIndex,
-    binding,
-  ]));
+): RuntimeInterfaceTransitionPlan {
   const nextByInterfaceId = new Map<string, {
     runtimeIndex: number;
     networkFingerprint: string;
@@ -42,30 +47,64 @@ export function transitionPersistentPaths(
     nextRuntimeIndex += 1;
   }
 
-  let removed = 0;
+  const unavailableRuntimeIndexes: number[] = [];
+  const retainedInterfaces: RetainedRuntimeInterfaceBinding[] = [];
+  for (const previous of previousBindings) {
+    const next = nextByInterfaceId.get(previous.interfaceId);
+    if (!next || next.networkFingerprint !== previous.networkFingerprint) {
+      unavailableRuntimeIndexes.push(previous.runtimeIndex);
+      continue;
+    }
+    retainedInterfaces.push({
+      interfaceId: previous.interfaceId,
+      previousRuntimeIndex: previous.runtimeIndex,
+      nextRuntimeIndex: next.runtimeIndex,
+    });
+  }
+  return {
+    unavailableRuntimeIndexes: unavailableRuntimeIndexes.sort((left, right) => left - right),
+    retainedInterfaces,
+  };
+}
+
+/**
+ * Rewrites paths that survived Leviculum's interface-down processing to the
+ * new runtime indexes. Unmapped entries are discarded only as a defensive
+ * boundary check; normal stale-path deletion belongs to Leviculum.
+ */
+export function remapPersistentPaths(
+  snapshot: Record<string, unknown>,
+  plan: RuntimeInterfaceTransitionPlan,
+): PersistentPathRemapResult {
+  const paths = Array.isArray(snapshot.paths) ? snapshot.paths : [];
+  const retainedByPreviousRuntimeIndex = new Map(plan.retainedInterfaces.map((binding) => [
+    binding.previousRuntimeIndex,
+    binding,
+  ]));
+
+  let discarded = 0;
   let remapped = 0;
   const transitioned = paths.flatMap((value) => {
     if (!value || typeof value !== 'object') {
-      removed += 1;
+      discarded += 1;
       return [];
     }
     const path = value as Record<string, unknown>;
     const previousRuntimeIndex = fieldRuntimeIndex(path);
-    const previous = previousRuntimeIndex === undefined
+    const retained = previousRuntimeIndex === undefined
       ? undefined
-      : previousByRuntimeIndex.get(previousRuntimeIndex);
-    const next = previous ? nextByInterfaceId.get(previous.interfaceId) : undefined;
-    if (!previous || !next || next.networkFingerprint !== previous.networkFingerprint) {
-      removed += 1;
+      : retainedByPreviousRuntimeIndex.get(previousRuntimeIndex);
+    if (!retained) {
+      discarded += 1;
       return [];
     }
-    if (next.runtimeIndex === previousRuntimeIndex) return [path];
+    if (retained.nextRuntimeIndex === previousRuntimeIndex) return [path];
     remapped += 1;
     const remappedPath = { ...path };
     if ('interfaceIndex' in path || !('interface_index' in path)) {
-      remappedPath.interfaceIndex = next.runtimeIndex;
+      remappedPath.interfaceIndex = retained.nextRuntimeIndex;
     }
-    if ('interface_index' in path) remappedPath.interface_index = next.runtimeIndex;
+    if ('interface_index' in path) remappedPath.interface_index = retained.nextRuntimeIndex;
     return [remappedPath];
   });
 
@@ -75,7 +114,7 @@ export function transitionPersistentPaths(
       paths: transitioned,
     },
     retained: transitioned.length,
-    removed,
+    discarded,
     remapped,
   };
 }
