@@ -92,6 +92,29 @@ export interface LxmfPropagationSyncResult {
   duplicates: number;
 }
 
+export type LxmfPropagationSyncState =
+  | 'idle'
+  | 'pathRequested'
+  | 'linkEstablishing'
+  | 'linkEstablished'
+  | 'requestSent'
+  | 'receiving'
+  | 'responseReceived'
+  | 'complete'
+  | 'noPath'
+  | 'linkFailed'
+  | 'transferFailed'
+  | 'noIdentity'
+  | 'noAccess'
+  | 'failed';
+
+export interface LxmfPropagationSyncStatus {
+  syncing: boolean;
+  state?: LxmfPropagationSyncState;
+  progress?: number;
+  transferSize?: number;
+}
+
 export interface ChatMessageQueueResult {
   ok: boolean;
   code?: string;
@@ -264,7 +287,7 @@ export type RuntimeEvent =
   | { type: 'runtimeStatus'; state: RuntimeState }
   | { type: 'interfaceStatus'; id: string; state: InterfaceRuntimeState; errorCode?: string }
   | { type: 'statusDetails'; details: RuntimeStatusDetails }
-  | { type: 'lxmfPropagationSyncStatus'; syncing: boolean }
+  | ({ type: 'lxmfPropagationSyncStatus' } & LxmfPropagationSyncStatus)
   | { type: 'identityReady'; identity: PersistedIdentityRecord; deliveryDestinationHashHex?: string }
   | { type: 'persistIdentity'; requestId: string; identity: PersistedIdentityRecord; activate?: boolean }
   | { type: 'persistNetworkState'; requestId: string; networkState: PersistedNetworkStateRecord }

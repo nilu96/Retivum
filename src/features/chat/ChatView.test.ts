@@ -19,6 +19,7 @@ import {
   interfaceStatuses,
   knownDestinations,
   propagationSyncActive,
+  propagationSyncStatus,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
@@ -93,6 +94,7 @@ describe('ChatView', () => {
     chatInboundTransfers.set([]);
     appPreferences.set(structuredClone(defaultAppPreferences));
     propagationSyncActive.set(false);
+    propagationSyncStatus.set({ syncing: false });
     markChatMessagesRead();
     clearToasts();
     clearProbeHistory();
@@ -342,6 +344,26 @@ describe('ChatView', () => {
     const remountedButton = await screen.findByRole('button', { name: 'Syncing messages from propagation node' });
     expect(remountedButton).toBeDisabled();
     expect(remountedButton).toHaveClass('syncing');
+  });
+
+  it('shows determinate propagation Resource progress without adding permanent copy', async () => {
+    propagationSyncActive.set(true);
+    propagationSyncStatus.set({
+      syncing: true,
+      state: 'receiving',
+      progress: 0.42,
+      transferSize: 4_096,
+    });
+    render(ChatView);
+
+    const syncButton = await screen.findByRole('button', {
+      name: 'Receiving messages — 42% of 4.1 KB',
+    });
+    expect(syncButton).toHaveClass('syncing', 'determinate');
+    expect(syncButton.querySelector('.chat-sync-progress-value')).toHaveAttribute(
+      'stroke-dashoffset',
+      '58',
+    );
   });
 
   it('provides propagation sync beside the contact action in an open mobile conversation', async () => {

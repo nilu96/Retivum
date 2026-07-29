@@ -391,7 +391,13 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .chat-header { padding: 29px 24px 18px; }
 .chat-header h1 { margin: 0; font-size: 1.65rem; }
 .chat-header .header-actions { align-self: start; }
-.chat-sync-button.syncing svg { animation: chat-sync-spin .8s linear infinite; }
+.chat-sync-button { position: relative; }
+.chat-sync-symbol { display: grid; place-items: center; }
+.chat-sync-button.syncing .chat-sync-symbol > svg { animation: chat-sync-spin .8s linear infinite; }
+.chat-sync-progress-ring { position: absolute; inset: 2px; width: 34px; height: 34px; pointer-events: none; transform: rotate(-90deg); }
+.chat-sync-progress-track, .chat-sync-progress-value { fill: none; stroke-width: 2; }
+.chat-sync-progress-track { stroke: color-mix(in srgb, var(--text-subtle) 25%, transparent); }
+.chat-sync-progress-value { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .18s linear; }
 .mobile-conversation-sync-button { display: none; flex: none; }
 @keyframes chat-sync-spin { to { transform: rotate(360deg); } }
 .scope-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-inline: 18px; padding: 3px; border-radius: 10px; background: var(--surface-2); }

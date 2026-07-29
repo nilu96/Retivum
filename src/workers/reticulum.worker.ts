@@ -46,6 +46,7 @@ import {
 } from '../domain/settings';
 import type {
   InterfaceRuntimeState,
+  LxmfPropagationSyncState,
   RuntimeCommand,
   RuntimeConfiguration,
   RuntimeEvent,
@@ -199,6 +200,7 @@ let automaticPropagationSyncTimer: ReturnType<typeof setTimeout> | undefined;
 let statusDetailsTimer: ReturnType<typeof setInterval> | undefined;
 let automaticPropagationSyncPending = false;
 let propagationSyncRequestId: string | undefined;
+let propagationSyncStatusSignature = '';
 let persistenceQueue = Promise.resolve();
 const persistenceWaiters = new Map<string, (ok: boolean) => void>();
 const networkPersistenceWaiters = new Map<string, (ok: boolean) => void>();
@@ -239,6 +241,22 @@ const registeredFullDestinationNames = [
   'rnstransport.remote.management',
 ] as const;
 type RegisteredFullDestinationName = typeof registeredFullDestinationNames[number];
+const lxmfPropagationSyncStates = new Set<LxmfPropagationSyncState>([
+  'idle',
+  'pathRequested',
+  'linkEstablishing',
+  'linkEstablished',
+  'requestSent',
+  'receiving',
+  'responseReceived',
+  'complete',
+  'noPath',
+  'linkFailed',
+  'transferFailed',
+  'noIdentity',
+  'noAccess',
+  'failed',
+]);
 const knownDestinationFullNames = new Map<string, RegisteredFullDestinationName | null>();
 const interfaceOnlineSuppressedAnnounceDestinations = new Set<string>();
 let pathManagementSnapshotSignature = '';
@@ -1119,7 +1137,7 @@ function syncLxmfPropagation(requestId: string): void {
   }
 
   propagationSyncRequestId = requestId;
-  emit({ type: 'lxmfPropagationSyncStatus', syncing: true });
+  emitPropagationSyncStatus({ syncing: true });
   try {
     if (propagationHash) {
       processOutput(node.selectLxmfPropagationNode(hexToBytes(propagationHash)) as WasmOutput);
@@ -1140,6 +1158,15 @@ function rejectPropagationSync(requestId: string, code: string): void {
   log('warning', 'wasm', code);
 }
 
+function emitPropagationSyncStatus(
+  status: Omit<Extract<RuntimeEvent, { type: 'lxmfPropagationSyncStatus' }>, 'type'>,
+): void {
+  const signature = `${status.syncing}:${status.state ?? ''}:${status.progress ?? ''}:${status.transferSize ?? ''}`;
+  if (signature === propagationSyncStatusSignature) return;
+  propagationSyncStatusSignature = signature;
+  emit({ type: 'lxmfPropagationSyncStatus', ...status });
+}
+
 function finishPropagationSync(
   ok: boolean,
   code?: string,
@@ -1149,7 +1176,7 @@ function finishPropagationSync(
   const requestId = propagationSyncRequestId;
   if (!requestId) return;
   propagationSyncRequestId = undefined;
-  emit({ type: 'lxmfPropagationSyncStatus', syncing: false });
+  emitPropagationSyncStatus({ syncing: false });
   emit({ type: 'lxmfPropagationSyncResult', requestId, ok, code, received, duplicates });
   log(ok ? 'info' : 'warning', 'wasm', ok ? 'LXMF_PROPAGATION_SYNC_COMPLETE' : (code ?? 'LXMF_PROPAGATION_SYNC_FAILED'), {
     received: received ?? 0,
@@ -3042,11 +3069,28 @@ function handleNomadResourceAdvertisementEvent(event: Record<string, unknown>): 
 }
 
 function handlePropagationSyncState(event: Record<string, unknown>): void {
-  const state = eventString(event, 'state');
-  if (!state || !propagationSyncRequestId) return;
+  const stateValue = eventString(event, 'state');
+  if (!stateValue || !lxmfPropagationSyncStates.has(stateValue as LxmfPropagationSyncState)
+    || !propagationSyncRequestId) return;
+  const state = stateValue as LxmfPropagationSyncState;
   if (['noPath', 'linkFailed', 'transferFailed', 'noIdentity', 'noAccess', 'failed'].includes(state)) {
     finishPropagationSync(false, `LXMF_PROPAGATION_SYNC_${state.replace(/([A-Z])/g, '_$1').toUpperCase()}`);
+    return;
   }
+  const progressValue = eventNumber(event, 'progress');
+  const progress = progressValue !== undefined && Number.isFinite(progressValue)
+    ? progressValue
+    : undefined;
+  const transferSizeValue = eventNumber(event, 'transferSize');
+  const transferSize = transferSizeValue !== undefined && Number.isFinite(transferSizeValue)
+    ? transferSizeValue
+    : undefined;
+  emitPropagationSyncStatus({
+    syncing: true,
+    state,
+    ...(progress !== undefined ? { progress: Math.min(1, Math.max(0, progress)) } : {}),
+    ...(transferSize !== undefined ? { transferSize: Math.max(0, transferSize) } : {}),
+  });
 }
 
 function handlePropagationSyncComplete(event: Record<string, unknown>): void {

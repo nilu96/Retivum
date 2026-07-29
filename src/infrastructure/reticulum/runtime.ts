@@ -75,6 +75,7 @@ import type {
   LocalDestinationEntry,
   InterfaceRuntimeState,
   LxmfPropagationSyncResult,
+  LxmfPropagationSyncStatus,
   NomadLinkStatus,
   PathTableEntry,
   ProbeResult,
@@ -119,6 +120,7 @@ export const identities = writable<IdentitySummary[]>([]);
 export const deliveryDestinationHash = writable<string | undefined>();
 export const runtimeErrorCode = writable<string | undefined>();
 export const propagationSyncActive = writable(false);
+export const propagationSyncStatus = writable<LxmfPropagationSyncStatus>({ syncing: false });
 export const nomadBookmarks = writable<NomadBookmark[]>([]);
 export const nomadDirectoryReady = writable(false);
 export const provisioningBookmarks = writable<ProvisioningBookmark[]>([]);
@@ -253,6 +255,7 @@ class ReticulumRuntimeController {
         runtimeErrorCode.set('RUNTIME_WORKER_FAILED');
         runtimeStatus.set('error');
         propagationSyncActive.set(false);
+        propagationSyncStatus.set({ syncing: false });
         for (const resolve of this.propagationSyncWaiters.values()) resolve(undefined);
         this.propagationSyncWaiters.clear();
         for (const resolve of this.lxmaPeerWaiters.values()) resolve(undefined);
@@ -1247,6 +1250,7 @@ class ReticulumRuntimeController {
     for (const resolve of this.propagationSyncWaiters.values()) resolve(undefined);
     this.propagationSyncWaiters.clear();
     propagationSyncActive.set(false);
+    propagationSyncStatus.set({ syncing: false });
     for (const resolve of this.messageOperationWaiters.values()) resolve(false);
     this.messageOperationWaiters.clear();
     for (const resolve of this.ignoredDestinationsWaiters.values()) resolve(false);
@@ -1281,7 +1285,19 @@ class ReticulumRuntimeController {
       return;
     }
     if (event.type === 'lxmfPropagationSyncStatus') {
+      const progress = event.progress !== undefined && Number.isFinite(event.progress)
+        ? Math.min(1, Math.max(0, event.progress))
+        : undefined;
+      const transferSize = event.transferSize !== undefined && Number.isFinite(event.transferSize)
+        ? Math.max(0, event.transferSize)
+        : undefined;
       propagationSyncActive.set(event.syncing);
+      propagationSyncStatus.set({
+        syncing: event.syncing,
+        ...(event.state ? { state: event.state } : {}),
+        ...(progress !== undefined ? { progress } : {}),
+        ...(transferSize !== undefined ? { transferSize } : {}),
+      });
       return;
     }
     if (event.type === 'interfaceStatus') {

@@ -55,6 +55,7 @@
   "chat.propagationSync.action": "Sync messages from the preferred or best available propagation node",
   "chat.propagationSync.unconfigured": "Configure a propagation node in Settings to sync messages",
   "chat.propagationSync.running": "Syncing messages from propagation node",
+  "chat.propagationSync.receiving": "Receiving messages — {percent}% of {size}",
   "chat.propagationSync.failed": "Messages could not be synced from the propagation node.",
   "chat.propagationSync.complete.none": "Sync complete. No new messages.",
   "chat.propagationSync.complete.one": "Sync complete. 1 new message.",

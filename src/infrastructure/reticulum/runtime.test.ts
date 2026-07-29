@@ -13,6 +13,8 @@ import {
   localDestinationInventory,
   nomadBookmarks,
   pathTableEntries,
+  propagationSyncActive,
+  propagationSyncStatus,
   provisioningBookmarks,
   remoteDestinationInventory,
   reticulumLogs,
@@ -64,6 +66,8 @@ describe('ReticulumRuntimeController chat deletion', () => {
     localDestinationInventory.set([]);
     knownDestinations.set([]);
     pathTableEntries.set([]);
+    propagationSyncActive.set(false);
+    propagationSyncStatus.set({ syncing: false });
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     internals.worker = undefined;
     internals.destinationDirectoryReconciled = false;
@@ -93,6 +97,32 @@ describe('ReticulumRuntimeController chat deletion', () => {
     }
 
     expect(results).toEqual([{ received: 4, duplicates: 1 }]);
+  });
+
+  it('publishes bounded propagation sync progress and transfer size', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+
+    await internals.handleEvent({
+      type: 'lxmfPropagationSyncStatus',
+      syncing: true,
+      state: 'receiving',
+      progress: 1.5,
+      transferSize: 4_096,
+    });
+
+    expect(get(propagationSyncActive)).toBe(true);
+    expect(get(propagationSyncStatus)).toEqual({
+      syncing: true,
+      state: 'receiving',
+      progress: 1,
+      transferSize: 4_096,
+    });
+
+    await internals.handleEvent({
+      type: 'lxmfPropagationSyncStatus',
+      syncing: false,
+    });
+    expect(get(propagationSyncStatus)).toEqual({ syncing: false });
   });
 
   it('replaces a Nomad bookmark identity when its address changes', async () => {
