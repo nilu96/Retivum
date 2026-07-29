@@ -5,6 +5,7 @@ import {
   hasCurrentInterfaceAnnounce,
   interfaceAnnounceHistoryId,
   interfaceNetworkFingerprint,
+  latestDestinationAnnouncedAt,
   lxmfDeliveryAnnounceFingerprint,
   normalizeInterfaceAnnounceHistoryRecord,
   shouldSuppressInterfaceOnlineAnnounce,
@@ -70,6 +71,49 @@ describe('interface announcement history', () => {
       lxmfDeliveryAnnounceFingerprint('Renamed', 0),
     )).toBe(false);
     expect(hasCurrentInterfaceAnnounce(undefined, current)).toBe(false);
+  });
+
+  it('finds the newest successful announce within the identity and destination scope', () => {
+    const destinationHash = '12'.repeat(16);
+    const records = [
+      createInterfaceAnnounceHistoryRecord(
+        'identity-1',
+        'interface-1',
+        'network-1',
+        destinationHash,
+        'announce-fingerprint-1',
+        '2026-07-29T12:00:00.000Z',
+      ),
+      createInterfaceAnnounceHistoryRecord(
+        'identity-1',
+        'interface-2',
+        'network-2',
+        destinationHash,
+        'announce-fingerprint-1',
+        '2026-07-29T13:00:00.000Z',
+      ),
+      createInterfaceAnnounceHistoryRecord(
+        'identity-1',
+        'interface-1',
+        'network-1',
+        '34'.repeat(16),
+        'announce-fingerprint-2',
+        '2026-07-29T14:00:00.000Z',
+      ),
+      createInterfaceAnnounceHistoryRecord(
+        'identity-2',
+        'interface-1',
+        'network-1',
+        destinationHash,
+        'announce-fingerprint-3',
+        '2026-07-29T15:00:00.000Z',
+      ),
+    ];
+
+    expect(latestDestinationAnnouncedAt(records, 'identity-1', destinationHash))
+      .toBe('2026-07-29T13:00:00.000Z');
+    expect(latestDestinationAnnouncedAt(records, 'identity-1', '56'.repeat(16)))
+      .toBeUndefined();
   });
 
   it('changes the network fingerprint only for material interface changes', () => {

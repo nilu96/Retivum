@@ -114,6 +114,27 @@ export function hasCurrentInterfaceAnnounce(
   return record?.announceFingerprint === announceFingerprint;
 }
 
+export function latestDestinationAnnouncedAt(
+  records: Iterable<InterfaceAnnounceHistoryRecord>,
+  identityId: string,
+  destinationHash: string,
+): string | undefined {
+  const normalizedDestinationHash = destinationHash.toLowerCase();
+  let latestAt: string | undefined;
+  let latestMs = Number.NEGATIVE_INFINITY;
+  for (const record of records) {
+    if (
+      record.identityId !== identityId
+      || record.destinationHash !== normalizedDestinationHash
+    ) continue;
+    const announcedMs = Date.parse(record.lastAnnouncedAt);
+    if (!Number.isFinite(announcedMs) || announcedMs <= latestMs) continue;
+    latestAt = record.lastAnnouncedAt;
+    latestMs = announcedMs;
+  }
+  return latestAt;
+}
+
 export function normalizeInterfaceAnnounceHistoryRecord(
   value: unknown,
 ): InterfaceAnnounceHistoryRecord | undefined {

@@ -31,6 +31,7 @@ import {
   hasCurrentInterfaceAnnounce,
   interfaceAnnounceHistoryId,
   interfaceNetworkFingerprint,
+  latestDestinationAnnouncedAt,
   lxmfDeliveryAnnounceFingerprint,
   normalizeInterfaceAnnounceHistoryRecord,
   shouldSuppressInterfaceOnlineAnnounce,
@@ -843,9 +844,16 @@ function emitPathManagementSnapshot(
       : identity
         ? recognizedFullDestinationName(destinationHash, identity.publicKey)
         : undefined;
+    const lastAnnouncedAt = identity
+      ? latestDestinationAnnouncedAt(
+          interfaceAnnounceHistory.values(),
+          identity.id,
+          destinationHash,
+        )
+      : undefined;
     return {
       destinationHash,
-      ...(identity?.lastAnnouncedAt ? { lastAnnouncedAt: identity.lastAnnouncedAt } : {}),
+      ...(lastAnnouncedAt ? { lastAnnouncedAt } : {}),
       ...(fullDestinationName ? { fullDestinationName } : {}),
     };
   }).sort((left, right) => (
@@ -1113,6 +1121,7 @@ function processOutput(
     });
   }
   for (const event of output.events ?? []) handleWasmEvent(event);
+  if (historyUpdates.size > 0) emitKnownDestinationSnapshot();
   emitLxmfOutboundProgress();
   emitDestinationPathStatuses(Array.from(observedDestinationPaths), false);
   if (output.dirtyPersistentState) queueSnapshotPersistence();
