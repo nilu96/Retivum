@@ -495,7 +495,7 @@
   "settings.chat.messageRetention.90": "After 90 days",
   "settings.chat.messageRetention.help": "All expired messages, including queued and failed messages, are deleted from local history.",
   "settings.blocked.title": "Blocked destinations",
-  "settings.blocked.description": "Blocked LXMF destinations cannot send messages to this identity and cannot receive messages from it.",
+  "settings.blocked.description": "Blocked LXMF destinations cannot send messages to the currently active identity or receive messages from it.",
   "settings.blocked.empty": "No LXMF destinations are blocked for the active identity.",
   "settings.blocked.add": "Add destinations",
   "settings.blocked.addSuccess.one": "Blocked 1 destination.",
