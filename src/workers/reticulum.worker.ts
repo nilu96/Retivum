@@ -67,6 +67,10 @@ import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
 import { diagnosticErrorMessage } from '../infrastructure/reticulum/diagnostic-error';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
+import {
+  transitionPersistentPaths,
+  type RuntimeInterfaceBinding,
+} from '../infrastructure/reticulum/path-interface-transition';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
 import { requiresReticulumRuntimeRebuild } from '../infrastructure/reticulum/runtime-configuration';
 import { computeRNodeBitrate, InterfaceTelemetryTracker } from '../infrastructure/reticulum/interface-telemetry';
@@ -373,11 +377,25 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
     if (command.type === 'applyConfiguration') {
       log('info', 'runtime', 'CONFIGURATION_APPLYING', { interfaces: command.configuration.interfaces.length });
       const rebuild = requiresReticulumRuntimeRebuild(configuration, command.configuration);
+      const interfacesChanged = JSON.stringify(configuration?.interfaces ?? [])
+        !== JSON.stringify(command.configuration.interfaces);
+      const previousBindings = interfacesChanged
+        ? runtimeInterfaceBindings()
+        : undefined;
       configuration = command.configuration;
       pruneInterfaceAnnounceHistory(command.configuration.interfaces);
       if (identity && privateKey) {
         if (rebuild) {
-          await rebuildRuntime(true);
+          await rebuildRuntime(
+            true,
+            undefined,
+            previousBindings
+              ? {
+                  previousBindings,
+                  nextInterfaces: command.configuration.interfaces,
+                }
+              : undefined,
+          );
         } else {
           automaticPropagationSyncPending = false;
           scheduleAutomaticAnnounce();
@@ -637,33 +655,66 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
   }
 }
 
-async function rebuildRuntime(persistCurrent = false, startupId?: string): Promise<void> {
+interface PathInterfaceTransition {
+  previousBindings: RuntimeInterfaceBinding[];
+  nextInterfaces: InterfaceConfig[];
+}
+
+interface ExportedRuntimePersistentState {
+  identity: unknown;
+  network: Record<string, unknown>;
+  persisted: boolean;
+}
+
+async function rebuildRuntime(
+  persistCurrent = false,
+  startupId?: string,
+  pathInterfaceTransition?: PathInterfaceTransition,
+): Promise<void> {
   if (!identity || !privateKey || !configuration) return;
-  if (persistCurrent && node) await persistSnapshot();
+  const livePersistentState = persistCurrent && node
+    ? await persistSnapshot(pathInterfaceTransition
+        ? (networkSnapshot) => {
+            const result = transitionPersistentPaths(
+              networkSnapshot,
+              pathInterfaceTransition.previousBindings,
+              pathInterfaceTransition.nextInterfaces,
+            );
+            log('info', 'runtime', 'PATHS_RECONCILED_FOR_INTERFACE_CONFIGURATION', {
+              retained: result.retained,
+              removed: result.removed,
+              remapped: result.remapped,
+            });
+            return result.snapshot;
+          }
+        : undefined)
+    : undefined;
   cleanupRuntime();
 
   let legacyPersistentState: unknown;
-  let networkPersistentState: unknown;
-  let identityPersistentState: unknown;
+  let networkPersistentState: unknown = livePersistentState?.network;
+  let identityPersistentState: unknown = livePersistentState?.identity;
   const encryptedNetworkSnapshot = persistedNetworkState?.encryptedSnapshot;
   const hasPersistedNetworkSnapshot = encryptedNetworkSnapshot !== undefined;
-  let networkInventoryComplete = !hasPersistedNetworkSnapshot;
-  if (encryptedNetworkSnapshot) {
-    try {
-      networkPersistentState = decodeSnapshot(await decrypt(encryptedNetworkSnapshot));
-      networkInventoryComplete = true;
-    } catch {
-      emit({ type: 'runtimeError', code: 'RUNTIME_NETWORK_SNAPSHOT_RESTORE_FAILED' });
+  let networkInventoryComplete = livePersistentState !== undefined || !hasPersistedNetworkSnapshot;
+  if (!livePersistentState) {
+    if (encryptedNetworkSnapshot) {
+      try {
+        networkPersistentState = decodeSnapshot(await decrypt(encryptedNetworkSnapshot));
+        networkInventoryComplete = true;
+      } catch {
+        emit({ type: 'runtimeError', code: 'RUNTIME_NETWORK_SNAPSHOT_RESTORE_FAILED' });
+      }
     }
-  }
-  if (identity.encryptedSnapshot) {
-    try {
-      const decoded = decodeSnapshot(await decrypt(identity.encryptedSnapshot));
-      if (hasPersistedNetworkSnapshot && networkInventoryComplete) identityPersistentState = decoded;
-      else legacyPersistentState = decoded;
-    } catch {
-      if (!hasPersistedNetworkSnapshot) networkInventoryComplete = false;
-      emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_RESTORE_FAILED' });
+    if (identity.encryptedSnapshot) {
+      try {
+        const decoded = decodeSnapshot(await decrypt(identity.encryptedSnapshot));
+        if (hasPersistedNetworkSnapshot && networkInventoryComplete) identityPersistentState = decoded;
+        else legacyPersistentState = decoded;
+      } catch {
+        if (!hasPersistedNetworkSnapshot) networkInventoryComplete = false;
+        emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_RESTORE_FAILED' });
+      }
     }
   }
   restoreKnownDestinationPublicKeys(networkPersistentState ?? legacyPersistentState);
@@ -723,6 +774,7 @@ async function rebuildRuntime(persistCurrent = false, startupId?: string): Promi
   scheduleNextTick();
   scheduleAutomaticAnnounce();
   scheduleAutomaticPropagationSync();
+  if (livePersistentState && !livePersistentState.persisted) queueSnapshotPersistence();
   if (legacyPersistentState && !persistedNetworkState) queueSnapshotPersistence();
 }
 
@@ -4007,6 +4059,19 @@ function stableInterfaceId(runtimeId: number | undefined): string | undefined {
   return Array.from(drivers.values()).find((driver) => driver.hasRuntimeId(runtimeId))?.stableId;
 }
 
+function runtimeInterfaceBindings(): RuntimeInterfaceBinding[] {
+  return Array.from(drivers.values()).flatMap((driver) => {
+    const runtimeIndex = driver.runtimeIndex();
+    return runtimeIndex === undefined
+      ? []
+      : [{
+          interfaceId: driver.stableId,
+          runtimeIndex,
+          networkFingerprint: driver.networkFingerprint,
+        }];
+  });
+}
+
 function currentChatMessagePath(
   destinationHash: string,
   networkSnapshot?: unknown,
@@ -4079,15 +4144,27 @@ function scheduleNextTick(): void {
 }
 
 function queueSnapshotPersistence(): void {
-  persistenceQueue = persistenceQueue.then(persistSnapshot).catch(() => {
-    emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_PERSIST_FAILED' });
-  });
+  persistenceQueue = persistenceQueue
+    .then(() => persistSnapshot())
+    .then(() => undefined)
+    .catch(() => {
+      emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_PERSIST_FAILED' });
+    });
 }
 
-async function persistSnapshot(): Promise<void> {
-  if (!node || !identity || !wrappingKey) return;
-  const encryptedSnapshot = await encrypt(encodeSnapshot(node.exportIdentityPersistentState()));
-  const encryptedNetworkSnapshot = await encrypt(encodeSnapshot(node.exportNetworkPersistentState()));
+async function persistSnapshot(
+  transformNetworkState?: (
+    snapshot: Record<string, unknown>,
+  ) => Record<string, unknown>,
+): Promise<ExportedRuntimePersistentState | undefined> {
+  if (!node || !identity || !wrappingKey) return undefined;
+  const identityPersistentState = node.exportIdentityPersistentState();
+  const exportedNetworkState = node.exportNetworkPersistentState() as Record<string, unknown>;
+  const networkPersistentState = transformNetworkState
+    ? transformNetworkState(exportedNetworkState)
+    : exportedNetworkState;
+  const encryptedSnapshot = await encrypt(encodeSnapshot(identityPersistentState));
+  const encryptedNetworkSnapshot = await encrypt(encodeSnapshot(networkPersistentState));
   const now = new Date().toISOString();
   const updated: PersistedIdentityRecord = {
     ...identity,
@@ -4103,13 +4180,19 @@ async function persistSnapshot(): Promise<void> {
     requestIdentitySave(updated),
     requestNetworkStateSave(updatedNetworkState),
   ]);
-  if (identitySaved && networkSaved) {
+  const persisted = identitySaved && networkSaved;
+  if (persisted) {
     identity = updated;
     persistedNetworkState = updatedNetworkState;
     node.clearDirtyPersistentState();
     log('debug', 'persistence', 'SNAPSHOT_PERSISTED');
     emitPropagationNodeSnapshot();
   }
+  return {
+    identity: identityPersistentState,
+    network: networkPersistentState,
+    persisted,
+  };
 }
 
 async function persistIdentityDisplayName(displayName: string): Promise<boolean> {
