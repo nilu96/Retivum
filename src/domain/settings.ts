@@ -53,7 +53,8 @@ export interface AppPreferences {
 
 export interface WebSocketInterfaceConfig {
   id: string;
-  schemaVersion: 3;
+  schemaVersion: 4;
+  createdAt: string;
   type: 'websocket';
   name: string;
   enabled: boolean;
@@ -69,7 +70,8 @@ export interface WebSocketInterfaceConfig {
 
 export interface RNodeInterfaceConfig {
   id: string;
-  schemaVersion: 3;
+  schemaVersion: 4;
+  createdAt: string;
   type: 'rnode';
   name: string;
   enabled: boolean;
@@ -95,7 +97,8 @@ export interface RNodeInterfaceConfig {
 
 export interface TcpInterfaceConfig {
   id: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
+  createdAt: string;
   type: 'tcp';
   name: string;
   enabled: boolean;
@@ -109,7 +112,8 @@ export interface TcpInterfaceConfig {
 
 export interface UdpInterfaceConfig {
   id: string;
-  schemaVersion: 2;
+  schemaVersion: 3;
+  createdAt: string;
   type: 'udp';
   name: string;
   enabled: boolean;
@@ -287,10 +291,14 @@ export function normalizeAutoAnnounceInterval(value: unknown, legacyEnabled?: bo
     : legacyEnabled === true ? 360 : defaultAppPreferences.lxmf.autoAnnounceIntervalMinutes;
 }
 
-export function createWebSocketInterfaceDraft(id: string = crypto.randomUUID()): WebSocketInterfaceConfig {
+export function createWebSocketInterfaceDraft(
+  id: string = crypto.randomUUID(),
+  createdAt = new Date().toISOString(),
+): WebSocketInterfaceConfig {
   return {
     id,
-    schemaVersion: 3,
+    schemaVersion: 4,
+    createdAt,
     type: 'websocket',
     name: '',
     enabled: true,
@@ -308,10 +316,12 @@ export function createWebSocketInterfaceDraft(id: string = crypto.randomUUID()):
 export function createRNodeInterfaceDraft(
   connectionType: RNodeConnectionType,
   id: string = crypto.randomUUID(),
+  createdAt = new Date().toISOString(),
 ): RNodeInterfaceConfig {
   return {
     id,
-    schemaVersion: 3,
+    schemaVersion: 4,
+    createdAt,
     type: 'rnode',
     name: '',
     enabled: true,
@@ -330,10 +340,14 @@ export function createRNodeInterfaceDraft(
   };
 }
 
-export function createTcpInterfaceDraft(id: string = crypto.randomUUID()): TcpInterfaceConfig {
+export function createTcpInterfaceDraft(
+  id: string = crypto.randomUUID(),
+  createdAt = new Date().toISOString(),
+): TcpInterfaceConfig {
   return {
     id,
-    schemaVersion: 2,
+    schemaVersion: 3,
+    createdAt,
     type: 'tcp',
     name: '',
     enabled: true,
@@ -343,10 +357,14 @@ export function createTcpInterfaceDraft(id: string = crypto.randomUUID()): TcpIn
   };
 }
 
-export function createUdpInterfaceDraft(id: string = crypto.randomUUID()): UdpInterfaceConfig {
+export function createUdpInterfaceDraft(
+  id: string = crypto.randomUUID(),
+  createdAt = new Date().toISOString(),
+): UdpInterfaceConfig {
   return {
     id,
-    schemaVersion: 2,
+    schemaVersion: 3,
+    createdAt,
     type: 'udp',
     name: '',
     enabled: true,
@@ -380,6 +398,9 @@ export function normalizeWebSocketInterfaceConfig(value: unknown): WebSocketInte
   if (typeof source.id !== 'string' || !source.id || source.type !== 'websocket') return undefined;
 
   const normalized = createWebSocketInterfaceDraft(source.id);
+  normalized.createdAt = normalizeInterfaceCreatedAt(
+    (source as { createdAt?: unknown }).createdAt,
+  );
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
@@ -400,6 +421,7 @@ export function normalizeRNodeInterfaceConfig(value: unknown): RNodeInterfaceCon
   const connectionType = source.connection?.type === 'ble' ? 'ble' : source.connection?.type === 'serial' ? 'serial' : undefined;
   if (!connectionType) return undefined;
   const normalized = createRNodeInterfaceDraft(connectionType, source.id);
+  normalized.createdAt = normalizeInterfaceCreatedAt(source.createdAt);
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
@@ -425,6 +447,7 @@ export function normalizeTcpInterfaceConfig(value: unknown): TcpInterfaceConfig 
   const source = value as Partial<TcpInterfaceConfig>;
   if (typeof source.id !== 'string' || !source.id || source.type !== 'tcp') return undefined;
   const normalized = createTcpInterfaceDraft(source.id);
+  normalized.createdAt = normalizeInterfaceCreatedAt(source.createdAt);
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
@@ -441,6 +464,7 @@ export function normalizeUdpInterfaceConfig(value: unknown): UdpInterfaceConfig 
   const source = value as Partial<UdpInterfaceConfig>;
   if (typeof source.id !== 'string' || !source.id || source.type !== 'udp') return undefined;
   const normalized = createUdpInterfaceDraft(source.id);
+  normalized.createdAt = normalizeInterfaceCreatedAt(source.createdAt);
   normalized.name = typeof source.name === 'string' ? source.name : '';
   normalized.enabled = source.enabled === true;
   normalized.mode = normalizeInterfaceMode(source.mode);
@@ -466,6 +490,21 @@ export function normalizeInterfaceConfig(value: unknown): InterfaceConfig | unde
   if (type === 'tcp') return normalizeTcpInterfaceConfig(value);
   if (type === 'udp') return normalizeUdpInterfaceConfig(value);
   return undefined;
+}
+
+export function sortInterfaceConfigurations(
+  interfaces: readonly InterfaceConfig[],
+): InterfaceConfig[] {
+  return [...interfaces].sort((left, right) => (
+    left.createdAt.localeCompare(right.createdAt)
+    || left.id.localeCompare(right.id)
+  ));
+}
+
+function normalizeInterfaceCreatedAt(value: unknown): string {
+  if (typeof value !== 'string') return new Date(0).toISOString();
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : new Date(0).toISOString();
 }
 
 export type InterfaceValidationCode =

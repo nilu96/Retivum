@@ -12,6 +12,7 @@ import {
   normalizeInterfaceMode,
   normalizeDestinationHash,
   resolveLxmfDeliveryPlan,
+  sortInterfaceConfigurations,
   tcpAddress,
   udpAddress,
   validateWebSocketInterface,
@@ -31,11 +32,15 @@ describe('WebSocket interface configuration', () => {
   });
 
   it('migrates legacy reconnect settings to the automatic driver policy', () => {
+    const expected = createWebSocketInterfaceDraft(
+      'legacy-interface',
+      '2026-07-29T12:00:00.000Z',
+    );
     expect(normalizeWebSocketInterfaceConfig({
-      ...createWebSocketInterfaceDraft('legacy-interface'),
+      ...expected,
       schemaVersion: 1,
       reconnect: { enabled: false, initialDelayMs: 60_000 },
-    })).toEqual(createWebSocketInterfaceDraft('legacy-interface'));
+    })).toEqual(expected);
   });
 
   it('validates user-controlled fields', () => {
@@ -61,6 +66,25 @@ describe('WebSocket interface configuration', () => {
 });
 
 describe('platform interface configuration', () => {
+  it('sorts interfaces by immutable creation time with a stable ID tie-breaker', () => {
+    const newest = createTcpInterfaceDraft('a-newest', '2026-07-29T12:02:00.000Z');
+    const tiedSecond = createTcpInterfaceDraft('z-tied', '2026-07-29T12:01:00.000Z');
+    const oldest = createTcpInterfaceDraft('m-oldest', '2026-07-29T12:00:00.000Z');
+    const tiedFirst = createTcpInterfaceDraft('a-tied', '2026-07-29T12:01:00.000Z');
+
+    expect(sortInterfaceConfigurations([
+      newest,
+      tiedSecond,
+      oldest,
+      tiedFirst,
+    ])).toEqual([
+      oldest,
+      tiedFirst,
+      tiedSecond,
+      newest,
+    ]);
+  });
+
   it('persists every Python-compatible interface mode and migrates accepted aliases', () => {
     expect(interfaceModes).toEqual([
       'full', 'pointToPoint', 'accessPoint', 'roaming', 'boundary', 'gateway',

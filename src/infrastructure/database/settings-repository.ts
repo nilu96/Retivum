@@ -1,5 +1,9 @@
 import type { AppPreferences, InterfaceConfig } from '../../domain/settings';
-import { normalizeAppPreferences, normalizeInterfaceConfig } from '../../domain/settings';
+import {
+  normalizeAppPreferences,
+  normalizeInterfaceConfig,
+  sortInterfaceConfigurations,
+} from '../../domain/settings';
 import { interfaceNetworkFingerprint } from '../../domain/interface-announce';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
@@ -30,10 +34,10 @@ export class BrowserSettingsRepository implements SettingsRepository {
 
       return {
         preferences: normalizeAppPreferences(preferences),
-        interfaces: interfaces.flatMap((item) => {
+        interfaces: sortInterfaceConfigurations(interfaces.flatMap((item) => {
           const normalized = normalizeInterfaceConfig(item);
           return normalized ? [normalized] : [];
-        }),
+        })),
       };
     } finally {
       database.close();
@@ -58,12 +62,22 @@ export class BrowserSettingsRepository implements SettingsRepository {
         ['interfaces', 'interfaceAnnounceHistory'],
         'readwrite',
       );
-      transaction.objectStore('interfaces').put(structuredClone(config));
+      const interfaceStore = transaction.objectStore('interfaces');
+      const existing = normalizeInterfaceConfig(
+        await requestResult<unknown>(interfaceStore.get(config.id)),
+      );
+      const normalized = normalizeInterfaceConfig(config);
+      if (!normalized) throw new Error('INTERFACE_CONFIG_INVALID');
+      const stored: InterfaceConfig = {
+        ...normalized,
+        createdAt: existing?.createdAt ?? normalized.createdAt,
+      };
+      interfaceStore.put(structuredClone(stored));
       const historyStore = transaction.objectStore('interfaceAnnounceHistory');
       const historyRecords = await requestResult<unknown[]>(
         historyStore.index('interfaceId').getAll(config.id),
       );
-      const networkFingerprint = interfaceNetworkFingerprint(config);
+      const networkFingerprint = interfaceNetworkFingerprint(stored);
       for (const value of historyRecords) {
         if (!value || typeof value !== 'object') continue;
         const record = value as { id?: unknown; networkFingerprint?: unknown };

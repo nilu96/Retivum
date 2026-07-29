@@ -832,7 +832,7 @@ Use Svelte context for app-scoped service injection and small rune/store modules
 | `settings` | Versioned non-secret preferences, `activeIdentityId`, locale/theme, active last-known-good node config, and separate pending draft reference |
 | `identities` | Stable UUID, LXMF display name, hash/public key, encrypted private-key reference, created/updated times; exactly one referenced by `activeIdentityId` |
 | `lxmfPreferences` | Default direct/opportunistic/propagated method, propagation-enabled flag, and optional normalized preferred propagation-node destination hash; the flag is false and no hash exists on first run |
-| `interfaces` | Stable UUID plus discriminated type configuration and persisted enabled state; shared across managed identities and empty on first run |
+| `interfaces` | Stable UUID, immutable creation timestamp, discriminated type configuration, and persisted enabled state; shared across managed identities, always presented in creation order, and empty on first run |
 | `interfaceAnnounceHistory` | `identityId`, stable interface ID, material network fingerprint, destination hash, enriched announce fingerprint, and last successful dispatch time; used to distinguish first announcements and metadata changes from unchanged reconnects across application restarts |
 | `contacts` | `(identityId, destinationHash)` unique key, user-assigned local name, optional separately stored announce label, created/updated times, trust/verification notes |
 | `conversations` | `identityId`, peer/group reference, unread/read cursor, latest message/draft activity, sort metadata; may exist before the first message |

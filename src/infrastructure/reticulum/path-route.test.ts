@@ -6,7 +6,8 @@ const destinationHash = '12'.repeat(16);
 const nextHopHash = '34'.repeat(16);
 const interfaceConfig: InterfaceConfig = {
   id: 'interface-one',
-  schemaVersion: 3,
+  schemaVersion: 4,
+  createdAt: '2026-07-29T12:00:00.000Z',
   type: 'websocket',
   name: 'Community Hub',
   enabled: true,

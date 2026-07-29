@@ -13,6 +13,7 @@
     normalizeChatImageLongEdge,
     normalizeDestinationHash,
     propagationIsActive,
+    sortInterfaceConfigurations,
     type AppPreferences,
     type ImageDownscalingMode,
     type InAppNotificationMode,
@@ -164,9 +165,9 @@
     try {
       await repository.saveInterface(config);
       const existingIndex = interfaces.findIndex((item) => item.id === config.id);
-      interfaces = existingIndex === -1
+      interfaces = sortInterfaceConfigurations(existingIndex === -1
         ? [...interfaces, config]
-        : interfaces.map((item) => item.id === config.id ? config : item);
+        : interfaces.map((item) => item.id === config.id ? config : item));
       await reticulumRuntime.applyConfiguration($state.snapshot(preferences), $state.snapshot(interfaces));
       editorOpen = false;
       editorConfig = undefined;
@@ -189,7 +190,9 @@
     }
     try {
       await repository.saveInterface(updated);
-      interfaces = interfaces.map((item) => item.id === updated.id ? updated : item);
+      interfaces = sortInterfaceConfigurations(
+        interfaces.map((item) => item.id === updated.id ? updated : item),
+      );
       interfaceStatuses.update((statuses) => ({
         ...statuses,
         [updated.id]: updated.enabled ? 'connecting' : 'disabled',

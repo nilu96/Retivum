@@ -91,6 +91,28 @@ describe('BrowserSettingsRepository', () => {
     expect((await repository.load()).interfaces[0]?.enabled).toBe(true);
   });
 
+  it('loads interfaces by creation time and preserves creation time across edits', async () => {
+    const repository = new BrowserSettingsRepository();
+    const older = createTcpInterfaceDraft('z-older', '2026-07-29T12:00:00.000Z');
+    const newer = createTcpInterfaceDraft('a-newer', '2026-07-29T12:01:00.000Z');
+    await repository.saveInterface(newer);
+    await repository.saveInterface(older);
+
+    expect((await repository.load()).interfaces.map((config) => config.id)).toEqual([
+      older.id,
+      newer.id,
+    ]);
+
+    await repository.saveInterface({
+      ...newer,
+      name: 'Edited',
+      createdAt: '2020-01-01T00:00:00.000Z',
+    });
+    const restored = await repository.load();
+    expect(restored.interfaces.map((config) => config.id)).toEqual([older.id, newer.id]);
+    expect(restored.interfaces[1]?.createdAt).toBe(newer.createdAt);
+  });
+
   it('preserves history for policy edits and clears it after a material network change', async () => {
     const repository = new BrowserSettingsRepository();
     const historyRepository = new BrowserInterfaceAnnounceHistoryRepository();
@@ -134,5 +156,46 @@ describe('BrowserSettingsRepository', () => {
     await repository.saveInterface(tcp);
     await repository.saveInterface(udp);
     expect((await repository.load()).interfaces).toEqual(expect.arrayContaining([rnode, tcp, udp]));
+  });
+
+  it('migrates legacy interfaces to one deterministic persisted creation order', async () => {
+    const request = indexedDB.open('retivum', 15);
+    await new Promise<void>((resolve, reject) => {
+      request.onupgradeneeded = () => {
+        request.result.createObjectStore('settings');
+        request.result.createObjectStore('interfaces', { keyPath: 'id' });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const database = request.result;
+        const transaction = database.transaction('interfaces', 'readwrite');
+        const store = transaction.objectStore('interfaces');
+        const first = createWebSocketInterfaceDraft('z-legacy-first');
+        const second = createWebSocketInterfaceDraft('a-legacy-second');
+        const { createdAt: _firstCreatedAt, ...legacyFirst } = first;
+        const { createdAt: _secondCreatedAt, ...legacySecond } = second;
+        store.put({ ...legacyFirst, schemaVersion: 3 });
+        store.put({ ...legacySecond, schemaVersion: 3 });
+        transaction.oncomplete = () => {
+          database.close();
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      };
+    });
+
+    const repository = new BrowserSettingsRepository();
+    const firstLoad = await repository.load();
+    const secondLoad = await repository.load();
+    expect(firstLoad.interfaces.map((config) => config.id)).toEqual([
+      'a-legacy-second',
+      'z-legacy-first',
+    ]);
+    expect(secondLoad.interfaces).toEqual(firstLoad.interfaces);
+    expect(firstLoad.interfaces.map((config) => config.createdAt)).toEqual([
+      '1970-01-01T00:00:00.000Z',
+      '1970-01-01T00:00:00.001Z',
+    ]);
+    expect(firstLoad.interfaces.every((config) => config.schemaVersion === 4)).toBe(true);
   });
 });

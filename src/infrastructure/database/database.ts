@@ -1,9 +1,10 @@
 import type { KnownDestinationRecord } from '../../domain/known-destination';
 import type { ChatMessage } from '../../domain/chat';
 import { assignChatMessageOrderings } from '../../domain/chat-ordering';
+import { normalizeInterfaceConfig } from '../../domain/settings';
 
 const databaseName = 'retivum';
-const databaseVersion = 15;
+const databaseVersion = 16;
 
 export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -55,8 +56,28 @@ export async function openRetivumDatabase(): Promise<IDBDatabase> {
       database.deleteObjectStore('propagationNodes');
     }
     if (event.oldVersion > 0 && event.oldVersion < 14) migrateChatMessageOrdering(request);
+    if (event.oldVersion > 0 && event.oldVersion < 16) migrateInterfaceCreationTimes(request);
   };
   return requestResult(request);
+}
+
+function migrateInterfaceCreationTimes(request: IDBOpenDBRequest): void {
+  const transaction = request.transaction;
+  if (!transaction) return;
+  const store = transaction.objectStore('interfaces');
+  const interfacesRequest = store.getAll();
+  interfacesRequest.onsuccess = () => {
+    interfacesRequest.result.forEach((value, index) => {
+      if (!value || typeof value !== 'object') return;
+      const source = value as Record<string, unknown>;
+      const createdAt = typeof source.createdAt === 'string'
+        && Number.isFinite(Date.parse(source.createdAt))
+        ? source.createdAt
+        : new Date(index).toISOString();
+      const normalized = normalizeInterfaceConfig({ ...source, createdAt });
+      if (normalized) store.put(normalized);
+    });
+  };
 }
 
 function migrateChatMessageOrdering(request: IDBOpenDBRequest): void {

@@ -13,7 +13,8 @@ function configuredInterface(
 ): WebSocketInterfaceConfig {
   return {
     id,
-    schemaVersion: 3,
+    schemaVersion: 4,
+    createdAt: '2026-07-29T12:00:00.000Z',
     type: 'websocket',
     name: id,
     enabled,

@@ -38,7 +38,8 @@ import { createRNodeByteConnection, isRetryableBleError } from './byte-connectio
 
 const config: RNodeInterfaceConfig = {
   id: 'native-rnode',
-  schemaVersion: 3,
+  schemaVersion: 4,
+  createdAt: '2026-07-29T12:00:00.000Z',
   type: 'rnode',
   name: 'RNode',
   enabled: true,

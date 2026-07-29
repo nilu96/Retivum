@@ -55,6 +55,7 @@ import {
 import {
   defaultAppPreferences,
   normalizeDestinationHash,
+  sortInterfaceConfigurations,
   type AppPreferences,
   type InterfaceConfig,
 } from '../../domain/settings';
@@ -327,12 +328,13 @@ class ReticulumRuntimeController {
   }
 
   async applyConfiguration(preferences: AppPreferences, interfaces: InterfaceConfig[]): Promise<void> {
+    const orderedInterfaces = sortInterfaceConfigurations(interfaces);
     const configuration: RuntimeConfiguration = {
       preferences: structuredClone(preferences),
-      interfaces: structuredClone(runtimeInterfaceConfigurations(interfaces)),
+      interfaces: structuredClone(runtimeInterfaceConfigurations(orderedInterfaces)),
     };
     appPreferences.set(structuredClone(preferences));
-    interfaceConfigurations.set(structuredClone(interfaces));
+    interfaceConfigurations.set(structuredClone(orderedInterfaces));
     await this.pruneExpiredChatMessages();
     this.post({ type: 'applyConfiguration', configuration });
   }
