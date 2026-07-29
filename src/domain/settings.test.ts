@@ -5,7 +5,6 @@ import {
   createTcpInterfaceDraft,
   createUdpInterfaceDraft,
   interfaceModes,
-  interfaceShouldAnnounceWhenOnline,
   lxmfInboundSourceAllowed,
   normalizeAppPreferences,
   normalizeWebSocketInterfaceConfig,
@@ -99,13 +98,6 @@ describe('platform interface configuration', () => {
       ...createWebSocketInterfaceDraft('configured-websocket'),
       reannounceOnReconnect: false,
     })?.reannounceOnReconnect).toBe(false);
-  });
-
-  it('announces every interface once, then follows the saved instance setting', () => {
-    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: false }, true)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: true }, true)).toBe(true);
-    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: false }, false)).toBe(false);
-    expect(interfaceShouldAnnounceWhenOnline({ reannounceOnReconnect: true }, false)).toBe(true);
   });
 
   it('normalizes and validates RNode radio and device settings', () => {

@@ -1,6 +1,11 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createRNodeInterfaceDraft, createTcpInterfaceDraft, createUdpInterfaceDraft, createWebSocketInterfaceDraft } from '../../domain/settings';
+import {
+  createInterfaceAnnounceHistoryRecord,
+  interfaceNetworkFingerprint,
+} from '../../domain/interface-announce';
+import { BrowserInterfaceAnnounceHistoryRepository } from './interface-announce-history-repository';
 import { BrowserSettingsRepository } from './settings-repository';
 
 function deleteDatabase(): Promise<void> {
@@ -55,12 +60,22 @@ describe('BrowserSettingsRepository', () => {
 
   it('deletes an interface without changing preferences', async () => {
     const repository = new BrowserSettingsRepository();
+    const historyRepository = new BrowserInterfaceAnnounceHistoryRepository();
     const config = createWebSocketInterfaceDraft('temporary-relay');
     config.name = 'Temporary relay';
     await repository.saveInterface(config);
+    await historyRepository.save([createInterfaceAnnounceHistoryRecord(
+      'identity-1',
+      config.id,
+      interfaceNetworkFingerprint(config),
+      '12'.repeat(16),
+      'announce-fingerprint-1',
+      '2026-07-29T12:00:00.000Z',
+    )]);
     await repository.deleteInterface(config.id);
 
     expect((await repository.load()).interfaces).toEqual([]);
+    expect(await historyRepository.load('identity-1')).toEqual([]);
   });
 
   it('persists disabling and re-enabling an interface', async () => {
@@ -74,6 +89,36 @@ describe('BrowserSettingsRepository', () => {
 
     await repository.saveInterface({ ...config, enabled: true });
     expect((await repository.load()).interfaces[0]?.enabled).toBe(true);
+  });
+
+  it('preserves history for policy edits and clears it after a material network change', async () => {
+    const repository = new BrowserSettingsRepository();
+    const historyRepository = new BrowserInterfaceAnnounceHistoryRepository();
+    const config = createWebSocketInterfaceDraft('editable-relay');
+    await repository.saveInterface(config);
+    const history = createInterfaceAnnounceHistoryRecord(
+      'identity-1',
+      config.id,
+      interfaceNetworkFingerprint(config),
+      '12'.repeat(16),
+      'announce-fingerprint-1',
+      '2026-07-29T12:00:00.000Z',
+    );
+    await historyRepository.save([history]);
+
+    await repository.saveInterface({
+      ...config,
+      name: 'Renamed relay',
+      enabled: false,
+      reannounceOnReconnect: false,
+    });
+    expect(await historyRepository.load('identity-1')).toEqual([history]);
+
+    await repository.saveInterface({
+      ...config,
+      connection: { ...config.connection, host: 'another-relay.example' },
+    });
+    expect(await historyRepository.load('identity-1')).toEqual([]);
   });
 
   it('persists heterogeneous interface configurations', async () => {

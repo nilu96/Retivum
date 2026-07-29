@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { PersistedIdentityRecord } from '../../domain/identity';
+import { createInterfaceAnnounceHistoryRecord } from '../../domain/interface-announce';
+import { BrowserInterfaceAnnounceHistoryRepository } from './interface-announce-history-repository';
 import { BrowserIdentityRepository } from './identity-repository';
 
 function deleteDatabase(): Promise<void> {
@@ -60,6 +62,7 @@ describe('BrowserIdentityRepository', () => {
 
   it('lists, activates, and deletes only inactive identities', async () => {
     const repository = new BrowserIdentityRepository();
+    const historyRepository = new BrowserInterfaceAnnounceHistoryRepository();
     const identity = (id: string): PersistedIdentityRecord => ({
       id,
       schemaVersion: 1,
@@ -78,6 +81,24 @@ describe('BrowserIdentityRepository', () => {
 
     await repository.saveAndActivate(identity('identity-1'));
     await repository.save(identity('identity-2'));
+    await historyRepository.save([
+      createInterfaceAnnounceHistoryRecord(
+        'identity-1',
+        'interface-1',
+        'network-1',
+        '12'.repeat(16),
+        'announce-fingerprint-1',
+        '2026-07-29T12:00:00.000Z',
+      ),
+      createInterfaceAnnounceHistoryRecord(
+        'identity-2',
+        'interface-1',
+        'network-1',
+        '34'.repeat(16),
+        'announce-fingerprint-2',
+        '2026-07-29T12:01:00.000Z',
+      ),
+    ]);
     expect((await repository.loadAll()).map((item) => item.id)).toEqual(['identity-1', 'identity-2']);
 
     await repository.setActive('identity-2');
@@ -85,5 +106,7 @@ describe('BrowserIdentityRepository', () => {
     await expect(repository.delete('identity-2')).rejects.toThrow('ACTIVE_IDENTITY_DELETE_FORBIDDEN');
     await repository.delete('identity-1');
     expect((await repository.loadAll()).map((item) => item.id)).toEqual(['identity-2']);
+    expect(await historyRepository.load('identity-1')).toEqual([]);
+    expect(await historyRepository.load('identity-2')).toHaveLength(1);
   });
 });

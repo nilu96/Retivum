@@ -25,6 +25,17 @@ import {
 } from '../domain/chat-stamps';
 import type { ReticulumLogEntry, ReticulumLogLevel } from '../domain/logging';
 import { parseLxmaAddress } from '../domain/lxmf';
+import {
+  announcePacketDestinationHash,
+  createInterfaceAnnounceHistoryRecord,
+  hasCurrentInterfaceAnnounce,
+  interfaceAnnounceHistoryId,
+  interfaceNetworkFingerprint,
+  lxmfDeliveryAnnounceFingerprint,
+  normalizeInterfaceAnnounceHistoryRecord,
+  shouldSuppressInterfaceOnlineAnnounce,
+  type InterfaceAnnounceHistoryRecord,
+} from '../domain/interface-announce';
 import { normalizeInDestinationHashes } from '../infrastructure/reticulum/in-destination-hashes';
 import {
   decodeNomadNodeAppData,
@@ -36,7 +47,6 @@ import {
   type NomadRequestData,
 } from '../domain/nomadnet';
 import {
-  interfaceShouldAnnounceWhenOnline,
   lxmfInboundSourceAllowed,
   normalizeDestinationHash,
   propagationIsActive,
@@ -53,7 +63,6 @@ import type {
   RuntimeState,
 } from '../infrastructure/reticulum/protocol';
 import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
-import { isSuppressedAnnounce } from '../infrastructure/reticulum/announce-output';
 import { diagnosticErrorMessage } from '../infrastructure/reticulum/diagnostic-error';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
@@ -191,6 +200,7 @@ let persistedNetworkState: PersistedNetworkStateRecord | undefined;
 let configuration: RuntimeConfiguration | undefined;
 let blockedDestinationHashes: string[] = [];
 let localLxmfDeliveryDestinationHash: string | undefined;
+let interfaceAnnounceHistory = new Map<string, InterfaceAnnounceHistoryRecord>();
 let contactDestinationHashes = new Set<string>();
 let nomadNodeNameHash: Uint8Array | undefined;
 let managementNodeNameHash: Uint8Array | undefined;
@@ -208,6 +218,7 @@ const activationStorageWaiters = new Map<string, (ok: boolean) => void>();
 interface InterfaceDriver {
   state: InterfaceRuntimeState;
   readonly stableId: string;
+  readonly networkFingerprint: string;
   readonly reannounceOnReconnect: boolean;
   readonly telemetry: InterfaceTelemetryTracker;
   runtimeIndex(): number | undefined;
@@ -258,7 +269,6 @@ const lxmfPropagationSyncStates = new Set<LxmfPropagationSyncState>([
   'failed',
 ]);
 const knownDestinationFullNames = new Map<string, RegisteredFullDestinationName | null>();
-const interfaceOnlineSuppressedAnnounceDestinations = new Set<string>();
 let pathManagementSnapshotSignature = '';
 const lxmfOutboundStatusCache = new Map<string, string>();
 const lxmfDeliveryLinks = new Set<string>();
@@ -287,12 +297,10 @@ const pendingInboundResourceAdvertisements = new Map<string, {
 const observedDestinationPaths = new Set<string>();
 const destinationPathStatusCache = new Map<string, string>();
 // Leviculum Core emits fresh destination announces whenever an interface is
-// marked online. Retivum owns the higher-level LXMF announce policy, so
-// interface state transitions pass the delivery destination in a suppression
-// set. processOutput() drops announces whose destination is in that set while
-// retaining every other locally owned destination announce, action, and event.
-// handleInterfaceOnline() then emits a metadata-complete LXMF announce targeted
-// to the interface that became online when required.
+// marked online. Retivum suppresses every announce in that interface-up output
+// and, when the persisted first/reconnect policy requires it, sends one
+// metadata-complete LXMF delivery announce targeted to the interface. Other
+// actions and all events remain untouched.
 
 function emit(event: RuntimeEvent): void {
   if (event.type === 'platformInterfaceWrite') {
@@ -327,6 +335,8 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       configuration = command.configuration;
       blockedDestinationHashes = command.blockedDestinationHashes;
       contactDestinationHashes = normalizeDestinationHashes(command.contactDestinationHashes);
+      interfaceAnnounceHistory = normalizedInterfaceAnnounceHistory(command.interfaceAnnounceHistory);
+      pruneInterfaceAnnounceHistory(command.configuration.interfaces);
       emit({ type: 'runtimeStatus', state: 'starting' });
       await initWasm();
       nomadNodeNameHash = ReticulumNode.fullHash(new TextEncoder().encode('nomadnetwork.node')).slice(0, 10);
@@ -363,6 +373,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       log('info', 'runtime', 'CONFIGURATION_APPLYING', { interfaces: command.configuration.interfaces.length });
       const rebuild = requiresReticulumRuntimeRebuild(configuration, command.configuration);
       configuration = command.configuration;
+      pruneInterfaceAnnounceHistory(command.configuration.interfaces);
       if (identity && privateKey) {
         if (rebuild) {
           await rebuildRuntime(true);
@@ -564,6 +575,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
         command.identity,
         command.blockedDestinationHashes,
         command.contactDestinationHashes,
+        command.interfaceAnnounceHistory,
       ));
       persistenceQueue = activation.then(() => undefined, () => undefined);
       const ok = await activation.catch(() => false);
@@ -667,7 +679,6 @@ async function rebuildRuntime(persistCurrent = false): Promise<void> {
   };
   if (lxmf.deliveryDestinationHash) {
     localLxmfDeliveryDestinationHash = bytesToHex(new Uint8Array(lxmf.deliveryDestinationHash));
-    interfaceOnlineSuppressedAnnounceDestinations.add(localLxmfDeliveryDestinationHash);
   }
   applyBlockedDestinationPolicy();
 
@@ -1007,7 +1018,6 @@ function cleanupRuntime(): void {
   knownDestinationPublicKeys.clear();
   knownDestinationFullNames.clear();
   localLxmfDeliveryDestinationHash = undefined;
-  interfaceOnlineSuppressedAnnounceDestinations.clear();
   pathManagementSnapshotSignature = '';
   emit({
     type: 'pathManagementSnapshot',
@@ -1040,24 +1050,112 @@ function cleanupRuntime(): void {
   node = undefined;
 }
 
+interface ProcessOutputResult {
+  lxmfDeliveryDispatched: boolean;
+}
+
+interface ProcessOutputOptions {
+  suppressAnnounces?: boolean;
+  lxmfDeliveryAnnounceFingerprint?: string;
+}
+
 function processOutput(
   output?: WasmOutput,
-  suppressedAnnounceDestinations?: ReadonlySet<string>,
-): void {
-  if (!output) return;
+  options?: ProcessOutputOptions,
+): ProcessOutputResult {
+  const result: ProcessOutputResult = { lxmfDeliveryDispatched: false };
+  if (!output) return result;
+  const historyUpdates = new Map<string, InterfaceAnnounceHistoryRecord>();
+  const announcedAt = new Date().toISOString();
   for (const action of output.actions ?? []) {
-    if (isSuppressedAnnounce(action.packet, suppressedAnnounceDestinations)) continue;
+    if (
+      options?.suppressAnnounces
+      && shouldSuppressInterfaceOnlineAnnounce(action.packet)
+    ) continue;
     let dispatched = 0;
+    const dispatchedDrivers: InterfaceDriver[] = [];
     for (const driver of drivers.values()) {
-      if (driver.dispatch(action)) dispatched += 1;
+      if (driver.dispatch(action)) {
+        dispatched += 1;
+        dispatchedDrivers.push(driver);
+      }
+    }
+    const destinationHash = announcePacketDestinationHash(action.packet);
+    if (
+      action.packet.packetType === 'announce'
+      && destinationHash
+      && destinationHash === localLxmfDeliveryDestinationHash
+    ) {
+      if (dispatchedDrivers.length > 0) {
+        result.lxmfDeliveryDispatched = true;
+      }
+      if (identity && options?.lxmfDeliveryAnnounceFingerprint) {
+        for (const driver of dispatchedDrivers) {
+          const record = createInterfaceAnnounceHistoryRecord(
+            identity.id,
+            driver.stableId,
+            driver.networkFingerprint,
+            destinationHash,
+            options.lxmfDeliveryAnnounceFingerprint,
+            announcedAt,
+          );
+          interfaceAnnounceHistory.set(record.id, record);
+          historyUpdates.set(record.id, record);
+        }
+      }
     }
     logNomadProtocolAction(action, dispatched);
+  }
+  if (historyUpdates.size > 0) {
+    emit({
+      type: 'persistInterfaceAnnounceHistory',
+      records: Array.from(historyUpdates.values()),
+    });
   }
   for (const event of output.events ?? []) handleWasmEvent(event);
   emitLxmfOutboundProgress();
   emitDestinationPathStatuses(Array.from(observedDestinationPaths), false);
   if (output.dirtyPersistentState) queueSnapshotPersistence();
   scheduleNextTick();
+  return result;
+}
+
+function destinationHasCurrentAnnounce(
+  driver: InterfaceDriver,
+  destinationHash: string,
+  announceFingerprint: string,
+): boolean {
+  if (!identity) return false;
+  const record = interfaceAnnounceHistory.get(interfaceAnnounceHistoryId(
+    identity.id,
+    driver.stableId,
+    driver.networkFingerprint,
+    destinationHash,
+  ));
+  return hasCurrentInterfaceAnnounce(record, announceFingerprint);
+}
+
+function normalizedInterfaceAnnounceHistory(
+  records: InterfaceAnnounceHistoryRecord[],
+): Map<string, InterfaceAnnounceHistoryRecord> {
+  const normalized = new Map<string, InterfaceAnnounceHistoryRecord>();
+  for (const value of records) {
+    const record = normalizeInterfaceAnnounceHistoryRecord(value);
+    if (record) normalized.set(record.id, record);
+  }
+  return normalized;
+}
+
+function pruneInterfaceAnnounceHistory(interfaces: InterfaceConfig[]): void {
+  const networkFingerprints = new Map(interfaces.map((config) => [
+    config.id,
+    interfaceNetworkFingerprint(config),
+  ]));
+  for (const [id, record] of interfaceAnnounceHistory) {
+    if (networkFingerprints.get(record.interfaceId) !== record.networkFingerprint) {
+      interfaceAnnounceHistory.delete(id);
+    }
+  }
 }
 
 function emitLxmfOutboundProgress(): void {
@@ -1199,11 +1297,19 @@ function announceLxmf(
   }
   try {
     const stampCost = configuration?.preferences.lxmf.inboundStampCost ?? 0;
-    processOutput(node.announceLxmf({
+    const announceFingerprint = lxmfDeliveryAnnounceFingerprint(identity.displayName, stampCost);
+    const result = processOutput(node.announceLxmf({
       displayName: identity.displayName,
       stampCost: stampCost > 0 ? stampCost : undefined,
+      compressionSupported: true,
       ...(requestedInterfaceIndex !== undefined ? { interfaceIndex: requestedInterfaceIndex } : {}),
-    }) as WasmOutput);
+    }) as WasmOutput, {
+      lxmfDeliveryAnnounceFingerprint: announceFingerprint,
+    });
+    if (!result.lxmfDeliveryDispatched) {
+      log('warning', 'runtime', `LXMF_ANNOUNCE_${source.toUpperCase()}_SKIPPED_OFFLINE`);
+      return false;
+    }
     if (!requestedInterface) recordSuccessfulBroadcastAnnounce();
     log('info', 'runtime', `LXMF_ANNOUNCE_${source.toUpperCase()}_SENT`, {
       interfaces: onlineDrivers.map((driver) => driver.stableId).join(','),
@@ -2736,13 +2842,25 @@ function tryAutomaticPropagationSync(): boolean {
   return true;
 }
 
-function handleInterfaceOnline(driver: InterfaceDriver, firstOnline: boolean): void {
-  if (interfaceShouldAnnounceWhenOnline(driver, firstOnline)) {
-    // Every interface announces once after it is attached to this runtime.
-    // Later online transitions follow this interface instance's persisted
-    // reconnect policy. The announce is always targeted to the single interface
-    // that became online, so bringing several interfaces up cannot multiply
-    // announcements across all interfaces.
+function handleInterfaceOnline(driver: InterfaceDriver): void {
+  const announceFingerprint = identity && configuration
+    ? lxmfDeliveryAnnounceFingerprint(
+        identity.displayName,
+        configuration.preferences.lxmf.inboundStampCost,
+      )
+    : undefined;
+  const deliveryHasCurrentAnnounce = localLxmfDeliveryDestinationHash && announceFingerprint
+    ? destinationHasCurrentAnnounce(
+        driver,
+        localLxmfDeliveryDestinationHash,
+        announceFingerprint,
+      )
+    : false;
+  if (!deliveryHasCurrentAnnounce || driver.reannounceOnReconnect) {
+    // All implicit announces were suppressed from the interface-up output.
+    // Send only the metadata-complete LXMF delivery announce when this
+    // destination or its metadata is new to the interface/network, or when
+    // reconnect policy asks for another announce.
     announceLxmf('automatic', driver);
   }
   // Interface-online announcements do not move the regular broadcast
@@ -3999,6 +4117,7 @@ async function activateIdentityRecord(
   nextIdentity: PersistedIdentityRecord,
   nextBlockedDestinationHashes: string[],
   nextContactDestinationHashes: string[],
+  nextInterfaceAnnounceHistory: InterfaceAnnounceHistoryRecord[],
 ): Promise<boolean> {
   if (!identity || !privateKey) return false;
   await persistSnapshot();
@@ -4010,12 +4129,15 @@ async function activateIdentityRecord(
   const previousPrivateKey = privateKey;
   const previousBlockedDestinationHashes = blockedDestinationHashes;
   const previousContactDestinationHashes = contactDestinationHashes;
+  const previousInterfaceAnnounceHistory = interfaceAnnounceHistory;
   if (!await requestActivationStorage(nextIdentity.id)) return false;
 
   identity = nextIdentity;
   privateKey = nextPrivateKey;
   blockedDestinationHashes = nextBlockedDestinationHashes;
   contactDestinationHashes = normalizeDestinationHashes(nextContactDestinationHashes);
+  interfaceAnnounceHistory = normalizedInterfaceAnnounceHistory(nextInterfaceAnnounceHistory);
+  pruneInterfaceAnnounceHistory(configuration?.interfaces ?? []);
   try {
     await rebuildRuntime(false);
     return true;
@@ -4024,6 +4146,7 @@ async function activateIdentityRecord(
     privateKey = previousPrivateKey;
     blockedDestinationHashes = previousBlockedDestinationHashes;
     contactDestinationHashes = previousContactDestinationHashes;
+    interfaceAnnounceHistory = previousInterfaceAnnounceHistory;
     await requestActivationStorage(previousIdentity.id);
     await rebuildRuntime(false);
     return false;
@@ -4203,7 +4326,6 @@ class PlatformInterfaceDriver implements InterfaceDriver {
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectAttempt = 0;
   private closedByRuntime = false;
-  private hasBeenOnline = false;
 
   constructor(private readonly config: Exclude<InterfaceConfig, WebSocketInterfaceConfig>) {
     this.telemetry = new InterfaceTelemetryTracker(config);
@@ -4215,6 +4337,10 @@ class PlatformInterfaceDriver implements InterfaceDriver {
 
   get reannounceOnReconnect(): boolean {
     return this.config.reannounceOnReconnect;
+  }
+
+  get networkFingerprint(): string {
+    return interfaceNetworkFingerprint(this.config);
   }
 
   runtimeIndex(): number | undefined {
@@ -4275,14 +4401,11 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     if (this.closedByRuntime) return;
     if (state === 'online') {
       const wasOnline = this.state === 'online';
-      const firstOnline = !this.hasBeenOnline;
       this.reconnectAttempt = 0;
-      this.setOnline(true);
+      if (wasOnline) return;
       this.setState('online');
-      if (!wasOnline) {
-        this.hasBeenOnline = true;
-        handleInterfaceOnline(this, firstOnline);
-      }
+      this.setOnline(true);
+      handleInterfaceOnline(this);
       return;
     }
     this.setOnline(false);
@@ -4314,7 +4437,7 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     if (node && this.runtimeId !== undefined) {
       processOutput(
         node.setInterfaceOnline(this.runtimeId, online) as WasmOutput,
-        online ? interfaceOnlineSuppressedAnnounceDestinations : undefined,
+        online ? { suppressAnnounces: true } : undefined,
       );
     }
   }
@@ -4384,7 +4507,6 @@ class WebSocketDriver {
   private reconnectAttempt = 0;
   private closedByRuntime = false;
   private generation = 0;
-  private hasBeenOnline = false;
 
   constructor(private readonly config: WebSocketInterfaceConfig) {
     this.telemetry = new InterfaceTelemetryTracker(config);
@@ -4396,6 +4518,10 @@ class WebSocketDriver {
 
   get reannounceOnReconnect(): boolean {
     return this.config.reannounceOnReconnect;
+  }
+
+  get networkFingerprint(): string {
+    return interfaceNetworkFingerprint(this.config);
   }
 
   runtimeIndex(): number | undefined {
@@ -4423,15 +4549,13 @@ class WebSocketDriver {
       this.socket = socket;
       socket.addEventListener('open', () => {
         if (!this.isCurrent(socket, generation) || !node || this.runtimeId === undefined) return;
-        const firstOnline = !this.hasBeenOnline;
-        this.hasBeenOnline = true;
         this.reconnectAttempt = 0;
         this.setState('online');
         processOutput(
           node.setInterfaceOnline(this.runtimeId, true) as WasmOutput,
-          interfaceOnlineSuppressedAnnounceDestinations,
+          { suppressAnnounces: true },
         );
-        handleInterfaceOnline(this, firstOnline);
+        handleInterfaceOnline(this);
       });
       socket.addEventListener('message', (event) => void this.receive(socket, generation, event.data));
       socket.addEventListener('error', () => {

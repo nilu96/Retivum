@@ -32,6 +32,7 @@ import {
   upsertKnownDestination,
   type KnownDestinationRecord,
 } from '../../domain/known-destination';
+import type { InterfaceAnnounceHistoryRecord } from '../../domain/interface-announce';
 import type { ReticulumLogEntry } from '../../domain/logging';
 import type {
   NomadBookmark,
@@ -65,6 +66,7 @@ import { BrowserSettingsRepository } from '../database/settings-repository';
 import { BrowserNetworkStateRepository } from '../database/network-state-repository';
 import { BrowserProvisioningRepository } from '../database/provisioning-repository';
 import { BrowserKnownDestinationRepository } from '../database/known-destination-repository';
+import { BrowserInterfaceAnnounceHistoryRepository } from '../database/interface-announce-history-repository';
 import { runtimeInterfaceConfigurations } from '../platform/interface-capabilities';
 import { PlatformInterfaceHost } from '../platform/interface-host';
 import type {
@@ -169,6 +171,8 @@ class ReticulumRuntimeController {
   private readonly networkStateRepository = new BrowserNetworkStateRepository();
   private readonly provisioningRepository = new BrowserProvisioningRepository();
   private readonly knownDestinationRepository = new BrowserKnownDestinationRepository();
+  private readonly interfaceAnnounceHistoryRepository = new BrowserInterfaceAnnounceHistoryRepository();
+  private interfaceAnnounceHistoryPersistenceQueue = Promise.resolve();
   private destinationDirectoryReconciled = false;
   private readonly platformInterfaceHost = new PlatformInterfaceHost(
     (command) => this.post(command),
@@ -275,13 +279,16 @@ class ReticulumRuntimeController {
 
       let blockedDestinationHashes: string[] = [];
       let contactDestinationHashes: string[] = [];
+      let interfaceAnnounceHistory: InterfaceAnnounceHistoryRecord[] = [];
       if (identity) {
-        const [, chatDirectory] = await Promise.all([
+        const [, chatDirectory, storedInterfaceAnnounceHistory] = await Promise.all([
           this.loadNomadDirectory(identity.id),
           this.chatRepository.load(identity.id),
+          this.interfaceAnnounceHistoryRepository.load(identity.id),
         ]);
         blockedDestinationHashes = chatDirectory.blockedDestinations.map((item) => item.destinationHash);
         contactDestinationHashes = chatDirectory.contacts.map((item) => item.destinationHash);
+        interfaceAnnounceHistory = storedInterfaceAnnounceHistory;
       }
 
       const defaultDisplayName = get(t)('settings.identity.defaultDisplayName');
@@ -293,6 +300,7 @@ class ReticulumRuntimeController {
         networkState,
         blockedDestinationHashes,
         contactDestinationHashes,
+        interfaceAnnounceHistory,
         newIdentity: {
           id: crypto.randomUUID(),
           label: defaultDisplayName,
@@ -1172,7 +1180,10 @@ class ReticulumRuntimeController {
     if (get(activeIdentity)?.id === identityId || !this.worker) return true;
     const record = await this.identityRepository.loadById(identityId);
     if (!record) return false;
-    const directory = await this.chatRepository.load(identityId);
+    const [directory, interfaceAnnounceHistory] = await Promise.all([
+      this.chatRepository.load(identityId),
+      this.interfaceAnnounceHistoryRepository.load(identityId),
+    ]);
     const requestId = crypto.randomUUID();
     this.destinationDirectoryReconciled = false;
     return this.waitForIdentityOperation(requestId, {
@@ -1181,6 +1192,7 @@ class ReticulumRuntimeController {
       identity: record,
       blockedDestinationHashes: directory.blockedDestinations.map((item) => item.destinationHash),
       contactDestinationHashes: directory.contacts.map((item) => item.destinationHash),
+      interfaceAnnounceHistory,
     });
   }
 
@@ -1726,6 +1738,20 @@ class ReticulumRuntimeController {
     }
     if (event.type === 'runtimeError') {
       runtimeErrorCode.set(event.code);
+      return;
+    }
+    if (event.type === 'persistInterfaceAnnounceHistory') {
+      const persistence = this.interfaceAnnounceHistoryPersistenceQueue.then(() => (
+        this.interfaceAnnounceHistoryRepository.save(event.records)
+      ));
+      this.interfaceAnnounceHistoryPersistenceQueue = persistence.catch(() => undefined);
+      try {
+        await persistence;
+      } catch {
+        appendLocalLog('warning', 'persistence', 'INTERFACE_ANNOUNCE_HISTORY_PERSIST_FAILED', {
+          count: event.records.length,
+        });
+      }
       return;
     }
     if (event.type === 'persistIdentity') {

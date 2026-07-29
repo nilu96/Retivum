@@ -93,10 +93,18 @@ export class BrowserIdentityRepository {
   async delete(id: string): Promise<void> {
     const database = await openRetivumDatabase();
     try {
-      const transaction = database.transaction(['settings', 'identities'], 'readwrite');
+      const transaction = database.transaction(
+        ['settings', 'identities', 'interfaceAnnounceHistory'],
+        'readwrite',
+      );
       const activeId = await requestResult<string | undefined>(transaction.objectStore('settings').get(activeIdentitySetting));
       if (activeId === id) throw new Error('ACTIVE_IDENTITY_DELETE_FORBIDDEN');
       transaction.objectStore('identities').delete(id);
+      const historyStore = transaction.objectStore('interfaceAnnounceHistory');
+      const historyKeys = await requestResult<IDBValidKey[]>(
+        historyStore.index('identityId').getAllKeys(id),
+      );
+      for (const key of historyKeys) historyStore.delete(key);
       await transactionDone(transaction);
     } finally {
       database.close();

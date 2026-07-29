@@ -1,5 +1,6 @@
 import type { AppPreferences, InterfaceConfig } from '../../domain/settings';
 import { normalizeAppPreferences, normalizeInterfaceConfig } from '../../domain/settings';
+import { interfaceNetworkFingerprint } from '../../domain/interface-announce';
 import { openRetivumDatabase, requestResult, transactionDone } from './database';
 
 export interface SettingsSnapshot {
@@ -53,8 +54,24 @@ export class BrowserSettingsRepository implements SettingsRepository {
   async saveInterface(config: InterfaceConfig): Promise<void> {
     const database = await openRetivumDatabase();
     try {
-      const transaction = database.transaction('interfaces', 'readwrite');
+      const transaction = database.transaction(
+        ['interfaces', 'interfaceAnnounceHistory'],
+        'readwrite',
+      );
       transaction.objectStore('interfaces').put(structuredClone(config));
+      const historyStore = transaction.objectStore('interfaceAnnounceHistory');
+      const historyRecords = await requestResult<unknown[]>(
+        historyStore.index('interfaceId').getAll(config.id),
+      );
+      const networkFingerprint = interfaceNetworkFingerprint(config);
+      for (const value of historyRecords) {
+        if (!value || typeof value !== 'object') continue;
+        const record = value as { id?: unknown; networkFingerprint?: unknown };
+        if (
+          record.networkFingerprint !== networkFingerprint
+          && typeof record.id === 'string'
+        ) historyStore.delete(record.id);
+      }
       await transactionDone(transaction);
     } finally {
       database.close();
@@ -64,8 +81,16 @@ export class BrowserSettingsRepository implements SettingsRepository {
   async deleteInterface(id: string): Promise<void> {
     const database = await openRetivumDatabase();
     try {
-      const transaction = database.transaction('interfaces', 'readwrite');
+      const transaction = database.transaction(
+        ['interfaces', 'interfaceAnnounceHistory'],
+        'readwrite',
+      );
       transaction.objectStore('interfaces').delete(id);
+      const historyStore = transaction.objectStore('interfaceAnnounceHistory');
+      const historyKeys = await requestResult<IDBValidKey[]>(
+        historyStore.index('interfaceId').getAllKeys(id),
+      );
+      for (const key of historyKeys) historyStore.delete(key);
       await transactionDone(transaction);
     } finally {
       database.close();

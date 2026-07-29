@@ -3,7 +3,7 @@ import type { ChatMessage } from '../../domain/chat';
 import { assignChatMessageOrderings } from '../../domain/chat-ordering';
 
 const databaseName = 'retivum';
-const databaseVersion = 14;
+const databaseVersion = 15;
 
 export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -43,6 +43,11 @@ export async function openRetivumDatabase(): Promise<IDBDatabase> {
     }
     if (!database.objectStoreNames.contains('provisioningSchemas')) {
       database.createObjectStore('provisioningSchemas', { keyPath: 'id' });
+    }
+    if (!database.objectStoreNames.contains('interfaceAnnounceHistory')) {
+      const store = database.createObjectStore('interfaceAnnounceHistory', { keyPath: 'id' });
+      store.createIndex('identityId', 'identityId');
+      store.createIndex('interfaceId', 'interfaceId');
     }
     if (event.oldVersion > 0 && event.oldVersion < 13) {
       migrateDestinationDirectories(request, database);

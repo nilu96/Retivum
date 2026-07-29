@@ -25,13 +25,6 @@ export const interfaceModes: readonly InterfaceMode[] = [
   'gateway',
 ] as const;
 
-export function interfaceShouldAnnounceWhenOnline(
-  config: Pick<InterfaceConfig, 'reannounceOnReconnect'>,
-  firstOnline: boolean,
-): boolean {
-  return firstOnline || config.reannounceOnReconnect;
-}
-
 export interface LxmfPreferences {
   defaultDeliveryMethod: LxmfDeliveryMethod;
   acceptMessagesFromContactsOnly: boolean;

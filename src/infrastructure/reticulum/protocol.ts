@@ -12,6 +12,7 @@ import type {
   KnownDestinationRecord,
   KnownFullDestinationName,
 } from '../../domain/known-destination';
+import type { InterfaceAnnounceHistoryRecord } from '../../domain/interface-announce';
 
 // Python Reticulum's Packet.ENCRYPTED_MDU: the largest plaintext that can be
 // encrypted into one 500-byte Single-destination packet.
@@ -178,6 +179,7 @@ export type RuntimeCommand =
       networkState?: PersistedNetworkStateRecord;
       blockedDestinationHashes: string[];
       contactDestinationHashes: string[];
+      interfaceAnnounceHistory: InterfaceAnnounceHistoryRecord[];
       newIdentity: NewIdentityMetadata;
       configuration: RuntimeConfiguration;
     }
@@ -273,6 +275,7 @@ export type RuntimeCommand =
       identity: PersistedIdentityRecord;
       blockedDestinationHashes: string[];
       contactDestinationHashes: string[];
+      interfaceAnnounceHistory: InterfaceAnnounceHistoryRecord[];
     }
   | { type: 'activationStorageResult'; requestId: string; ok: boolean }
   | { type: 'persistenceResult'; requestId: string; ok: boolean }
@@ -291,6 +294,7 @@ export type RuntimeEvent =
   | { type: 'identityReady'; identity: PersistedIdentityRecord; deliveryDestinationHashHex?: string }
   | { type: 'persistIdentity'; requestId: string; identity: PersistedIdentityRecord; activate?: boolean }
   | { type: 'persistNetworkState'; requestId: string; networkState: PersistedNetworkStateRecord }
+  | { type: 'persistInterfaceAnnounceHistory'; records: InterfaceAnnounceHistoryRecord[] }
   | { type: 'identityDisplayNameResult'; requestId: string; ok: boolean }
   | { type: 'lxmfAnnounceResult'; requestId: string; ok: boolean }
   | {
