@@ -43,7 +43,7 @@ Capacitor itself officially targets iOS, Android, and Web. Retivum uses a direct
 | NomadNet | Navigate to a destination/path, request content over Reticulum, safely render the supported markup subset, and provide history/bookmarks |
 | Settings | Generate, import, export, rename, activate, deactivate-by-switching, and remove managed identities; enable/disable transport mode; inspect local data/diagnostics |
 | Interfaces | First run has no interfaces; add, edit, enable, disable, and delete multiple persistent interface definitions whose enabled state survives restart |
-| Interfaces | WebSocket is universal; RNode uses BLE on iOS/Android and supported browsers or Web Serial on desktop/supported browsers; raw TCP and UDP use pinned Capacitor plugins on mobile and allowlisted `node:net`/`node:dgram` IPC bridges in Electron |
+| Interfaces | WebSocket is available in browsers and Electron but hidden on iOS/Android; RNode uses BLE on iOS/Android and supported browsers or Web Serial on desktop/supported browsers; raw TCP and UDP use pinned Capacitor plugins on mobile and allowlisted `node:net`/`node:dgram` IPC bridges in Electron |
 | Adaptive UI | Persistent left navigation sidebar on desktop and a safe-area-aware bottom tab bar on mobile, with mobile single-pane and desktop master-detail content built from the same components |
 | Accessibility | Keyboard navigation, visible focus, semantic controls, screen-reader names, reduced-motion support, and WCAG AA contrast |
 | Localization | All labels, messages, validation, errors, notifications, accessibility text, and formatted dates/numbers use localization keys and locale-aware formatters; English is bundled initially and no catalog is downloaded at runtime |
@@ -418,7 +418,7 @@ Each interface type registers one descriptor containing:
 - driver factory
 - redacted diagnostic serializer
 
-The arrow on the **Add interface** button opens a menu populated from the interface-type descriptor registry. The menu is capability-filtered: WebSocket is universal; RNode appears when BLE or serial is available; TCP and UDP appear only in Capacitor native builds or when Electron exposes their typed socket bridges. Settings maps each descriptor to its dedicated editor, and the runtime maps it to its driver factory. Unsupported types are never advertised as working choices.
+The arrow on the **Add interface** button opens a menu populated from the interface-type descriptor registry. The menu is capability-filtered: WebSocket appears in browser and Electron builds but is hidden on Capacitor iOS/Android; RNode appears when BLE or serial is available; TCP and UDP appear only in Capacitor native builds or when Electron exposes their typed socket bridges. Settings maps each descriptor to its dedicated editor, and the runtime maps it to its driver factory. Unsupported types are never advertised as working choices.
 
 Interface definitions are durable application configuration. Each record has a stable ID, and its type-specific fields plus `enabled` state survive application and network-engine restarts. Startup instantiates one driver for every enabled record, so heterogeneous interfaces connect, report status, reconnect, and fail independently. Automatic reconnection uses one bounded driver-owned exponential-backoff policy and is not user-configurable. There is intentionally no automatically created interface on first run.
 

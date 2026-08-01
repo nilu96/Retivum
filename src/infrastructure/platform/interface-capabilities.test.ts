@@ -33,7 +33,7 @@ describe('platform interface capabilities', () => {
     expect(interfaceIsSupported(createUdpInterfaceDraft(), mobile)).toBe(true);
   });
 
-  it('disables WebSocket interfaces on Android while retaining them on iOS', () => {
+  it('disables WebSocket interfaces on Android and iOS', () => {
     const android = detectInterfaceCapabilities({
       platform: 'android',
       native: true,
@@ -57,8 +57,8 @@ describe('platform interface capabilities', () => {
     expect(interfaceIsSupported(websocket, android)).toBe(false);
     expect(runtimeInterfaceConfigurations([websocket, rnode], android)).toEqual([rnode]);
 
-    expect(supportedInterfaceTypes(ios)).toEqual(['websocket', 'rnode', 'tcp', 'udp']);
-    expect(interfaceIsSupported(websocket, ios)).toBe(true);
-    expect(runtimeInterfaceConfigurations([websocket, rnode], ios)).toEqual([websocket, rnode]);
+    expect(supportedInterfaceTypes(ios)).toEqual(['rnode', 'tcp', 'udp']);
+    expect(interfaceIsSupported(websocket, ios)).toBe(false);
+    expect(runtimeInterfaceConfigurations([websocket, rnode], ios)).toEqual([rnode]);
   });
 });

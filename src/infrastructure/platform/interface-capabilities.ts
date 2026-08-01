@@ -38,7 +38,7 @@ export function detectInterfaceCapabilities(
   if (environment.native || environment.bluetooth) rnodeConnections.push('ble');
   if (!environment.native && environment.serial) rnodeConnections.push('serial');
   return {
-    websocket: environment.platform !== 'android',
+    websocket: environment.platform !== 'android' && environment.platform !== 'ios',
     rnodeConnections,
     tcp: environment.native || environment.socketBridge,
     udp: environment.native || environment.datagramBridge,
