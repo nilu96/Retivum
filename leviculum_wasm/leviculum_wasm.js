@@ -279,14 +279,20 @@ export class ReticulumNode {
         return takeFromExternrefTable0(ret[0]);
     }
     /**
+     * @param {Uint8Array} destination_hash
      * @param {string} path
      * @returns {boolean}
      */
-    deregisterRequestHandler(path) {
-        const ptr0 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+    deregisterRequestHandler(destination_hash, path) {
+        const ptr0 = passArray8ToWasm0(destination_hash, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.reticulumnode_deregisterRequestHandler(this.__wbg_ptr, ptr0, len0);
-        return ret !== 0;
+        const ptr1 = passStringToWasm0(path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len1 = WASM_VECTOR_LEN;
+        const ret = wasm.reticulumnode_deregisterRequestHandler(this.__wbg_ptr, ptr0, len0, ptr1, len1);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] !== 0;
     }
     /**
      * @returns {string}
@@ -1637,7 +1643,7 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 142, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 143, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h708329bea8352ec0);
             return ret;
         },
