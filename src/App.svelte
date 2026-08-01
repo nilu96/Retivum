@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { route, startRouter } from './app/router';
+  import { navigateTopLevel, route, startRouter } from './app/router';
   import AppShell from './lib/layout/AppShell.svelte';
   import ChatView from './features/chat/ChatView.svelte';
   import NomadNetView from './features/nomadnet/NomadNetView.svelte';
@@ -9,6 +9,8 @@
   import ReticulumLogsView from './features/settings/ReticulumLogsView.svelte';
   import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
   import StatusDetailsView from './features/tools/StatusDetailsView.svelte';
+  import OnboardingView from './features/onboarding/OnboardingView.svelte';
+  import { onboardingIsRequired } from './features/onboarding/onboarding';
   import ProbeView from './features/tools/ProbeView.svelte';
   import PathManagementView from './features/tools/PathManagementView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
@@ -22,10 +24,34 @@
     initializeDesktopDeviceSelection,
   } from './infrastructure/platform/desktop-device-selection';
   import { answerNativeBluetoothSelection, nativeBluetoothSelection } from './infrastructure/platform/native-bluetooth-selection';
-  import { reticulumRuntime, runtimeErrorCode } from './infrastructure/reticulum/runtime';
+  import {
+    identities,
+    interfaceConfigurations,
+    reticulumRuntime,
+    runtimeErrorCode,
+    runtimeStatus,
+  } from './infrastructure/reticulum/runtime';
+  import { t } from './i18n';
   import { toast } from './lib/notifications/toasts';
 
   let observedRuntimeErrorCode: string | undefined;
+  let onboardingStarted = $state(false);
+  let onboardingSkipped = $state(false);
+
+  $effect(() => {
+    if (onboardingStarted) return;
+    if (onboardingSkipped) return;
+    const runtimeReady = $runtimeStatus !== 'starting' && $runtimeStatus !== 'error';
+    if (
+      !onboardingStarted
+      && runtimeReady
+      && onboardingIsRequired(
+        $identities,
+        $interfaceConfigurations,
+        $t('settings.identity.defaultDisplayName'),
+      )
+    ) onboardingStarted = true;
+  });
 
   $effect(() => {
     const errorCode = $runtimeErrorCode;
@@ -50,28 +76,38 @@
   });
 </script>
 
-<AppShell current={$route}>
-  {#if $route === 'chat'}
-    <ChatView />
-  {:else if $route === 'logs'}
-    <ReticulumLogsView />
-  {:else if $route === 'settings'}
-    <SettingsView />
-  {:else if $route === 'tools'}
-    <ToolsView />
-  {:else if $route === 'provisioning'}
-    <ProvisioningView />
-  {:else if $route === 'probe'}
-    <ProbeView />
-  {:else if $route === 'path-management'}
-    <PathManagementView />
-  {:else if $route === 'status'}
-    <StatusDetailsView />
-  {/if}
-  <div class="persistent-route-view" hidden={$route !== 'nomadnet'}>
-    <NomadNetView active={$route === 'nomadnet'} />
-  </div>
-</AppShell>
+{#if onboardingStarted}
+  <OnboardingView onskip={() => {
+    onboardingSkipped = true;
+    onboardingStarted = false;
+  }} oncomplete={() => {
+    onboardingStarted = false;
+    navigateTopLevel('chat');
+  }} />
+{:else}
+  <AppShell current={$route}>
+    {#if $route === 'chat'}
+      <ChatView />
+    {:else if $route === 'logs'}
+      <ReticulumLogsView />
+    {:else if $route === 'settings'}
+      <SettingsView />
+    {:else if $route === 'tools'}
+      <ToolsView />
+    {:else if $route === 'provisioning'}
+      <ProvisioningView />
+    {:else if $route === 'probe'}
+      <ProbeView />
+    {:else if $route === 'path-management'}
+      <PathManagementView />
+    {:else if $route === 'status'}
+      <StatusDetailsView />
+    {/if}
+    <div class="persistent-route-view" hidden={$route !== 'nomadnet'}>
+      <NomadNetView active={$route === 'nomadnet'} />
+    </div>
+  </AppShell>
+{/if}
 
 {#if $desktopDeviceSelection}
   <DevicePicker
