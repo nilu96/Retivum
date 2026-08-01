@@ -179,7 +179,15 @@ describe('platform interface configuration', () => {
 describe('LXMF delivery preferences', () => {
   const hash = '0123456789abcdef0123456789abcdef';
 
-  it('activates propagation when opted in and treats the configured hash as preferred', () => {
+  it('enables propagation fallback by default while preserving an explicit opt-out', () => {
+    expect(normalizeAppPreferences(undefined).lxmf.propagationEnabled).toBe(true);
+    expect(normalizeAppPreferences({ lxmf: {} }).lxmf.propagationEnabled).toBe(true);
+    expect(normalizeAppPreferences({
+      lxmf: { propagationEnabled: false },
+    }).lxmf.propagationEnabled).toBe(false);
+  });
+
+  it('resolves propagation choices and treats the configured hash as preferred', () => {
     expect(resolveLxmfDeliveryPlan({
       ...normalizeAppPreferences(undefined).lxmf,
       defaultDeliveryMethod: 'direct',
@@ -303,8 +311,13 @@ describe('LXMF delivery preferences', () => {
     }).lxmf.propagationSyncIntervalMinutes).toBe(0);
   });
 
-  it('keeps automatic announcements off by default and validates their interval', () => {
+  it('defaults automatic announcements to every six hours and validates their interval', () => {
     expect(normalizeAppPreferences({ lxmf: {} }).lxmf).toMatchObject({
+      autoAnnounceIntervalMinutes: 360,
+    });
+    expect(normalizeAppPreferences({
+      lxmf: { autoAnnounceIntervalMinutes: 0 },
+    }).lxmf).toMatchObject({
       autoAnnounceIntervalMinutes: 0,
     });
     expect(normalizeAppPreferences({

@@ -545,7 +545,7 @@ type LxmfDeliveryMethod = 'direct' | 'opportunistic' | 'propagated';
 interface LxmfPreferences {
   identityId: string;
   defaultDeliveryMethod: LxmfDeliveryMethod;
-  propagationEnabled: boolean;  // false on first run
+  propagationEnabled: boolean;  // true on first run
   propagationNodeHash?: string; // optional preferred node; absent on first run
   inboundStampCost: number;     // 0 disables inbound stamp enforcement
   propagationSyncIntervalMinutes: 0 | 15 | 30 | 60 | 180 | 360 | 720 | 1440; // 0 = never
@@ -556,7 +556,7 @@ interface LxmfPreferences {
 - No preferred propagation node is configured by default. Settings uses an editable combobox that lists verified `lxmf.propagation` announces with route/cost and last-heard context while still accepting a custom hash. Verified raw announces and their app-data are part of the global WASM network checkpoint rather than a duplicate UI repository. They are restored after reload and projected newest-first. Retention follows the Python Reticulum known-destination lifecycle: destinations with a path or explicit retain pin survive; pathless entries linger for six minutes when unused or 1.25 times the seven-day destination timeout after use. There is no independent 24-hour UI deletion rule. The preferred hash is normalized and validated and remains a preference rather than a hard requirement.
 - The initial default delivery method is **direct**, matching the supplied harness behavior. The user-selectable methods are **direct**, **opportunistic**, and **propagated**.
 - A conversation may remember an override, and the composer exposes a compact per-message selector. Resolution order is per-message selection, then conversation override, then identity default.
-- For direct or opportunistic delivery, propagation remains an independent fallback opt-in. Once the primary attempt reaches terminal `failed`, Retivum queues the same logical message as propagated. Selecting **propagated** skips the primary attempt and locks the propagation toggle on.
+- For direct or opportunistic delivery, propagation is an independently configurable fallback that is enabled by default. Once the primary attempt reaches terminal `failed`, Retivum queues the same logical message as propagated. Selecting **propagated** skips the primary attempt and locks the propagation toggle on.
 - Before propagated sending or synchronization, the LXMF layer selects the preferred node only when it is announced, enabled, and currently reachable. Otherwise it chooses the reachable enabled announced node with the fewest hops, using lower advertised costs and the destination hash as deterministic tie-breakers. If no candidate exists, propagated delivery fails.
 - Automatic propagation synchronization defaults to **Never**. When an interval is selected, Retivum periodically requests waiting messages from the preferred or best available node while the app is running. A run reached while offline is deferred until an interface reconnects. Manual synchronization remains available even without a preferred node.
 - **Direct** and **opportunistic** do not require a configured propagation node. A route may still be unavailable, which is reported through the normal queued/failed state flow.
@@ -568,7 +568,7 @@ interface LxmfPreferences {
 
 - The active identity exposes a manual **Announce** action immediately above the connection status in the expanded desktop sidebar. Compact desktop and mobile layouts reuse the same action as a labelled icon control near the primary navigation.
 - A manual announce is accepted only while at least one interface is online. The worker invokes the bundled LXMF announce API with the active identity's stored display name, dispatches the resulting Reticulum frames through every eligible interface, records a diagnostic event, and returns explicit success/failure feedback to the UI.
-- The announcement interval defaults to **Never**. Selecting an interval from 15 minutes through 24 hours enables automatic announcements without a separate toggle. Retivum announces once after the first interface becomes online and repeats at the selected interval while the app remains running. An interval reached while offline is skipped and retried after a later interface connection; no background-server service is implied.
+- The announcement interval defaults to **Every 6 hours**. Selecting an interval from 15 minutes through 24 hours enables automatic announcements without a separate toggle; selecting **Never** disables them. Retivum announces once after the first interface becomes online and repeats at the selected interval while the app remains running. An interval reached while offline is skipped and retried after a later interface connection; no background-server service is implied.
 - Changing the active identity or applying network settings rebuilds the identity-scoped runtime and reschedules announcements without leaking the previous identity's timer or display name.
 - The adjacent QR action opens an offline-generated address dialog containing the active delivery destination hash, the complete LXMF address, a scannable QR code, and Copy. No QR-generation web service is used.
 - The interoperable contact address payload is `lxma://<delivery_destination_hash>:<identity_public_key>`, where the destination hash is exactly 32 lowercase hexadecimal characters and the public key is exactly 128 lowercase hexadecimal characters. Invalid or incomplete runtime values do not produce a shareable QR.
@@ -652,7 +652,7 @@ Settings uses shared `SettingsSection`, `FormField`, `Toggle`, `Select`, `Number
 | Identities | Active identity summary plus a manager for generated/imported identities: LXMF display name, hash, active/inactive state, generate, import, export/backup, rename, set active, announce, and remove |
 | Network node | Engine state, transport-mode toggle and capability note, advanced node limits; explanation that Electron closes to the tray while transport is enabled |
 | Interfaces | Ordered interface cards, live state, add/edit/enable/delete/test actions |
-| LXMF | Default sending method (direct, opportunistic, or propagated), propagation fallback opt-in, optional preferred node, inbound stamp cost, and synchronization/announcement intervals |
+| LXMF | Default sending method (direct, opportunistic, or propagated), propagation fallback toggle (enabled by default), optional preferred node, inbound stamp cost, and synchronization/announcement intervals |
 | Storage | Usage, persistence status, encrypted backup/restore, clear cache/history, and separately confirmed clearing of heard-announce history |
 | Appearance | System/light/dark theme, language foundation (system/English initially), density where appropriate, reduced motion follows OS |
 | Tools | Primary navigation directory for Reticulum logs, Path management, Remote provisioning, live Status details, and raw destination Probing |

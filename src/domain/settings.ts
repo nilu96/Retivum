@@ -149,10 +149,10 @@ export const defaultAppPreferences: AppPreferences = {
   lxmf: {
     defaultDeliveryMethod: 'direct',
     acceptMessagesFromContactsOnly: false,
-    propagationEnabled: false,
+    propagationEnabled: true,
     inboundStampCost: DEFAULT_INBOUND_STAMP_COST,
     propagationSyncIntervalMinutes: 0,
-    autoAnnounceIntervalMinutes: 0,
+    autoAnnounceIntervalMinutes: 360,
   },
 };
 
@@ -235,7 +235,7 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
       acceptMessagesFromContactsOnly: source.lxmf?.acceptMessagesFromContactsOnly === true,
       propagationEnabled: typeof source.lxmf?.propagationEnabled === 'boolean'
         ? source.lxmf.propagationEnabled || legacyMethod === 'propagated'
-        : legacyMethod === 'propagated',
+        : defaultAppPreferences.lxmf.propagationEnabled || legacyMethod === 'propagated',
       propagationNodeHash,
       inboundStampCost: normalizeInboundStampCost(source.lxmf?.inboundStampCost),
       propagationSyncIntervalMinutes: normalizePropagationSyncInterval(source.lxmf?.propagationSyncIntervalMinutes),
