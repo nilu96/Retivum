@@ -1269,6 +1269,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .rnode-radio-grid .field:nth-child(n) { grid-column: auto; }
   .tcp-endpoint-grid, .udp-endpoint-grid { grid-template-columns: 1fr; }
   .tcp-endpoint-grid .port-field, .udp-endpoint-grid .port-field { grid-column: auto; }
+  .interface-editor footer { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .interface-editor footer .button { width: 100%; }
 }
 
 @media (max-width: 1099px) and (min-width: 700px) {
