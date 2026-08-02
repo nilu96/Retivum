@@ -63,6 +63,28 @@ describe('SettingsView blocked destinations', () => {
     }
   });
 
+  it('displays an unnamed identity fallback without using it as the identity name', async () => {
+    const unnamedIdentity = {
+      id: 'identity-1',
+      displayName: '',
+      identityHashHex: 'a'.repeat(32),
+      publicKeyHex: 'b'.repeat(128),
+    };
+    identities.set([unnamedIdentity]);
+    activeIdentity.set(unnamedIdentity);
+    render(SettingsView);
+
+    expect(screen.getByText('(Unnamed Identity)')).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Copy identity hash for (Unnamed Identity)',
+    })).toBeInTheDocument();
+    expect(get(activeIdentity)?.displayName).toBe('');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit name' }));
+    expect(screen.getByRole('textbox', { name: /Identity name/ })).toHaveValue('');
+    expect(get(identities)[0].displayName).toBe('');
+  });
+
   it('requires a name when adding an identity instead of pre-filling a default', async () => {
     const currentIdentity = {
       id: 'identity-1',

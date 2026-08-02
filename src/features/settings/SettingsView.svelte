@@ -105,6 +105,10 @@
     );
   }
 
+  function displayedIdentityName(identity: IdentitySummary): string {
+    return identity.displayName.trim() || get(t)('settings.identity.unnamedDisplayName');
+  }
+
   onMount(async () => {
     try {
       const snapshot = await repository.load();
@@ -341,7 +345,7 @@
   }
 
   async function exportManagedIdentity(identity: IdentitySummary): Promise<void> {
-    if (!window.confirm(get(t)('settings.identity.exportConfirm', { name: identity.displayName }))) return;
+    if (!window.confirm(get(t)('settings.identity.exportConfirm', { name: displayedIdentityName(identity) }))) return;
     identityBusyId = identity.id;
     try {
       const backup = await reticulumRuntime.exportIdentity(identity.id);
@@ -466,10 +470,16 @@
         {:else}
           {#each $identities as identity (identity.id)}
             <article class="identity-row">
-              <div class="identity-avatar">{identity.displayName.slice(0, 1)}</div>
+              <div class="identity-avatar">
+                {#if identity.displayName.trim()}
+                  {identity.displayName.trim().slice(0, 1)}
+                {:else}
+                  <Icon name="identity" size={18} />
+                {/if}
+              </div>
               <div class="identity-copy">
                 <div class="identity-name-line">
-                  <strong>{identity.displayName}</strong>
+                  <strong>{displayedIdentityName(identity)}</strong>
                   {#if identity.id === $activeIdentity?.id}
                     <span class="badge success identity-active-mobile">{$t('status.active')}</span>
                   {/if}
@@ -477,7 +487,7 @@
                 <button
                   class="identity-copy-target"
                   type="button"
-                  aria-label={$t('settings.identity.copyHash', { name: identity.displayName })}
+                  aria-label={$t('settings.identity.copyHash', { name: displayedIdentityName(identity) })}
                   onclick={() => { void copyIdentityHash(identity.identityHashHex); }}
                 ><code>{identity.identityHashHex}</code></button>
               </div>
@@ -982,7 +992,7 @@
 
 {#if identityDeleteTarget}
   <IdentityDeleteConfirmation
-    identityName={identityDeleteTarget.displayName}
+    identityName={displayedIdentityName(identityDeleteTarget)}
     oncancel={() => { identityDeleteTarget = undefined; }}
     onconfirm={() => deleteManagedIdentity(identityDeleteTarget!)}
   />
