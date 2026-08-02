@@ -1346,7 +1346,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .app-shell {
     --mobile-identity-actions-edge-gap: 10px;
     --mobile-conversation-header-height: 77px;
-    --mobile-conversation-tray-top: calc(env(safe-area-inset-top, 0px) + var(--mobile-conversation-header-height) + var(--mobile-identity-actions-edge-gap));
+    --mobile-conversation-tray-gap: 12px;
+    --mobile-conversation-tray-top: calc(env(safe-area-inset-top, 0px) + var(--mobile-conversation-header-height) + var(--mobile-conversation-tray-gap));
     display: block;
     height: auto;
     min-height: 100dvh;
