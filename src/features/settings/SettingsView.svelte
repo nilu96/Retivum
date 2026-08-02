@@ -43,6 +43,7 @@
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
+  import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import WebSocketInterfaceEditor from './WebSocketInterfaceEditor.svelte';
   import BlockedDestinationsEditor from './BlockedDestinationsEditor.svelte';
@@ -69,6 +70,7 @@
   let identityEditorTarget = $state<IdentitySummary | undefined>();
   let pendingIdentityImport = $state.raw<ParsedIdentityBackup | undefined>();
   let identityDeleteTarget = $state<IdentitySummary | undefined>();
+  let identityExportTarget = $state<IdentitySummary | undefined>();
   let identityBusyId = $state<string | undefined>();
   let interfaceBusyId = $state<string | undefined>();
   let blockedDestinationBusyHash = $state<string | undefined>();
@@ -345,7 +347,6 @@
   }
 
   async function exportManagedIdentity(identity: IdentitySummary): Promise<void> {
-    if (!window.confirm(get(t)('settings.identity.exportConfirm', { name: displayedIdentityName(identity) }))) return;
     identityBusyId = identity.id;
     try {
       const backup = await reticulumRuntime.exportIdentity(identity.id);
@@ -365,6 +366,7 @@
       toast.error('settings.identity.exportError');
     } finally {
       identityBusyId = undefined;
+      identityExportTarget = undefined;
     }
   }
 
@@ -508,7 +510,7 @@
                   title={$t('settings.identity.export')}
                   aria-label={$t('settings.identity.export')}
                   disabled={identityBusyId === identity.id}
-                  onclick={() => exportManagedIdentity(identity)}
+                  onclick={() => { identityExportTarget = identity; }}
                 ><Icon name="upload" size={16} /></button>
                 <button
                   class="icon-button"
@@ -995,6 +997,18 @@
     identityName={displayedIdentityName(identityDeleteTarget)}
     oncancel={() => { identityDeleteTarget = undefined; }}
     onconfirm={() => deleteManagedIdentity(identityDeleteTarget!)}
+  />
+{/if}
+
+{#if identityExportTarget}
+  <ConfirmationDialog
+    titleId="identity-export-title"
+    title={$t('settings.identity.export')}
+    description={$t('settings.identity.exportConfirm', { name: displayedIdentityName(identityExportTarget) })}
+    icon="download"
+    confirmLabel={$t('settings.identity.export')}
+    oncancel={() => { identityExportTarget = undefined; }}
+    onconfirm={() => exportManagedIdentity(identityExportTarget!)}
   />
 {/if}
 
