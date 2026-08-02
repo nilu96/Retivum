@@ -246,7 +246,6 @@
     } catch {
       if (sequence !== loadSequence || client !== activeClient) return;
       stage = undefined;
-      toast.error('provisioning.load.failed');
     } finally {
       if (sequence === loadSequence && client === activeClient) {
         busy = false;
@@ -459,7 +458,11 @@
     </div>
   </header>
 
-  <form class="provisioning-address" onsubmit={connectToDestination}>
+  <form
+    class="provisioning-address"
+    class:connection-active={Boolean(selectedNode)}
+    onsubmit={connectToDestination}
+  >
     <div class="provisioning-address-actions" role="group" aria-label={$t('provisioning.destination.actions.toolbar')}>
       <button
         class="icon-button"
@@ -478,7 +481,7 @@
         onclick={reloadDevice}
       ><Icon name="sync" size={19} /></button>
     </div>
-    <label>
+    <label class:connection-locked={Boolean(selectedNode)}>
       <span class="sr-only">{$t('provisioning.destination.label')}</span>
       <Icon name="network" size={19} />
       <input
@@ -489,9 +492,11 @@
         disabled={Boolean(selectedNode)}
       />
     </label>
-    <button class="button primary" type="submit" disabled={!normalizedDestination || Boolean(selectedNode)}>
-      {$t(loadingDevice ? 'provisioning.connecting' : 'provisioning.connect')}<Icon name="arrow-right" size={17} />
-    </button>
+    {#if !selectedNode}
+      <button class="button primary" type="submit" disabled={!normalizedDestination}>
+        {$t('provisioning.connect')}<Icon name="arrow-right" size={17} />
+      </button>
+    {/if}
   </form>
 
   <div class="provisioning-workspace">

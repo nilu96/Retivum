@@ -867,7 +867,6 @@
   "provisioning.load.empty.title": "Device configuration unavailable",
   "provisioning.load.empty.description": "Try loading this device again when a path is available.",
   "provisioning.node.lastHeard": "Last heard {date}",
-  "provisioning.load.failed": "The device configuration could not be loaded.",
   "provisioning.save.success": "The device configuration was saved.",
   "provisioning.save.rebootRequired": "The device configuration was saved. A reboot is required.",
   "provisioning.save.failed": "The device configuration could not be saved.",

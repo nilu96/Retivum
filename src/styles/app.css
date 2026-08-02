@@ -675,11 +675,14 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .provisioning-back-button { width: max-content; min-height: 38px; }
 .provisioning-header-copy { min-width: 0; }
 .provisioning-address { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; }
+.provisioning-address.connection-active { grid-template-columns: auto minmax(0, 1fr); }
 .provisioning-address-actions { display: flex; align-items: center; gap: 8px; }
 .provisioning-address-actions .icon-button { width: 45px; height: 45px; }
 .provisioning-address label { display: flex; min-width: 0; min-height: 45px; align-items: center; gap: 10px; padding-inline: 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-subtle); background: var(--surface-1); }
 .provisioning-address label:focus-within { border-color: var(--accent); }
 .provisioning-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
+.provisioning-address label.connection-locked { color: var(--text-subtle); background: var(--surface-2); cursor: not-allowed; }
+.provisioning-address label.connection-locked input { color: var(--text-subtle); -webkit-text-fill-color: var(--text-subtle); cursor: not-allowed; opacity: 1; }
 .provisioning-workspace { display: grid; height: clamp(430px, calc(100dvh - 250px), 680px); min-height: 430px; grid-template-columns: minmax(0, 1fr); }
 .provisioning-directory { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .provisioning-directory-content { display: grid; min-height: 0; align-content: start; gap: 20px; padding: 14px; overflow: auto; }

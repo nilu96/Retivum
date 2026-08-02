@@ -48,7 +48,7 @@ describe('ProvisioningView', () => {
     clearToasts();
   });
 
-  it('connects to a valid custom hash, hides the directory, and locks the address controls', async () => {
+  it('connects to a valid custom hash, hides the directory, and locks the address field', async () => {
     let requestedNode: ProvisioningNode | undefined;
     vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(function (this: ProvisioningClient) {
       requestedNode = this.provisioningNode;
@@ -69,7 +69,9 @@ describe('ProvisioningView', () => {
     expect(screen.queryByRole('heading', { name: 'No management destinations heard' })).not.toBeInTheDocument();
     expect(screen.getByText('Finding a path to the device…')).toBeInTheDocument();
     expect(input).toBeDisabled();
-    expect(connect).toBeDisabled();
+    expect(input.closest('label')).toHaveClass('connection-locked');
+    expect(connect).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Connect/ })).not.toBeInTheDocument();
   });
 
   it('orders disconnect and reload immediately before the destination input', () => {
@@ -140,6 +142,19 @@ describe('ProvisioningView', () => {
     expect(screen.queryByRole('heading', { name: 'No management destinations heard' })).not.toBeInTheDocument();
   });
 
+  it('shows a load failure only in the main content box', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unavailable'));
+    render(ProvisioningView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+
+    expect(await screen.findByRole('heading', { name: 'Device configuration unavailable' })).toBeInTheDocument();
+    expect(screen.getByText('Try loading this device again when a path is available.')).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('disconnects a loaded destination and restores the unlocked overview', async () => {
     setProvisioningNodes([announcedNode]);
     vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
@@ -152,6 +167,7 @@ describe('ProvisioningView', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Disconnect and return to destinations' })).toBeEnabled());
+    expect(screen.queryByRole('button', { name: /Connect/ })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect and return to destinations' }));
 
     expect(close).toHaveBeenCalledWith(announcedNode.destinationHash, true);
