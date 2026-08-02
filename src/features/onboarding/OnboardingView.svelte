@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte';
   import {
     sortInterfaceConfigurations,
     type InterfaceConfig,
@@ -20,7 +21,17 @@
   import WebSocketInterfaceEditor from '../settings/WebSocketInterfaceEditor.svelte';
   import { interfaceTypeDescriptors } from '../settings/interface-types';
 
-  let { onskip, oncomplete }: { onskip: () => void; oncomplete: () => void } = $props();
+  let {
+    initialStep = 1,
+    interfaceStepRequired = true,
+    onskip,
+    oncomplete,
+  }: {
+    initialStep?: 1 | 2;
+    interfaceStepRequired?: boolean;
+    onskip: () => void;
+    oncomplete: () => void;
+  } = $props();
 
   const repository = new BrowserSettingsRepository();
   const interfaceCapabilities = detectInterfaceCapabilities();
@@ -30,28 +41,32 @@
   let editorType = $state<InterfaceType>();
   let editorConfig = $state<InterfaceConfig>();
   let configuredInterfaces = $state<InterfaceConfig[]>([]);
-  let identityCommitted = $state(false);
-  let currentStep = $state<1 | 2 | 3>(1);
+  let identitySaving = $state(false);
+  let currentStep = $state<1 | 2 | 3>(untrack(() => initialStep));
 
   const configuredDisplayName = $derived(chosenDisplayName ?? $activeIdentity?.displayName ?? '');
   const availableDescriptors = interfaceTypeDescriptors.filter((descriptor) => (
     availableInterfaceTypes.includes(descriptor.type)
   ));
 
-  $effect(() => {
-    if (
-      currentStep === 1
-      && $activeIdentity !== undefined
-      && $activeIdentity.displayName.trim() !== ''
-    ) currentStep = 2;
-  });
-
-  function saveIdentity(event: SubmitEvent): void {
+  async function saveIdentity(event: SubmitEvent): Promise<void> {
     event.preventDefault();
     const normalized = displayName.trim();
     if (!normalized || !$activeIdentity) return;
+    identitySaving = true;
+    try {
+      if (!await reticulumRuntime.updateActiveIdentityDisplayName(normalized)) {
+        toast.error('settings.identity.displayName.saveError');
+        return;
+      }
+    } catch {
+      toast.error('settings.identity.displayName.saveError');
+      return;
+    } finally {
+      identitySaving = false;
+    }
     chosenDisplayName = normalized;
-    currentStep = 2;
+    currentStep = interfaceStepRequired ? 2 : 3;
   }
 
   function openInterfaceEditor(type: InterfaceType, config?: InterfaceConfig): void {
@@ -67,24 +82,6 @@
   async function saveInterface(config: InterfaceConfig): Promise<void> {
     try {
       await repository.saveInterface(config);
-      if (
-        chosenDisplayName
-        && !$activeIdentity?.displayName.trim()
-        && !identityCommitted
-      ) {
-        let identitySaved = false;
-        try {
-          identitySaved = await reticulumRuntime.updateActiveIdentityDisplayName(chosenDisplayName);
-        } catch {
-          // Roll the staged interface back below so restarting still returns to onboarding.
-        }
-        if (!identitySaved) {
-          await repository.deleteInterface(config.id);
-          toast.error('settings.identity.displayName.saveError');
-          return;
-        }
-        identityCommitted = true;
-      }
       const currentInterfaces = $state.snapshot(configuredInterfaces);
       const nextInterfaces = sortInterfaceConfigurations(
         currentInterfaces.some((item) => item.id === config.id)
@@ -158,9 +155,9 @@
               <button
                 class="button primary"
                 type="submit"
-                disabled={!displayName.trim()}
+                disabled={identitySaving || !displayName.trim()}
               >
-                {$t('onboarding.next')}
+                {$t(identitySaving ? 'common.loading' : 'onboarding.next')}
                 <Icon name="arrow-right" size={17} />
               </button>
             </div>

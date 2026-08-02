@@ -10,7 +10,10 @@
   import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
   import StatusDetailsView from './features/tools/StatusDetailsView.svelte';
   import OnboardingView from './features/onboarding/OnboardingView.svelte';
-  import { onboardingIsRequired } from './features/onboarding/onboarding';
+  import {
+    determineOnboardingPlan,
+    type OnboardingPlan,
+  } from './features/onboarding/onboarding';
   import ProbeView from './features/tools/ProbeView.svelte';
   import PathManagementView from './features/tools/PathManagementView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
@@ -35,21 +38,17 @@
   import { toast } from './lib/notifications/toasts';
 
   let observedRuntimeErrorCode: string | undefined;
-  let onboardingStarted = $state(false);
-  let onboardingSkipped = $state(false);
+  let activeOnboardingPlan = $state<OnboardingPlan>();
+  let onboardingEvaluated = $state(false);
 
   $effect(() => {
-    if (onboardingStarted) return;
-    if (onboardingSkipped) return;
+    // Onboarding is a startup decision. Configuration changes during this app
+    // session must not make the dialog appear unexpectedly.
+    if (onboardingEvaluated) return;
     const runtimeReady = $runtimeStatus !== 'starting' && $runtimeStatus !== 'error';
-    if (
-      !onboardingStarted
-      && runtimeReady
-      && onboardingIsRequired(
-        $identities,
-        $interfaceConfigurations,
-      )
-    ) onboardingStarted = true;
+    if (!runtimeReady) return;
+    onboardingEvaluated = true;
+    activeOnboardingPlan = determineOnboardingPlan($identities, $interfaceConfigurations);
   });
 
   $effect(() => {
@@ -75,14 +74,18 @@
   });
 </script>
 
-{#if onboardingStarted}
-  <OnboardingView onskip={() => {
-    onboardingSkipped = true;
-    onboardingStarted = false;
-  }} oncomplete={() => {
-    onboardingStarted = false;
-    navigateTopLevel('chat');
-  }} />
+{#if activeOnboardingPlan}
+  <OnboardingView
+    initialStep={activeOnboardingPlan.initialStep}
+    interfaceStepRequired={activeOnboardingPlan.interfaceStepRequired}
+    onskip={() => {
+      activeOnboardingPlan = undefined;
+    }}
+    oncomplete={() => {
+      activeOnboardingPlan = undefined;
+      navigateTopLevel('chat');
+    }}
+  />
 {:else}
   <AppShell current={$route}>
     {#if $route === 'chat'}

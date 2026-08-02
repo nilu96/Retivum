@@ -42,13 +42,13 @@ describe('OnboardingView', () => {
     await fireEvent.input(name, { target: { value: 'Alice' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
 
+    await waitFor(() => expect(updateName).toHaveBeenCalledWith('Alice'));
     expect(await screen.findByRole('heading', { name: 'Connect to Reticulum' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /WebSocket/ })).toBeInTheDocument();
-    expect(updateName).not.toHaveBeenCalled();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
     expect(onskip).toHaveBeenCalledOnce();
-    expect(updateName).not.toHaveBeenCalled();
+    expect(updateName).toHaveBeenCalledOnce();
   });
 
   it('saves a disabled first interface and applies it to the runtime', async () => {
@@ -59,7 +59,7 @@ describe('OnboardingView', () => {
       async (_preferences, interfaces) => { structuredClone(interfaces); },
     );
     const oncomplete = vi.fn();
-    render(OnboardingView, { onskip: vi.fn(), oncomplete });
+    render(OnboardingView, { initialStep: 2, onskip: vi.fn(), oncomplete });
 
     await fireEvent.click(screen.getByRole('button', { name: /WebSocket/ }));
     await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Home relay' } });
@@ -117,7 +117,7 @@ describe('OnboardingView', () => {
     expect(oncomplete).toHaveBeenCalledOnce();
   });
 
-  it('commits the staged identity name when the first interface is saved', async () => {
+  it('commits the identity name before the first interface is saved', async () => {
     const saveInterface = vi.spyOn(BrowserSettingsRepository.prototype, 'saveInterface').mockResolvedValue();
     const updateName = vi.spyOn(reticulumRuntime, 'updateActiveIdentityDisplayName').mockResolvedValue(true);
     const applyConfiguration = vi.spyOn(reticulumRuntime, 'applyConfiguration').mockResolvedValue();
@@ -127,14 +127,38 @@ describe('OnboardingView', () => {
       target: { value: 'Alice' },
     });
     await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() => expect(updateName).toHaveBeenCalledWith('Alice'));
+    expect(saveInterface).not.toHaveBeenCalled();
+
     await fireEvent.click(screen.getByRole('button', { name: /WebSocket/ }));
     await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'Home relay' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(updateName).toHaveBeenCalledWith('Alice'));
-    expect(saveInterface).toHaveBeenCalledOnce();
+    await waitFor(() => expect(saveInterface).toHaveBeenCalledOnce());
     expect(applyConfiguration).toHaveBeenCalledOnce();
-    expect(saveInterface.mock.invocationCallOrder[0]).toBeLessThan(updateName.mock.invocationCallOrder[0]);
-    expect(updateName.mock.invocationCallOrder[0]).toBeLessThan(applyConfiguration.mock.invocationCallOrder[0]);
+    expect(updateName.mock.invocationCallOrder[0]).toBeLessThan(saveInterface.mock.invocationCallOrder[0]);
+    expect(saveInterface.mock.invocationCallOrder[0]).toBeLessThan(applyConfiguration.mock.invocationCallOrder[0]);
+  });
+
+  it('saves an unnamed identity and skips interface setup when one already exists', async () => {
+    const updateName = vi.spyOn(reticulumRuntime, 'updateActiveIdentityDisplayName').mockResolvedValue(true);
+    const oncomplete = vi.fn();
+    render(OnboardingView, {
+      interfaceStepRequired: false,
+      onskip: vi.fn(),
+      oncomplete,
+    });
+
+    await fireEvent.input(screen.getByRole('textbox', { name: /Identity name/ }), {
+      target: { value: 'Alice' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+
+    await waitFor(() => expect(updateName).toHaveBeenCalledWith('Alice'));
+    expect(screen.queryByRole('heading', { name: 'Connect to Reticulum' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: "You're ready to use Retivum" })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Start messaging' }));
+    expect(oncomplete).toHaveBeenCalledOnce();
   });
 });
