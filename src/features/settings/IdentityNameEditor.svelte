@@ -11,7 +11,7 @@
     onsave,
   }: {
     currentName: string;
-    mode?: 'add' | 'edit';
+    mode?: 'add' | 'edit' | 'import';
     oncancel: () => void;
     onsave: (displayName: string) => Promise<boolean>;
   } = $props();
@@ -30,9 +30,9 @@
     saving = true;
     try {
       if (await onsave(normalized)) oncancel();
-      else toast.error('settings.identity.displayName.saveError');
+      else toast.error(mode === 'import' ? 'settings.identity.importError' : 'settings.identity.displayName.saveError');
     } catch {
-      toast.error('settings.identity.displayName.saveError');
+      toast.error(mode === 'import' ? 'settings.identity.importError' : 'settings.identity.displayName.saveError');
     } finally {
       saving = false;
     }
@@ -45,8 +45,16 @@
     <header>
       <div class="section-icon identity"><Icon name="identity" size={21} /></div>
       <div>
-        <h2 id="identity-name-editor-title">{$t(mode === 'add' ? 'settings.identity.editor.addTitle' : 'settings.identity.editor.title')}</h2>
-        <p>{$t(mode === 'add' ? 'settings.identity.editor.addDescription' : 'settings.identity.editor.description')}</p>
+        <h2 id="identity-name-editor-title">{$t(mode === 'add'
+          ? 'settings.identity.editor.addTitle'
+          : mode === 'import'
+            ? 'settings.identity.editor.importTitle'
+            : 'settings.identity.editor.title')}</h2>
+        <p>{$t(mode === 'add'
+          ? 'settings.identity.editor.addDescription'
+          : mode === 'import'
+            ? 'settings.identity.editor.importDescription'
+            : 'settings.identity.editor.description')}</p>
       </div>
     </header>
     <form onsubmit={submit}>
@@ -55,13 +63,10 @@
         <input bind:value={displayName} maxlength="128" autocomplete="nickname" />
         <small>{$t('settings.identity.displayName.help')}</small>
       </label>
-      {#if !displayName.trim()}
-        <div class="validation-summary" role="alert"><p>{$t('settings.identity.displayName.required')}</p></div>
-      {/if}
       <footer>
         <button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button>
         <button class="button primary" type="submit" disabled={saving || !displayName.trim()}>
-          {saving ? $t('common.loading') : $t('common.save')}
+          {saving ? $t('common.loading') : $t(mode === 'import' ? 'settings.identity.import' : 'common.save')}
         </button>
       </footer>
     </form>

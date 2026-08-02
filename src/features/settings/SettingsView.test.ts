@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import packageJson from '../../../package.json';
@@ -61,6 +61,70 @@ describe('SettingsView blocked destinations', () => {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
+  });
+
+  it('requires a name when adding an identity instead of pre-filling a default', async () => {
+    const currentIdentity = {
+      id: 'identity-1',
+      displayName: 'Alice',
+      identityHashHex: 'a'.repeat(32),
+      publicKeyHex: 'b'.repeat(128),
+    };
+    identities.set([currentIdentity]);
+    activeIdentity.set(currentIdentity);
+    const createIdentity = vi.spyOn(reticulumRuntime, 'createIdentity').mockResolvedValue(true);
+    render(SettingsView);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Add identity' }));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Add identity' })).toBeInTheDocument();
+    const name = within(dialog).getByRole('textbox', { name: /Identity name/ });
+    expect(name).toHaveValue('');
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    await fireEvent.input(name, { target: { value: 'Travel' } });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(createIdentity).toHaveBeenCalledWith('Travel'));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('asks for a display name before importing an identity', async () => {
+    const currentIdentity = {
+      id: 'identity-1',
+      displayName: 'Alice',
+      identityHashHex: 'a'.repeat(32),
+      publicKeyHex: 'b'.repeat(128),
+    };
+    identities.set([currentIdentity]);
+    activeIdentity.set(currentIdentity);
+    const importIdentity = vi.spyOn(reticulumRuntime, 'importIdentity').mockResolvedValue(true);
+    render(SettingsView);
+    const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(fileInput).not.toBeNull();
+    const privateKey = Uint8Array.from({ length: 64 }, (_, index) => index);
+    const file = {
+      size: privateKey.byteLength,
+      arrayBuffer: vi.fn().mockResolvedValue(privateKey.buffer),
+    } as unknown as File;
+
+    await fireEvent.change(fileInput!, { target: { files: [file] } });
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('heading', { name: 'Name imported identity' })).toBeInTheDocument();
+    expect(importIdentity).not.toHaveBeenCalled();
+    const name = within(dialog).getByRole('textbox', { name: /Identity name/ });
+    expect(name).toHaveValue('');
+    expect(within(dialog).getByRole('button', { name: 'Import' })).toBeDisabled();
+
+    await fireEvent.input(name, { target: { value: 'Imported travel identity' } });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Import' }));
+
+    await waitFor(() => expect(importIdentity).toHaveBeenCalledWith(
+      expect.objectContaining({ displayName: '' }),
+      'Imported travel identity',
+    ));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
   it('shows two blocked destinations until the list is expanded', async () => {

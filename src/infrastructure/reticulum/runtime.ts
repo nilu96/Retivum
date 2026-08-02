@@ -295,8 +295,6 @@ class ReticulumRuntimeController {
         interfaceAnnounceHistory = storedInterfaceAnnounceHistory;
       }
 
-      const defaultDisplayName = get(t)('settings.identity.defaultDisplayName');
-
       this.post({
         type: 'initialize',
         startupId,
@@ -308,8 +306,8 @@ class ReticulumRuntimeController {
         interfaceAnnounceHistory,
         newIdentity: {
           id: crypto.randomUUID(),
-          label: defaultDisplayName,
-          displayName: defaultDisplayName,
+          label: '',
+          displayName: '',
         },
         configuration: {
           preferences: settings.preferences,
@@ -1158,10 +1156,10 @@ class ReticulumRuntimeController {
     });
   }
 
-  async importIdentity(backup: ParsedIdentityBackup): Promise<boolean> {
-    if (!this.worker) return false;
+  async importIdentity(backup: ParsedIdentityBackup, value: string): Promise<boolean> {
+    const displayName = value.trim();
+    if (!displayName || !this.worker) return false;
     const requestId = crypto.randomUUID();
-    const displayName = backup.displayName || get(t)('settings.identity.importedDisplayName');
     const privateKey = Uint8Array.from(backup.privateKey);
     const operation = this.waitForIdentityOperation(requestId, {
       type: 'importIdentity',
@@ -1170,7 +1168,6 @@ class ReticulumRuntimeController {
       privateKey,
       expectedIdentityHash: backup.expectedIdentityHash,
     });
-    backup.privateKey.fill(0);
     privateKey.fill(0);
     return operation;
   }

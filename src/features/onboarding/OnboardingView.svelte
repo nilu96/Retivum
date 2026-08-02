@@ -33,8 +33,8 @@
   let identityCommitted = $state(false);
   let currentStep = $state<1 | 2 | 3>(1);
 
-  const defaultDisplayName = $derived($t('settings.identity.defaultDisplayName'));
-  const configuredDisplayName = $derived(chosenDisplayName ?? $activeIdentity?.displayName ?? defaultDisplayName);
+  const legacyDefaultDisplayName = $derived($t('settings.identity.legacyDefaultDisplayName'));
+  const configuredDisplayName = $derived(chosenDisplayName ?? $activeIdentity?.displayName ?? '');
   const availableDescriptors = interfaceTypeDescriptors.filter((descriptor) => (
     availableInterfaceTypes.includes(descriptor.type)
   ));
@@ -43,14 +43,15 @@
     if (
       currentStep === 1
       && $activeIdentity !== undefined
-      && $activeIdentity.displayName !== defaultDisplayName
+      && $activeIdentity.displayName.trim() !== ''
+      && $activeIdentity.displayName !== legacyDefaultDisplayName
     ) currentStep = 2;
   });
 
   function saveIdentity(event: SubmitEvent): void {
     event.preventDefault();
     const normalized = displayName.trim();
-    if (!normalized || normalized === defaultDisplayName || !$activeIdentity) return;
+    if (!normalized || !$activeIdentity) return;
     chosenDisplayName = normalized;
     currentStep = 2;
   }
@@ -68,7 +69,11 @@
   async function saveInterface(config: InterfaceConfig): Promise<void> {
     try {
       await repository.saveInterface(config);
-      if (chosenDisplayName && $activeIdentity?.displayName === defaultDisplayName && !identityCommitted) {
+      if (
+        chosenDisplayName
+        && (!$activeIdentity?.displayName.trim() || $activeIdentity.displayName === legacyDefaultDisplayName)
+        && !identityCommitted
+      ) {
         let identitySaved = false;
         try {
           identitySaved = await reticulumRuntime.updateActiveIdentityDisplayName(chosenDisplayName);
@@ -150,17 +155,12 @@
               />
               <small>{$t('onboarding.identity.help')}</small>
             </label>
-            {#if displayName.trim() === defaultDisplayName}
-              <div class="validation-summary" role="alert">
-                <p>{$t('onboarding.identity.choosePersonalName')}</p>
-              </div>
-            {/if}
             <div class="onboarding-actions">
               <button class="button secondary" type="button" onclick={onskip}>{$t('onboarding.skip')}</button>
               <button
                 class="button primary"
                 type="submit"
-                disabled={!displayName.trim() || displayName.trim() === defaultDisplayName}
+                disabled={!displayName.trim()}
               >
                 {$t('onboarding.next')}
                 <Icon name="arrow-right" size={17} />

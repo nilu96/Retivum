@@ -10,9 +10,9 @@ import {
 } from '../../infrastructure/reticulum/runtime';
 import OnboardingView from './OnboardingView.svelte';
 
-const anonymous: IdentitySummary = {
+const unnamed: IdentitySummary = {
   id: 'identity-1',
-  displayName: 'Anonymous',
+  displayName: '',
   identityHashHex: 'a'.repeat(32),
   publicKeyHex: 'b'.repeat(64),
 };
@@ -20,7 +20,7 @@ const anonymous: IdentitySummary = {
 describe('OnboardingView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    activeIdentity.set(anonymous);
+    activeIdentity.set(unnamed);
     appPreferences.set(structuredClone(defaultAppPreferences));
   });
 
@@ -35,8 +35,8 @@ describe('OnboardingView', () => {
 
     expect(screen.getByRole('heading', { name: 'What should people call you?' })).toBeInTheDocument();
     const name = screen.getByRole('textbox', { name: /Identity name/ });
-    await fireEvent.input(name, { target: { value: 'Anonymous' } });
-    expect(screen.getByText('Choose a name other than Anonymous.')).toBeInTheDocument();
+    expect(name).toHaveValue('');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled();
 
     await fireEvent.input(name, { target: { value: 'Alice' } });
@@ -53,7 +53,7 @@ describe('OnboardingView', () => {
 
   it('saves a disabled first interface and applies it to the runtime', async () => {
     vi.stubGlobal('retivumDesktopSockets', {});
-    activeIdentity.set({ ...anonymous, displayName: 'Alice' });
+    activeIdentity.set({ ...unnamed, displayName: 'Alice' });
     const saveInterface = vi.spyOn(BrowserSettingsRepository.prototype, 'saveInterface').mockResolvedValue();
     const applyConfiguration = vi.spyOn(reticulumRuntime, 'applyConfiguration').mockImplementation(
       async (_preferences, interfaces) => { structuredClone(interfaces); },

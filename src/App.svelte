@@ -48,7 +48,7 @@
       && onboardingIsRequired(
         $identities,
         $interfaceConfigurations,
-        $t('settings.identity.defaultDisplayName'),
+        $t('settings.identity.legacyDefaultDisplayName'),
       )
     ) onboardingStarted = true;
   });

@@ -101,6 +101,38 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(results).toEqual([{ received: 4, duplicates: 1 }]);
   });
 
+  it('requires an explicit imported identity name without clearing the pending backup', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const backup = {
+      label: '',
+      displayName: '',
+      privateKey: new Uint8Array([1, 2, 3, 4]),
+    };
+
+    await expect(reticulumRuntime.importIdentity(backup, '   ')).resolves.toBe(false);
+    expect(postMessage).not.toHaveBeenCalled();
+
+    const operation = reticulumRuntime.importIdentity(backup, '  Travel  ');
+    const command = postMessage.mock.calls[0][0] as {
+      requestId: string;
+      metadata: { label: string; displayName: string };
+    };
+    expect(command.metadata).toEqual(expect.objectContaining({
+      label: 'Travel',
+      displayName: 'Travel',
+    }));
+    expect(Array.from(backup.privateKey)).toEqual([1, 2, 3, 4]);
+
+    await internals.handleEvent({
+      type: 'identityOperationResult',
+      requestId: command.requestId,
+      ok: false,
+    });
+    await expect(operation).resolves.toBe(false);
+  });
+
   it('publishes bounded propagation sync progress and transfer size', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
 

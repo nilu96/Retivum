@@ -1,8 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { requestedSettingsSection } from '../../app/router';
-  import { parseIdentityFile, type IdentitySummary } from '../../domain/identity';
+  import {
+    parseIdentityFile,
+    type IdentitySummary,
+    type ParsedIdentityBackup,
+  } from '../../domain/identity';
   import { destinationsByFullName } from '../../domain/known-destination';
   import {
     defaultAppPreferences,
@@ -61,8 +65,9 @@
   let editorConfig = $state<InterfaceConfig | undefined>();
   let loading = $state(true);
   let identityNameEditorOpen = $state(false);
-  let identityEditorMode = $state<'add' | 'edit'>('edit');
+  let identityEditorMode = $state<'add' | 'edit' | 'import'>('edit');
   let identityEditorTarget = $state<IdentitySummary | undefined>();
+  let pendingIdentityImport = $state.raw<ParsedIdentityBackup | undefined>();
   let identityDeleteTarget = $state<IdentitySummary | undefined>();
   let identityBusyId = $state<string | undefined>();
   let interfaceBusyId = $state<string | undefined>();
@@ -131,6 +136,10 @@
       document.removeEventListener('pointerdown', closeMenu);
       document.removeEventListener('keydown', closeOnEscape);
     };
+  });
+
+  onDestroy(() => {
+    pendingIdentityImport?.privateKey.fill(0);
   });
 
   $effect(() => {
@@ -246,6 +255,13 @@
     identityNameEditorOpen = true;
   }
 
+  function closeIdentityNameEditor(): void {
+    pendingIdentityImport?.privateKey.fill(0);
+    pendingIdentityImport = undefined;
+    identityNameEditorOpen = false;
+    identityEditorTarget = undefined;
+  }
+
   function addInterface(type: InterfaceType): void {
     editorType = type;
     editorConfig = undefined;
@@ -285,11 +301,15 @@
   }
 
   async function saveIdentityName(displayName: string): Promise<boolean> {
-    return identityEditorMode === 'add'
-      ? await reticulumRuntime.createIdentity(displayName)
-      : identityEditorTarget
-        ? await reticulumRuntime.updateIdentityDisplayName(identityEditorTarget.id, displayName)
+    if (identityEditorMode === 'add') return reticulumRuntime.createIdentity(displayName);
+    if (identityEditorMode === 'import') {
+      return pendingIdentityImport
+        ? reticulumRuntime.importIdentity(pendingIdentityImport, displayName)
         : false;
+    }
+    return identityEditorTarget
+      ? reticulumRuntime.updateIdentityDisplayName(identityEditorTarget.id, displayName)
+      : false;
   }
 
   async function copyIdentityHash(identityHash: string): Promise<void> {
@@ -361,7 +381,11 @@
         toast.error('settings.identity.importInvalid');
         return;
       }
-      if (!await reticulumRuntime.importIdentity(backup)) toast.error('settings.identity.importError');
+      pendingIdentityImport?.privateKey.fill(0);
+      pendingIdentityImport = backup;
+      identityEditorMode = 'import';
+      identityEditorTarget = undefined;
+      identityNameEditorOpen = true;
     } catch {
       toast.error('settings.identity.importError');
     }
@@ -947,11 +971,11 @@
 
 {#if identityNameEditorOpen && $activeIdentity}
   <IdentityNameEditor
-    currentName={identityEditorMode === 'add'
-      ? $t('settings.identity.defaultDisplayName')
-      : identityEditorTarget?.displayName ?? $activeIdentity.displayName}
+    currentName={identityEditorMode === 'edit'
+      ? identityEditorTarget?.displayName ?? $activeIdentity.displayName
+      : ''}
     mode={identityEditorMode}
-    oncancel={() => { identityNameEditorOpen = false; identityEditorTarget = undefined; }}
+    oncancel={closeIdentityNameEditor}
     onsave={saveIdentityName}
   />
 {/if}
