@@ -1486,7 +1486,6 @@
         </button>
         <button
           class="icon-button conversation-block-button"
-          class:danger={!selectedDestinationBlocked}
           class:blocked={selectedDestinationBlocked}
           disabled={blockActionPending}
           title={$t(selectedDestinationBlocked ? 'chat.unblock.action' : 'chat.block.action')}

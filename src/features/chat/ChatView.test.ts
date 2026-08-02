@@ -1640,6 +1640,10 @@ describe('ChatView', () => {
       }]);
       return true;
     });
+    const unblock = vi.spyOn(reticulumRuntime, 'unblockChatDestination').mockImplementation(async () => {
+      blockedChatDestinations.set([]);
+      return true;
+    });
     render(ChatView);
 
     const row = screen.getByRole('button', { name: /Block this conversation/ });
@@ -1650,7 +1654,15 @@ describe('ChatView', () => {
 
     await fireEvent.click(row);
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Unblock destination' })).toBeInTheDocument();
+    const unblockButton = screen.getByRole('button', { name: 'Unblock destination' });
+    expect(unblockButton).toHaveClass('blocked');
+
+    await fireEvent.click(unblockButton);
+    expect(unblock).toHaveBeenCalledWith(destinationHash);
+    const blockButton = await screen.findByRole('button', { name: 'Block destination' });
+    expect(blockButton).not.toHaveClass('blocked');
+    expect(blockButton).not.toHaveClass('danger');
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBeEnabled();
   });
 
   it('can dismiss message deletion without deleting it', async () => {

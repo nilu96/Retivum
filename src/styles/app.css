@@ -1639,6 +1639,37 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   }
 }
 
+@media (hover: none) and (pointer: coarse) {
+  .icon-button.conversation-block-button,
+  .icon-button.conversation-block-button:hover:not(:disabled),
+  .icon-button.conversation-block-button:active:not(:disabled) {
+    border-color: var(--border);
+    color: inherit;
+    background: var(--surface-2);
+    transform: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .icon-button.conversation-block-button.blocked,
+  .icon-button.conversation-block-button.blocked:hover:not(:disabled),
+  .icon-button.conversation-block-button.blocked:active:not(:disabled) {
+    border-color: var(--danger);
+    color: var(--danger);
+    background: var(--danger-soft);
+  }
+  .icon-button.chat-sync-button,
+  .icon-button.chat-sync-button:hover:not(:active) {
+    border-color: var(--border);
+    color: inherit;
+    background: var(--surface-2);
+    transform: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .icon-button.chat-sync-button:active:not(:disabled) {
+    border-color: var(--border-strong);
+    background: var(--surface-hover);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
