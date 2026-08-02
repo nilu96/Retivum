@@ -6,7 +6,10 @@ import {
   provisioningFieldTypes,
   type ProvisioningNode,
 } from '../../domain/provisioning';
-import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
+import {
+  ProvisioningClient,
+  ProvisioningFieldFailure,
+} from '../../infrastructure/reticulum/provisioning-client';
 import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
 import type { ProbeResult } from '../../infrastructure/reticulum/protocol';
 import {
@@ -54,11 +57,6 @@ describe('ProvisioningView', () => {
 
   it('connects to a valid custom hash, hides the directory, and locks the address field', async () => {
     let requestedNode: ProvisioningNode | undefined;
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', {
-      configurable: true,
-      value: { writeText },
-    });
     vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(function (this: ProvisioningClient) {
       requestedNode = this.provisioningNode;
       return new Promise(() => {});
@@ -83,12 +81,13 @@ describe('ProvisioningView', () => {
     expect(screen.queryByRole('button', { name: /Connect/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Provisioning section' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
+    expect(screen.getByText(`Currently connected to ${'a'.repeat(32)}`)).toBeInTheDocument();
+    expect(screen.queryByText(
+      'Discover and configure authorized microReticulum devices over the active Reticulum network.',
+    )).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: new RegExp(`Remote provisioning:.*${'a'.repeat(8)}`) }))
       .not.toBeInTheDocument();
-    const copyTarget = screen.getByRole('button', { name: 'Copy management destination' });
-    expect(copyTarget.querySelectorAll('svg')).toHaveLength(0);
-    await fireEvent.click(copyTarget);
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('a'.repeat(32)));
+    expect(screen.queryByRole('button', { name: 'Copy management destination' })).not.toBeInTheDocument();
   });
 
   it('orders disconnect and reload immediately before the destination input', () => {
@@ -250,7 +249,7 @@ describe('ProvisioningView', () => {
     expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
   });
 
-  it('moves the connected node name into the page title instead of repeating a device header', async () => {
+  it('shows the connected node name below the fixed page title', async () => {
     const namedNode: ProvisioningNode = {
       ...announcedNode,
       label: 'Node 123',
@@ -266,9 +265,26 @@ describe('ProvisioningView', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(namedNode.destinationHash) }));
 
-    expect(await screen.findByRole('heading', { name: 'Remote provisioning: Node 123' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
+    expect(screen.getByText('Currently connected to Node 123')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Node 123' })).not.toBeInTheDocument();
     expect(container.querySelector('.provisioning-device-header')).not.toBeInTheDocument();
+  });
+
+  it('uses the destination hash below the title when the connected node has no name', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { needsReboot: false },
+      schema: { namespaces: [] },
+      state: {},
+    });
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+
+    expect(await screen.findByText(`Currently connected to ${announcedNode.destinationHash}`))
+      .toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
   });
 
   it('uses desktop section navigation with node status as the default and keeps the mobile selector in sync', async () => {
@@ -544,6 +560,104 @@ describe('ProvisioningView', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  it('validates numeric schema limits immediately and uses tenths for zero-to-one fields', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { needsReboot: false },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'RNode General Config',
+          parentId: 0,
+          fields: [{
+            id: 1,
+            name: 'LT Airtime',
+            type: provisioningFieldTypes.float,
+            flags: 0,
+            minFloat: 0,
+            maxFloat: 1,
+          }],
+        }],
+      },
+      state: { 10: { 1: 0.2 } },
+    });
+    const stage = vi.spyOn(ProvisioningClient.prototype, 'stage').mockResolvedValue({
+      applied: 1,
+      draftHasReboot: false,
+      fieldErrors: [],
+    });
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+    await fireEvent.change(await screen.findByRole('combobox', { name: 'Provisioning section' }), {
+      target: { value: 'namespace:10' },
+    });
+
+    const airtime = screen.getByRole('spinbutton', { name: 'LT Airtime' });
+    const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
+    expect(airtime).toHaveAttribute('min', '0');
+    expect(airtime).toHaveAttribute('max', '1');
+    expect(airtime).toHaveAttribute('step', '0.1');
+
+    await fireEvent.input(airtime, { target: { value: '0.5' } });
+    expect(saveNamespace).toBeEnabled();
+
+    await fireEvent.input(airtime, { target: { value: '1.1' } });
+    expect(airtime).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('alert')).toHaveTextContent('Must be at most 1.');
+    expect(saveNamespace).toBeDisabled();
+    await fireEvent.click(saveNamespace);
+    expect(stage).not.toHaveBeenCalled();
+
+    await fireEvent.input(airtime, { target: { value: '0.6' } });
+    expect(airtime).not.toHaveAttribute('aria-invalid');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(saveNamespace).toBeEnabled();
+    await fireEvent.click(saveNamespace);
+
+    await waitFor(() => expect(stage).toHaveBeenCalledWith({ 10: { 1: 0.6 } }));
+  });
+
+  it('includes a remote field rejection in the save failure toast', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { needsReboot: false },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'RNode General Config',
+          parentId: 0,
+          fields: [{
+            id: 1,
+            name: 'LT Airtime',
+            type: provisioningFieldTypes.float,
+            flags: 0,
+            minFloat: 0,
+            maxFloat: 1,
+          }],
+        }],
+      },
+      state: { 10: { 1: 0.2 } },
+    });
+    vi.spyOn(ProvisioningClient.prototype, 'stage')
+      .mockRejectedValue(new ProvisioningFieldFailure(10, 1, 6));
+    render(ProvisioningView);
+    render(ToastViewport);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+    await fireEvent.change(await screen.findByRole('combobox', { name: 'Provisioning section' }), {
+      target: { value: 'namespace:10' },
+    });
+    await fireEvent.input(screen.getByRole('spinbutton', { name: 'LT Airtime' }), {
+      target: { value: '0.5' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save namespace' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'The namespace changes could not be saved. Device response: LT Airtime: Constraint not satisfied.',
+    );
+  });
+
   it('reverts one namespace tree and can discard every staged namespace', async () => {
     setProvisioningNodes([announcedNode]);
     vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
@@ -794,9 +908,9 @@ describe('ProvisioningView', () => {
     await fireEvent.keyDown(window, { key: 'Escape' });
     await fireEvent.click(row);
 
-    await waitFor(() => expect(screen.getByRole('heading', {
-      name: 'Remote provisioning: Workshop router',
-    })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Currently connected to Workshop router'))
+      .toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Workshop router/ })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Management destination hash')).toBeDisabled();
   });

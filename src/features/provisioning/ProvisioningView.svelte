@@ -9,13 +9,20 @@
     ProvisioningState,
     ProvisioningValue,
   } from '../../domain/provisioning';
-  import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/provisioning';
+  import {
+    ProvisioningProtocolError,
+    provisioningFieldFlags,
+    provisioningFieldTypes,
+  } from '../../domain/provisioning';
   import {
     destinationsByFullName,
     knownDestinationDirectory,
   } from '../../domain/known-destination';
   import { normalizeDestinationHash } from '../../domain/settings';
-  import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
+  import {
+    ProvisioningClient,
+    ProvisioningFieldFailure,
+  } from '../../infrastructure/reticulum/provisioning-client';
   import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
   import { probeTimeoutMsForPath } from '../../infrastructure/reticulum/timeouts';
   import {
@@ -25,7 +32,7 @@
     provisioningBookmarks,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
-  import { createDateFormatter, locale, t } from '../../i18n';
+  import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
     contextMenuTrigger,
     type ContextMenuOpenMethod,
@@ -47,6 +54,7 @@
   let commandValues = $state<Record<string, ProvisioningValue>>({});
   let dirtyFields = $state<string[]>([]);
   let firmwareDraftFields = $state<string[]>([]);
+  let fieldValidationErrors = $state<Record<string, string>>({});
   let busy = $state(false);
   let loadingDevice = $state(false);
   let stage = $state<string>();
@@ -142,6 +150,9 @@
   const activeFirmwareDraftCount = $derived(firmwareDraftFields.filter((key) => (
     activeNamespaceIds.has(Number(key.split(':', 1)[0]))
   )).length);
+  const activeValidationErrorCount = $derived(Object.keys(fieldValidationErrors).filter((key) => (
+    activeNamespaceIds.has(Number(key.split(':', 1)[0]))
+  )).length);
 
   onDestroy(() => {
     loadSequence += 1;
@@ -169,6 +180,7 @@
       commandValues = {};
       dirtyFields = [];
       firmwareDraftFields = [];
+      fieldValidationErrors = {};
       activeSection = 'status';
     }
     selectedNodeSnapshot = node;
@@ -244,10 +256,6 @@
     else toast.error('common.copyFailed');
   }
 
-  function copyActiveDestination(): void {
-    if (selectedNode) void copyDestinationHash(selectedNode.destinationHash);
-  }
-
   function probeDestination(node: ProvisioningNode): void {
     closeDestinationActions();
     showDestinationProbeActivity({
@@ -274,6 +282,7 @@
       draft = provisioningStateWithDrafts(nextLoaded.state, nextLoaded.drafts);
       dirtyFields = [];
       firmwareDraftFields = provisioningStateFieldKeys(nextLoaded.drafts);
+      fieldValidationErrors = {};
       if (activeSection !== 'status' && !nextLoaded.schema.namespaces.some((namespace) => (
         namespace.parentId === 0 && namespace.id === activeNamespaceId
       ))) activeSection = 'status';
@@ -334,6 +343,8 @@
         };
         const refreshedNamespaceIds = new Set(namespaceIds);
         dirtyFields = dirtyFields.filter((key) => !refreshedNamespaceIds.has(Number(key.split(':', 1)[0])));
+        fieldValidationErrors = Object.fromEntries(Object.entries(fieldValidationErrors)
+          .filter(([key]) => !refreshedNamespaceIds.has(Number(key.split(':', 1)[0]))));
         firmwareDraftFields = [
           ...firmwareDraftFields.filter((key) => !refreshedNamespaceIds.has(Number(key.split(':', 1)[0]))),
           ...provisioningStateFieldKeys(refreshedDrafts),
@@ -360,6 +371,7 @@
     commandValues = {};
     dirtyFields = [];
     firmwareDraftFields = [];
+    fieldValidationErrors = {};
     busy = false;
     loadingDevice = false;
     stage = undefined;
@@ -406,6 +418,96 @@
 
   function fieldKey(namespaceId: number, fieldId: number): string {
     return `${namespaceId}:${fieldId}`;
+  }
+
+  function selectSection(section: string): void {
+    if (section === activeSection) return;
+    activeSection = section;
+    // Invalid raw input is intentionally not copied into the typed draft. Once
+    // its editor is unmounted, discard its matching presentation-only error.
+    fieldValidationErrors = {};
+  }
+
+  function fieldValidationError(namespaceId: number, field: ProvisioningField): string | undefined {
+    return fieldValidationErrors[fieldKey(namespaceId, field.id)];
+  }
+
+  function setFieldValidationError(namespaceId: number, field: ProvisioningField, error?: string): void {
+    const key = fieldKey(namespaceId, field.id);
+    if (error) fieldValidationErrors = { ...fieldValidationErrors, [key]: error };
+    else if (fieldValidationErrors[key]) {
+      fieldValidationErrors = Object.fromEntries(Object.entries(fieldValidationErrors)
+        .filter(([candidate]) => candidate !== key));
+    }
+  }
+
+  function numericInputError(field: ProvisioningField, rawValue: string): string | undefined {
+    if (rawValue.trim() === '') return $t('provisioning.field.validation.number');
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) return $t('provisioning.field.validation.number');
+    if (field.type === provisioningFieldTypes.integer && !Number.isInteger(value)) {
+      return $t('provisioning.field.validation.integer');
+    }
+    const minimum = field.type === provisioningFieldTypes.integer ? field.minInteger : field.minFloat;
+    const maximum = field.type === provisioningFieldTypes.integer ? field.maxInteger : field.maxFloat;
+    if (minimum !== undefined && value < minimum) {
+      return $t('provisioning.field.validation.minimum', { minimum });
+    }
+    if (maximum !== undefined && value > maximum) {
+      return $t('provisioning.field.validation.maximum', { maximum });
+    }
+    return undefined;
+  }
+
+  function numericInputStep(field: ProvisioningField): number | 'any' {
+    if (field.type === provisioningFieldTypes.integer) return 1;
+    return field.minFloat !== undefined
+      && field.maxFloat !== undefined
+      && field.minFloat >= 0
+      && field.maxFloat <= 1
+      ? 0.1
+      : 'any';
+  }
+
+  function normalizedHexInput(rawValue: string): string | undefined {
+    const normalized = rawValue.replace(/[\s,:-]/g, '');
+    return /^[0-9a-f]*$/i.test(normalized) ? normalized : undefined;
+  }
+
+  function bytesInputError(field: ProvisioningField, rawValue: string): string | undefined {
+    const normalized = normalizedHexInput(rawValue);
+    if (normalized === undefined || normalized.length % 2 !== 0) {
+      return $t('provisioning.field.bytesInvalid');
+    }
+    const byteLength = normalized.length / 2;
+    if (field.maxLength !== undefined && byteLength > field.maxLength) {
+      return $t('provisioning.field.validation.maxBytes', { maximum: field.maxLength });
+    }
+    return undefined;
+  }
+
+  function stringInputError(field: ProvisioningField, value: string): string | undefined {
+    return field.maxLength !== undefined && field.maxLength > 0 && value.length > field.maxLength
+      ? $t('provisioning.field.validation.maxCharacters', { maximum: field.maxLength })
+      : undefined;
+  }
+
+  function bytesListInputError(field: ProvisioningField, rawValue: string): string | undefined {
+    const entries = rawValue.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+    if (field.maxCount !== undefined && field.maxCount > 0 && entries.length > field.maxCount) {
+      return $t('provisioning.field.validation.maxEntries', { maximum: field.maxCount });
+    }
+    for (const entry of entries) {
+      const normalized = normalizedHexInput(entry);
+      if (normalized === undefined || normalized.length % 2 !== 0) {
+        return $t('provisioning.field.bytesInvalid');
+      }
+      if (field.elementSize !== undefined && field.elementSize > 0
+        && normalized.length / 2 !== field.elementSize) {
+        return $t('provisioning.field.validation.elementBytes', { count: field.elementSize });
+      }
+    }
+    return undefined;
   }
 
   function fieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
@@ -544,8 +646,58 @@
     ));
   }
 
+  function remoteErrorCodeMessage(code: number): string {
+    const messageKeys: Partial<Record<number, MessageKey>> = {
+      0: 'provisioning.remoteError.ok',
+      1: 'provisioning.remoteError.badRequest',
+      2: 'provisioning.remoteError.unknownOperation',
+      3: 'provisioning.remoteError.unknownNamespace',
+      4: 'provisioning.remoteError.unknownField',
+      5: 'provisioning.remoteError.invalidValue',
+      6: 'provisioning.remoteError.constraint',
+      7: 'provisioning.remoteError.readOnly',
+      8: 'provisioning.remoteError.storage',
+      9: 'provisioning.remoteError.notInitialized',
+      99: 'provisioning.remoteError.internal',
+    };
+    const messageKey = messageKeys[code];
+    return messageKey ? $t(messageKey) : $t('provisioning.remoteError.unknown', { code });
+  }
+
+  function remoteFieldName(namespaceId?: number, fieldId?: number): string | undefined {
+    if (namespaceId === undefined || fieldId === undefined) return undefined;
+    return loaded?.schema.namespaces
+      .find((namespace) => namespace.id === namespaceId)
+      ?.fields.find((field) => field.id === fieldId)?.name;
+  }
+
+  function remoteErrorDetail(error: unknown): string | undefined {
+    if (error instanceof ProvisioningFieldFailure) {
+      const reason = remoteErrorCodeMessage(error.code);
+      const fieldName = remoteFieldName(error.namespaceId, error.fieldId);
+      return fieldName ? `${fieldName}: ${reason}` : reason;
+    }
+    if (error instanceof ProvisioningProtocolError) {
+      const remoteMessage = error.details.message.trim().slice(0, 240)
+        || remoteErrorCodeMessage(error.details.code);
+      const fieldName = remoteFieldName(error.details.namespace, error.details.field);
+      return fieldName ? `${fieldName}: ${remoteMessage}` : remoteMessage;
+    }
+    return undefined;
+  }
+
+  function showProvisioningFailure(messageKey: MessageKey, error: unknown): void {
+    const detail = remoteErrorDetail(error);
+    if (detail) {
+      toast.error('provisioning.action.failedWithDeviceError', {
+        message: $t(messageKey),
+        error: detail,
+      });
+    } else toast.error(messageKey);
+  }
+
   async function saveNamespace(): Promise<void> {
-    if (!client || !loaded || busy || activeDirtyFieldCount === 0) return;
+    if (!client || !loaded || busy || activeDirtyFieldCount === 0 || activeValidationErrorCount > 0) return;
     const activeLoaded = loaded;
     const namespaceIds = new Set(activeNamespaceIds);
     const stagedKeys = dirtyFields.filter((key) => namespaceIds.has(Number(key.split(':', 1)[0])));
@@ -575,9 +727,11 @@
         ...stagedKeys,
       ]));
       dirtyFields = dirtyFields.filter((key) => !namespaceIds.has(Number(key.split(':', 1)[0])));
+      fieldValidationErrors = Object.fromEntries(Object.entries(fieldValidationErrors)
+        .filter(([key]) => !namespaceIds.has(Number(key.split(':', 1)[0]))));
       toast.success('provisioning.namespace.save.success');
-    } catch {
-      toast.error('provisioning.namespace.save.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.namespace.save.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -603,10 +757,12 @@
       };
       draft = { ...draft, ...refreshedState };
       dirtyFields = dirtyFields.filter((key) => !activeNamespaceIds.has(Number(key.split(':', 1)[0])));
+      fieldValidationErrors = Object.fromEntries(Object.entries(fieldValidationErrors)
+        .filter(([key]) => !activeNamespaceIds.has(Number(key.split(':', 1)[0]))));
       firmwareDraftFields = firmwareDraftFields.filter((key) => !activeNamespaceIds.has(Number(key.split(':', 1)[0])));
       toast.success('provisioning.namespace.revert.success');
-    } catch {
-      toast.error('provisioning.namespace.revert.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.namespace.revert.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -632,11 +788,12 @@
       draft = structuredClone(refreshedState);
       dirtyFields = [];
       firmwareDraftFields = [];
+      fieldValidationErrors = {};
       toast.success(result.needsReboot
         ? 'provisioning.commitAll.rebootRequired'
         : 'provisioning.commitAll.success');
-    } catch {
-      toast.error('provisioning.commitAll.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.commitAll.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -657,9 +814,10 @@
       draft = structuredClone(refreshedState);
       dirtyFields = [];
       firmwareDraftFields = [];
+      fieldValidationErrors = {};
       toast.success('provisioning.discardAll.success');
-    } catch {
-      toast.error('provisioning.discardAll.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.discardAll.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -678,8 +836,8 @@
       commandValues = Object.fromEntries(Object.entries(commandValues)
         .filter(([key]) => key !== fieldKey(namespaceId, field.id)));
       toast.success(result.needsReboot ? 'provisioning.command.rebootRequired' : 'provisioning.command.success');
-    } catch {
-      toast.error('provisioning.command.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.command.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -692,8 +850,8 @@
     try {
       await client.reboot();
       toast.success('provisioning.reboot.sent');
-    } catch {
-      toast.error('provisioning.reboot.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.reboot.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -706,8 +864,8 @@
     try {
       await client.factoryReset();
       toast.success('provisioning.factoryReset.sent');
-    } catch {
-      toast.error('provisioning.factoryReset.failed');
+    } catch (error) {
+      showProvisioningFailure('provisioning.factoryReset.failed', error);
     } finally {
       busy = false;
       stage = undefined;
@@ -715,7 +873,7 @@
   }
 
   function requestCommand(namespaceId: number, field: ProvisioningField): void {
-    if (!client || busy) return;
+    if (!client || busy || fieldValidationError(namespaceId, field)) return;
     const value = field.type === provisioningFieldTypes.void
       ? null
       : editableFieldValue(namespaceId, field);
@@ -783,10 +941,14 @@
     </button>
     <div class="provisioning-header-copy">
       <p class="eyebrow">{$t('app.name')}</p>
-      <h1>{selectedNode && nodeName(selectedNode)
-        ? $t('provisioning.title.connected', { name: nodeName(selectedNode) })
-        : $t('provisioning.title')}</h1>
-      <p>{$t('provisioning.description')}</p>
+      <h1>{$t('provisioning.title')}</h1>
+      {#if selectedNode}
+        <p>{$t('provisioning.connection.current', {
+          name: nodeName(selectedNode) || selectedNode.destinationHash,
+        })}</p>
+      {:else}
+        <p>{$t('provisioning.description')}</p>
+      {/if}
     </div>
   </header>
 
@@ -825,15 +987,6 @@
           disabled={Boolean(selectedNode)}
         />
       </label>
-      {#if selectedNode}
-        <button
-          class="provisioning-address-copy-target"
-          type="button"
-          aria-label={$t('provisioning.bookmark.copyAddress')}
-          title={$t('provisioning.bookmark.copyAddress')}
-          onclick={copyActiveDestination}
-        ></button>
-      {/if}
     </div>
     {#if !selectedNode}
       <button class="button primary" type="submit" disabled={!normalizedDestination}>
@@ -843,8 +996,9 @@
       <select
         class="provisioning-section-select"
         aria-label={$t('provisioning.section.label')}
-        bind:value={activeSection}
+        value={activeSection}
         disabled={busy}
+        onchange={(event) => selectSection(event.currentTarget.value)}
       >
         <option value="status">{$t('provisioning.section.status')}</option>
         {#each rootNamespaces as namespace (namespace.id)}
@@ -962,7 +1116,7 @@
               type="button"
               aria-current={activeSection === 'status' ? 'page' : undefined}
               disabled={busy}
-              onclick={() => activeSection = 'status'}
+              onclick={() => selectSection('status')}
             >
               <span class="destination-mark provisioning-section-icon" data-icon="info">
                 <Icon name="info" size={16} />
@@ -976,7 +1130,7 @@
                 type="button"
                 aria-current={activeSection === `namespace:${namespace.id}` ? 'page' : undefined}
                 disabled={busy}
-                onclick={() => activeSection = `namespace:${namespace.id}`}
+                onclick={() => selectSection(`namespace:${namespace.id}`)}
               >
                 <span
                   class="destination-mark provisioning-section-icon"
@@ -1083,7 +1237,13 @@
               >
                 <div class="provisioning-field-grid">
                 {#each namespace.fields as field (field.id)}
-                  <label class="field provisioning-field" class:read-only={fieldIsReadOnly(field)}>
+                  {@const validationError = fieldValidationError(namespace.id, field)}
+                  {@const validationId = `provisioning-field-error-${namespace.id}-${field.id}`}
+                  <label
+                    class="field provisioning-field"
+                    class:read-only={fieldIsReadOnly(field)}
+                    class:invalid={Boolean(validationError)}
+                  >
                     <span>
                       {field.name}
                       {#if (field.flags & provisioningFieldFlags.rebootRequired) !== 0}<small>{$t('provisioning.field.reboot')}</small>{/if}
@@ -1109,30 +1269,41 @@
                         type="number"
                         min={field.type === provisioningFieldTypes.integer ? field.minInteger : field.minFloat}
                         max={field.type === provisioningFieldTypes.integer ? field.maxInteger : field.maxFloat}
-                        step={field.type === provisioningFieldTypes.integer ? 1 : 'any'}
+                        step={numericInputStep(field)}
                         value={Number(editableFieldValue(namespace.id, field) ?? 0)}
+                        aria-invalid={validationError ? 'true' : undefined}
+                        aria-describedby={validationError ? validationId : undefined}
                         oninput={(event) => {
-                          if (Number.isFinite(event.currentTarget.valueAsNumber)) {
+                          const error = numericInputError(field, event.currentTarget.value);
+                          setFieldValidationError(namespace.id, field, error);
+                          if (!error && Number.isFinite(event.currentTarget.valueAsNumber)) {
                             updateEditableField(namespace.id, field, event.currentTarget.valueAsNumber);
                           }
                         }}
                       />
                     {:else if field.type === provisioningFieldTypes.bytes}
-                      <input value={displayValue(editableFieldValue(namespace.id, field))} oninput={(event) => {
-                        try { updateEditableField(namespace.id, field, parseBytes(event.currentTarget.value)); }
-                        catch { /* Wait for a complete byte pair before updating the draft. */ }
-                      }} onchange={(event) => {
-                        try { updateEditableField(namespace.id, field, parseBytes(event.currentTarget.value)); }
-                        catch { toast.error('provisioning.field.bytesInvalid'); }
-                      }} />
+                      <input
+                        value={displayValue(editableFieldValue(namespace.id, field))}
+                        aria-invalid={validationError ? 'true' : undefined}
+                        aria-describedby={validationError ? validationId : undefined}
+                        oninput={(event) => {
+                          const error = bytesInputError(field, event.currentTarget.value);
+                          setFieldValidationError(namespace.id, field, error);
+                          if (!error) updateEditableField(namespace.id, field, parseBytes(event.currentTarget.value));
+                        }}
+                      />
                     {:else if field.type === provisioningFieldTypes.bytesList}
-                      <textarea rows="3" value={displayListValue(editableFieldValue(namespace.id, field))} oninput={(event) => {
-                        try { updateEditableField(namespace.id, field, parseBytesList(event.currentTarget.value)); }
-                        catch { /* Wait for complete byte pairs before updating the draft. */ }
-                      }} onchange={(event) => {
-                        try { updateEditableField(namespace.id, field, parseBytesList(event.currentTarget.value)); }
-                        catch { toast.error('provisioning.field.bytesInvalid'); }
-                      }}></textarea>
+                      <textarea
+                        rows="3"
+                        value={displayListValue(editableFieldValue(namespace.id, field))}
+                        aria-invalid={validationError ? 'true' : undefined}
+                        aria-describedby={validationError ? validationId : undefined}
+                        oninput={(event) => {
+                          const error = bytesListInputError(field, event.currentTarget.value);
+                          setFieldValidationError(namespace.id, field, error);
+                          if (!error) updateEditableField(namespace.id, field, parseBytesList(event.currentTarget.value));
+                        }}
+                      ></textarea>
                     {:else if field.type === provisioningFieldTypes.void}
                       <button class="button secondary compact" type="button" onclick={() => fieldIsWriteOnly(field)
                         ? requestCommand(namespace.id, field)
@@ -1143,13 +1314,27 @@
                         maxlength={field.maxLength}
                         value={typeof editableFieldValue(namespace.id, field) === 'string' ? editableFieldValue(namespace.id, field) as string : ''}
                         placeholder={fieldIsSecret(field) ? $t('provisioning.field.secretPlaceholder') : undefined}
-                        oninput={(event) => updateEditableField(namespace.id, field, event.currentTarget.value)}
+                        aria-invalid={validationError ? 'true' : undefined}
+                        aria-describedby={validationError ? validationId : undefined}
+                        oninput={(event) => {
+                          const error = stringInputError(field, event.currentTarget.value);
+                          setFieldValidationError(namespace.id, field, error);
+                          if (!error) updateEditableField(namespace.id, field, event.currentTarget.value);
+                        }}
                       />
                     {/if}
                     {#if fieldIsWriteOnly(field) && field.type !== provisioningFieldTypes.void}
-                      <button class="button secondary compact provisioning-command-button" type="button" onclick={() => requestCommand(namespace.id, field)}>
+                      <button
+                        class="button secondary compact provisioning-command-button"
+                        type="button"
+                        disabled={Boolean(validationError)}
+                        onclick={() => requestCommand(namespace.id, field)}
+                      >
                         {$t('provisioning.command.send')}
                       </button>
+                    {/if}
+                    {#if validationError}
+                      <small class="field-error" id={validationId} role="alert">{validationError}</small>
                     {/if}
                   </label>
                 {/each}
@@ -1168,7 +1353,7 @@
             <button
               class="button primary compact"
               type="button"
-              disabled={activeDirtyFieldCount === 0}
+              disabled={activeDirtyFieldCount === 0 || activeValidationErrorCount > 0}
               onclick={() => void saveNamespace()}
             >{$t('provisioning.namespace.save')}</button>
           </div>

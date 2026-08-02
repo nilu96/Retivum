@@ -35,6 +35,17 @@ export type ProvisioningProgressHandler = (
   dataSize?: number,
 ) => void;
 
+export class ProvisioningFieldFailure extends Error {
+  constructor(
+    readonly namespaceId: number,
+    readonly fieldId: number,
+    readonly code: number,
+  ) {
+    super(`PROVISIONING_FIELD_ERROR_${namespaceId}_${fieldId}_${code}`);
+    this.name = 'ProvisioningFieldFailure';
+  }
+}
+
 export class ProvisioningClient {
   private sequence = 1;
   private structuredStateProtocol = false;
@@ -93,7 +104,7 @@ export class ProvisioningClient {
     ));
     if (staged.fieldErrors.length) {
       const first = staged.fieldErrors[0];
-      throw new Error(`PROVISIONING_FIELD_ERROR_${first.namespace}_${first.field}_${first.code}`);
+      throw new ProvisioningFieldFailure(first.namespace, first.field, first.code);
     }
     return staged;
   }

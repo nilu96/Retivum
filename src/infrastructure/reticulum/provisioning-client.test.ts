@@ -6,7 +6,7 @@ import {
   type ProvisioningNode,
   type ProvisioningValue,
 } from '../../domain/provisioning';
-import { ProvisioningClient } from './provisioning-client';
+import { ProvisioningClient, ProvisioningFieldFailure } from './provisioning-client';
 import { ProvisioningRequestFailure, reticulumRuntime } from './runtime';
 
 const node: ProvisioningNode = {
@@ -43,6 +43,21 @@ describe('ProvisioningClient', () => {
       .toBe(provisioningOperations.commit);
     expect(request.mock.calls[0][2]).toBe(false);
     expect(request.mock.calls[1][2]).toBe(false);
+  });
+
+  it('preserves remote field rejection details in a typed failure', async () => {
+    vi.spyOn(reticulumRuntime, 'requestProvisioning').mockResolvedValue(encodeProvisioningMessage([
+      provisioningOperations.acknowledgement,
+      1,
+      new Map<ProvisioningValue, ProvisioningValue>([
+        [1, 0],
+        [2, false],
+        [3, [[4, 2, 6]]],
+      ]),
+    ]));
+
+    await expect(new ProvisioningClient(node).stage({ 4: { 2: 1.2 } }))
+      .rejects.toEqual(new ProvisioningFieldFailure(4, 2, 6));
   });
 
   it('decodes structured values and drafts and uses structured mutation payloads', async () => {
