@@ -590,6 +590,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 }
 .nomad-identify-button.identified:disabled { cursor: default; opacity: 1; }
 .nomad-canvas { position: relative; display: grid; min-height: 0; grid-column: 2; grid-row: 3; place-items: center; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
+.nomad-canvas, .nomad-canvas :where(*) { -webkit-user-select: text; user-select: text; }
+.nomad-canvas :where(button, [role='button']) { -webkit-user-select: none; user-select: none; }
 .conversation-empty > .empty-state,
 .nomad-canvas > .empty-state { width: min(378px, 100%); }
 .nomad-canvas.page-loaded { display: block; place-items: initial; overflow: auto; }
