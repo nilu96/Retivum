@@ -1580,6 +1580,13 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .log-entry dd { flex: 1; }
 }
 
+@media (max-width: 699px) and (hover: none) and (pointer: coarse) {
+  .mobile-identity-actions .mobile-runtime-status:hover:not(:active) {
+    border-color: var(--border);
+    background: var(--surface-2);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
