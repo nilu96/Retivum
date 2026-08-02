@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/sve
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   knownDestinations,
+  localDestinationInventory,
   remoteDestinationInventory,
   reticulumRuntime,
   runtimeStatus,
@@ -18,6 +19,7 @@ describe('ProbeView', () => {
     clearToasts();
     runtimeStatus.set('online');
     knownDestinations.set([]);
+    localDestinationInventory.set([]);
     remoteDestinationInventory.set([
       { destinationHash: '1'.repeat(32), fullDestinationName: 'lxmf.delivery' },
       { destinationHash: '2'.repeat(32), fullDestinationName: 'rnstransport.probe' },
@@ -56,6 +58,16 @@ describe('ProbeView', () => {
     }]);
     render(ProbeView);
 
+    await fireEvent.input(screen.getByLabelText('Destination hash'), {
+      target: { value: inventoryNamedHash },
+    });
+    expect(screen.getByLabelText('Full destination name')).toHaveValue('nomadnetwork.node');
+
+    await fireEvent.input(screen.getByLabelText('Destination hash'), {
+      target: { value: propagationHash },
+    });
+    expect(screen.getByLabelText('Full destination name')).toHaveValue('lxmf.propagation');
+
     await fireEvent.click(screen.getByRole('button', { name: 'Show known destinations' }));
     const list = screen.getByRole('listbox', { name: 'Known Reticulum destinations' });
     expect(within(list).getByText(propagationHash)).toBeInTheDocument();
@@ -71,6 +83,41 @@ describe('ProbeView', () => {
     await fireEvent.click(screen.getByRole('option', { name: unknownHash }));
     expect(screen.getByLabelText('Destination hash')).toHaveValue(unknownHash);
     expect(screen.getByLabelText('Full destination name')).toHaveValue('');
+  });
+
+  it('treats a local-only destination as unknown and clears its name', async () => {
+    const localProbeHash = '6'.repeat(32);
+    localDestinationInventory.set([{
+      destinationHash: localProbeHash,
+      fullDestinationName: 'rnstransport.probe',
+    }]);
+    render(ProbeView);
+
+    await fireEvent.input(screen.getByLabelText('Destination hash'), {
+      target: { value: localProbeHash },
+    });
+
+    expect(screen.getByLabelText('Full destination name')).toHaveValue('');
+  });
+
+  it('treats a persisted-only destination as unknown and allows a manual name', async () => {
+    const persistedOnlyHash = '7'.repeat(32);
+    knownDestinations.set([{
+      destinationHash: persistedOnlyHash,
+      fullDestinationName: 'rnstransport.probe',
+    }]);
+    render(ProbeView);
+
+    await fireEvent.input(screen.getByLabelText('Destination hash'), {
+      target: { value: persistedOnlyHash },
+    });
+
+    const nameInput = screen.getByLabelText('Full destination name');
+    expect(nameInput).toHaveValue('');
+
+    await fireEvent.input(nameInput, { target: { value: 'custom.application' } });
+
+    expect(nameInput).toHaveValue('custom.application');
   });
 
   it('uses the shared probe API and places newest results first', async () => {
@@ -97,6 +144,9 @@ describe('ProbeView', () => {
     render(ProbeView);
 
     await fireEvent.input(screen.getByLabelText('Destination hash'), { target: { value: destination } });
+    await fireEvent.input(screen.getByLabelText('Full destination name'), {
+      target: { value: 'lxmf.delivery' },
+    });
     await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
     expect(probe).toHaveBeenLastCalledWith(destination, 'lxmf.delivery', 20_000, 8, expect.any(AbortSignal));
     expect(screen.getByText('Valid proof received')).toBeInTheDocument();
@@ -148,6 +198,9 @@ describe('ProbeView', () => {
     try {
       render(ProbeView);
       await fireEvent.input(screen.getByLabelText('Destination hash'), { target: { value: destination } });
+      await fireEvent.input(screen.getByLabelText('Full destination name'), {
+        target: { value: 'lxmf.delivery' },
+      });
       await fireEvent.input(screen.getByRole('spinbutton', { name: /^Timeout \(seconds\)/ }), {
         target: { value: '37' },
       });
@@ -208,7 +261,9 @@ describe('ProbeView', () => {
     render(ToastViewport);
 
     const destinationInput = screen.getByLabelText('Destination hash');
+    const destinationNameInput = screen.getByLabelText('Full destination name');
     await fireEvent.input(destinationInput, { target: { value: firstDestination } });
+    await fireEvent.input(destinationNameInput, { target: { value: 'lxmf.delivery' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));
 
     const history = screen.getByRole('list', { name: 'Probe results, newest first' });
@@ -226,6 +281,7 @@ describe('ProbeView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Close probe history actions' }));
 
     await fireEvent.input(destinationInput, { target: { value: secondDestination } });
+    await fireEvent.input(destinationNameInput, { target: { value: 'lxmf.delivery' } });
     expect(screen.getByRole('button', { name: 'Send probe' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Drop path' })).toBeEnabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Send probe' }));

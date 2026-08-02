@@ -39,6 +39,8 @@
   let droppingPath = $state(false);
   let destinationMenuOpen = $state(false);
   let nameMenuOpen = $state(false);
+  let lastResolvedDestination: string | undefined;
+  let lastResolvedDestinationName: string | undefined;
   let destinationPicker = $state<HTMLDivElement>();
   let namePicker = $state<HTMLDivElement>();
   let validationVisible = $state(false);
@@ -76,6 +78,22 @@
         fullDestinationName,
       };
     });
+  });
+
+  $effect(() => {
+    if (!normalizedDestination) {
+      lastResolvedDestination = undefined;
+      lastResolvedDestinationName = undefined;
+      return;
+    }
+    const registeredName = visibleDestinations.find((entry) => (
+      entry.destinationHash === normalizedDestination
+    ))?.fullDestinationName;
+    if (normalizedDestination === lastResolvedDestination
+      && registeredName === lastResolvedDestinationName) return;
+    lastResolvedDestination = normalizedDestination;
+    lastResolvedDestinationName = registeredName;
+    fullDestinationName = registeredName ?? '';
   });
 
   onMount(() => {
