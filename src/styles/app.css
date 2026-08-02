@@ -379,12 +379,12 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .button { gap: 8px; min-height: 42px; padding-inline: 16px; font-weight: 650; }
 .button.compact { min-height: 36px; padding-inline: 12px; font-size: .8rem; }
 .button.primary, .icon-button.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
-.button.primary:hover, .icon-button.primary:hover { background: var(--accent-strong); }
+.button.primary:hover:not(:disabled), .icon-button.primary:hover:not(:disabled) { background: var(--accent-strong); }
 .button.secondary, .icon-button { background: var(--surface-2); }
-.button.secondary:hover, .icon-button:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+.button.secondary:hover:not(:disabled), .icon-button:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-hover); }
 .icon-button { width: 40px; height: 40px; padding: 0; }
 .icon-button.danger { color: var(--danger); }
-.icon-button.danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+.icon-button.danger:hover:not(:disabled) { border-color: var(--danger); background: var(--danger-soft); }
 
 .chat-workspace { display: grid; grid-template-columns: minmax(310px, 370px) minmax(0, 1fr); height: 100%; min-height: 600px; }
 .chat-overview { position: relative; display: grid; grid-template-rows: auto auto auto 1fr auto; min-height: 0; border-inline-end: 1px solid var(--border); background: var(--surface-1); }
