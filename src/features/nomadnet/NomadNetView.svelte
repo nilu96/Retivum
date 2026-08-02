@@ -67,6 +67,7 @@
   let { active = true }: { active?: boolean } = $props();
   let previouslyActive: boolean | undefined;
   let address = $state('');
+  let addressInputElement = $state<HTMLInputElement>();
   function preferredNomadScope(): NomadDirectoryScope {
     return $nomadBookmarks.length ? 'bookmarks' : 'announces';
   }
@@ -661,6 +662,11 @@
     if (event.currentTarget instanceof HTMLInputElement) {
       setNomadAddress(event.currentTarget.value);
     }
+  }
+
+  function clearAddress(): void {
+    setNomadAddress('');
+    addressInputElement?.focus();
   }
 
   async function copyDestinationHash(destinationHash: string): Promise<void> {
@@ -1321,17 +1327,33 @@
             ><Icon name="home" size={19} /></button>
           </div>
         {/if}
-        <label>
-          <span class="sr-only">{$t('nomadnet.address.label')}</span>
+        <div class="nomad-address-field">
+          <label class="sr-only" for="nomadnet-address">
+            {$t('nomadnet.address.label')}
+          </label>
           <Icon name="nomadnet" size={19} />
           <input
+            id="nomadnet-address"
+            bind:this={addressInputElement}
+            type="text"
             value={address}
             placeholder={$t('nomadnet.address.placeholder')}
+            autocomplete="off"
             autocapitalize="none"
             spellcheck="false"
+            data-1p-ignore="true"
             oninput={handleAddressInput}
           />
-        </label>
+          {#if address}
+            <button
+              class="search-clear-button"
+              type="button"
+              aria-label={$t('nomadnet.address.clear')}
+              title={$t('nomadnet.address.clear')}
+              onclick={clearAddress}
+            ><Icon name="close" size={16} /></button>
+          {/if}
+        </div>
         <button
           class="button primary nomad-open-button"
           type="submit"

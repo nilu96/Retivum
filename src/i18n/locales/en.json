@@ -256,6 +256,7 @@
   "nomadnet.subtitle": "Browse pages over Reticulum",
   "nomadnet.address.label": "Destination and path",
   "nomadnet.address.placeholder": "destination:/page/path",
+  "nomadnet.address.clear": "Clear NomadNet address",
   "nomadnet.go": "Open page",
   "nomadnet.bookmarks": "Bookmarks",
   "nomadnet.bookmarkCurrent": "Bookmark current address",

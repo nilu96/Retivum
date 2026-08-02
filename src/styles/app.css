@@ -582,9 +582,10 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .nomad-mobile-toolbar { display: none; }
 .nomad-address { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 9px; }
 .nomad-browser-actions { display: flex; gap: 7px; }
-.nomad-address label { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 45px; padding-inline: 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-subtle); background: var(--surface-1); }
-.nomad-address label:focus-within { border-color: var(--accent); }
-.nomad-address input { width: 100%; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
+.nomad-address-field { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 45px; padding-inline: 14px; border: 1px solid var(--border); border-radius: 11px; color: var(--text-subtle); background: var(--surface-1); }
+.nomad-address-field:focus-within { border-color: var(--accent); }
+.nomad-address-field > svg { flex: none; }
+.nomad-address input { width: 100%; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; font-family: "SFMono-Regular", Consolas, monospace; font-size: .83rem; }
 .nomad-bookmark-button.bookmarked { color: var(--accent-strong); }
 .nomad-identify-button.identified {
   border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
@@ -1562,7 +1563,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     padding: 0;
     border: 0;
   }
-  .nomad-address label,
+  .nomad-address-field,
   .nomad-open-button {
     height: 45px;
     min-height: 45px;

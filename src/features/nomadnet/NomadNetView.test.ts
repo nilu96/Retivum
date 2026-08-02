@@ -89,6 +89,26 @@ describe('NomadNetView', () => {
     }
   });
 
+  it('clears the NomadNet address and returns focus to its input', async () => {
+    render(NomadNetView);
+
+    const input = screen.getByPlaceholderText('destination:/page/path');
+    expect(input).toHaveAttribute('autocomplete', 'off');
+    expect(input).toHaveAttribute('data-1p-ignore', 'true');
+    expect(screen.queryByRole('button', { name: 'Clear NomadNet address' }))
+      .not.toBeInTheDocument();
+
+    await fireEvent.input(input, { target: { value: 'example:/page/index.mu' } });
+    const clearButton = screen.getByRole('button', { name: 'Clear NomadNet address' });
+    clearButton.focus();
+    await fireEvent.click(clearButton);
+
+    expect(input).toHaveValue('');
+    expect(input).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Clear NomadNet address' }))
+      .not.toBeInTheDocument();
+  });
+
   it('keeps the mobile page controls available while toggling the floating destination panel', async () => {
     useMobileViewport();
     const { container } = render(NomadNetView);
