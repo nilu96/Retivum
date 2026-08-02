@@ -1046,6 +1046,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .status-details-page { max-width: 1180px; min-width: 0; }
 .status-details-header { margin-block-end: 22px; }
 .status-details-page .empty-state { margin-inline: auto; }
+.status-interface-section > .empty-state { margin-block-start: 28px; }
 .path-management-page { display: grid; max-width: 1100px; min-width: 0; align-content: start; gap: 26px; }
 .path-management-header { margin-block-end: -3px; }
 .message-scroll-latest.path-management-scroll-top { position: fixed; z-index: 10; inset-inline-end: 24px; inset-block-end: 24px; }
