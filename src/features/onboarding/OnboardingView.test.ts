@@ -78,6 +78,7 @@ describe('OnboardingView', () => {
     const configuredInterface = screen.getByRole('button', { name: 'Edit Home relay' });
     expect(configuredInterface).toHaveTextContent('Interface configuration saved');
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument();
 
     await fireEvent.click(configuredInterface);
     expect(await screen.findByRole('heading', { name: 'Edit WebSocket interface' })).toBeInTheDocument();

@@ -211,7 +211,9 @@
             <span>{$t('onboarding.interface.disabledCounts')}</span>
           </p>
           <div class="onboarding-actions">
-            <button class="button secondary" type="button" onclick={onskip}>{$t('onboarding.skip')}</button>
+            {#if configuredInterfaces.length === 0}
+              <button class="button secondary" type="button" onclick={onskip}>{$t('onboarding.skip')}</button>
+            {/if}
             <button
               class="button primary"
               type="button"
