@@ -137,6 +137,24 @@ describe('NomadNetView', () => {
     expect(browser).not.toHaveClass('expanded');
   });
 
+  it('expands the mobile toolbar when returning to the empty address state', async () => {
+    useMobileViewport();
+    const { rerender } = render(NomadNetView, { active: true });
+
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    expect(screen.getByRole('heading', { name: 'Enter a NomadNet address' })).toBeInTheDocument();
+    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
+    expect(within(toolbar).getByRole('button', { name: 'Show announces (0)' }))
+      .toHaveAttribute('aria-expanded', 'false');
+
+    await rerender({ active: false });
+    await rerender({ active: true });
+
+    await waitFor(() => expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
+      .toHaveAttribute('aria-expanded', 'true'));
+    expect(screen.getByPlaceholderText('destination:/page/path')).toBeInTheDocument();
+  });
+
   it('compensates sticky toolbar height changes to preserve the page viewport', async () => {
     useMobileViewport();
     let browserResizeCallback: ResizeObserverCallback | undefined;

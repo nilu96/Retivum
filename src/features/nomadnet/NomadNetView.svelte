@@ -57,6 +57,7 @@
   };
 
   let { active = true }: { active?: boolean } = $props();
+  let previouslyActive: boolean | undefined;
   let address = $state('');
   function preferredNomadScope(): NomadDirectoryScope {
     return $nomadBookmarks.length ? 'bookmarks' : 'announces';
@@ -182,6 +183,14 @@
     if (!initialScopePending || !$nomadDirectoryReady) return;
     initialScopePending = false;
     selectedScope = preferredNomadScope();
+  });
+
+  $effect(() => {
+    const enteringNomadNet = active && previouslyActive === false;
+    previouslyActive = active;
+    if (enteringNomadNet && !loadedPage && !loadingPage && !pageError) {
+      setDirectoryExpanded(true);
+    }
   });
 
   onMount(() => {
