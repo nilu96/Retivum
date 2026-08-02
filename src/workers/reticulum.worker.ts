@@ -2,13 +2,11 @@
 
 import initWasm, {
   ReticulumNode,
-  type LxmfMessageAttachments,
 } from '../../leviculum_wasm/leviculum_wasm.js';
 import type { EncryptedPayload, PersistedIdentityRecord } from '../domain/identity';
 import { bytesToHex, identityAnnounceIsDue, identityLastAnnouncedAtMs } from '../domain/identity';
 import type { PersistedNetworkStateRecord } from '../domain/network-state';
 import {
-  imageFormat,
   imageMime,
   inferAttachmentMimeType,
   normalizeChatAttachments,
@@ -38,6 +36,7 @@ import {
   type InterfaceAnnounceHistoryRecord,
 } from '../domain/interface-announce';
 import { normalizeInDestinationHashes } from '../infrastructure/reticulum/in-destination-hashes';
+import { lxmfAttachmentInput } from '../infrastructure/reticulum/lxmf-attachments';
 import {
   decodeNomadNodeAppData,
   encodeNomadRequestData,
@@ -1598,7 +1597,7 @@ function prepareLxmfAttempt(
       title: new TextEncoder().encode(title),
       content: new TextEncoder().encode(content),
       fields: [],
-      attachments: wasmAttachmentInput(attachments),
+      attachments: lxmfAttachmentInput(attachments),
       method,
       timestamp,
       includeTicket: true,
@@ -3983,18 +3982,6 @@ function handleReceivedLxmfMessage(event: Record<string, unknown>): void {
     receivedAt: new Date().toISOString(),
   });
   log('debug', 'wasm', 'LXMF_MESSAGE_PROJECTED', { messageId: bytesToHex(messageId) });
-}
-
-function wasmAttachmentInput(attachments: ChatAttachment[] | undefined): LxmfMessageAttachments | undefined {
-  if (!attachments?.length) return undefined;
-  const image = attachments.find((attachment) => attachment.kind === 'image');
-  const audio = attachments.find((attachment) => attachment.kind === 'audio' && attachment.mimeType === 'audio/webm');
-  const files = attachments.filter((attachment) => attachment !== image && attachment !== audio);
-  return {
-    files: files.map((file) => ({ name: file.name, data: file.data })),
-    ...(image ? { image: { format: imageFormat(image.mimeType), data: image.data } } : {}),
-    ...(audio ? { audio: { mode: 'custom', data: audio.data } } : {}),
-  };
 }
 
 function eventChatAttachments(event: Record<string, unknown>): ChatAttachment[] {
