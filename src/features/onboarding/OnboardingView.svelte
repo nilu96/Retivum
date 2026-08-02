@@ -33,7 +33,6 @@
   let identityCommitted = $state(false);
   let currentStep = $state<1 | 2 | 3>(1);
 
-  const legacyDefaultDisplayName = $derived($t('settings.identity.legacyDefaultDisplayName'));
   const configuredDisplayName = $derived(chosenDisplayName ?? $activeIdentity?.displayName ?? '');
   const availableDescriptors = interfaceTypeDescriptors.filter((descriptor) => (
     availableInterfaceTypes.includes(descriptor.type)
@@ -44,7 +43,6 @@
       currentStep === 1
       && $activeIdentity !== undefined
       && $activeIdentity.displayName.trim() !== ''
-      && $activeIdentity.displayName !== legacyDefaultDisplayName
     ) currentStep = 2;
   });
 
@@ -71,7 +69,7 @@
       await repository.saveInterface(config);
       if (
         chosenDisplayName
-        && (!$activeIdentity?.displayName.trim() || $activeIdentity.displayName === legacyDefaultDisplayName)
+        && !$activeIdentity?.displayName.trim()
         && !identityCommitted
       ) {
         let identitySaved = false;

@@ -12,27 +12,27 @@ const unnamed: IdentitySummary = {
 
 describe('onboardingIsRequired', () => {
   it('requires onboarding when there is no identity and no interface', () => {
-    expect(onboardingIsRequired([], [], 'Anonymous')).toBe(true);
+    expect(onboardingIsRequired([], [])).toBe(true);
   });
 
   it('requires onboarding for a sole unnamed identity and no interface', () => {
-    expect(onboardingIsRequired([unnamed], [], 'Anonymous')).toBe(true);
+    expect(onboardingIsRequired([unnamed], [])).toBe(true);
   });
 
-  it('continues onboarding for a legacy default Anonymous identity', () => {
-    expect(onboardingIsRequired([{ ...unnamed, displayName: 'Anonymous' }], [], 'Anonymous')).toBe(true);
+  it('treats an existing Anonymous identity as explicitly named', () => {
+    expect(onboardingIsRequired([{ ...unnamed, displayName: 'Anonymous' }], [])).toBe(false);
   });
 
   it('does not require onboarding for a named identity', () => {
-    expect(onboardingIsRequired([{ ...unnamed, displayName: 'Alice' }], [], 'Anonymous')).toBe(false);
+    expect(onboardingIsRequired([{ ...unnamed, displayName: 'Alice' }], [])).toBe(false);
   });
 
   it('does not require onboarding when more than one identity exists', () => {
-    expect(onboardingIsRequired([unnamed, { ...unnamed, id: 'second' }], [], 'Anonymous')).toBe(false);
+    expect(onboardingIsRequired([unnamed, { ...unnamed, id: 'second' }], [])).toBe(false);
   });
 
   it('counts a disabled interface as configured', () => {
     const configured = { ...createWebSocketInterfaceDraft(), enabled: false };
-    expect(onboardingIsRequired([unnamed], [configured], 'Anonymous')).toBe(false);
+    expect(onboardingIsRequired([unnamed], [configured])).toBe(false);
   });
 });
