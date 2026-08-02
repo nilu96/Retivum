@@ -52,8 +52,11 @@ const fieldKeys = {
 const infoKeys = { firmwareVersion: 1, schemaVersion: 2, needsReboot: 3, schemaHash: 4 } as const;
 const wireKeys = { requestCompression: 100, compressedPayload: 101 } as const;
 const getStateKeys = { namespaceFilter: 1, pending: 2 } as const;
+const getStateResponseKeys = { values: 1, drafts: 2, hash: 3, unchanged: 4 } as const;
+const stateRequestKeys = { state: 3, includeState: 5 } as const;
 const setStateKeys = { applied: 1, draftHasReboot: 2, fieldErrors: 3 } as const;
 const commitKeys = { applied: 1, needsReboot: 2 } as const;
+const postOperationKeys = { values: 4, drafts: 5, hash: 6 } as const;
 const errorKeys = { code: 1, message: 2, namespace: 3, field: 4 } as const;
 
 export type ProvisioningValue = null | boolean | number | bigint | string | Uint8Array | ProvisioningValue[] | Map<ProvisioningValue, ProvisioningValue>;
@@ -464,7 +467,7 @@ export function parseProvisioningSchema(body: ProvisioningValue): ProvisioningSc
   return { namespaces };
 }
 
-export function parseProvisioningState(body: ProvisioningValue): ProvisioningState {
+function parseProvisioningStateMap(body: ProvisioningValue | undefined): ProvisioningState {
   const state: ProvisioningState = {};
   if (!(body instanceof Map)) return state;
   for (const [namespaceId, rawFields] of body) {
@@ -476,16 +479,78 @@ export function parseProvisioningState(body: ProvisioningValue): ProvisioningSta
   return state;
 }
 
-export function provisioningStatePayload(state: ProvisioningState): ProvisioningValue {
+export interface ProvisioningStateResult {
+  values: ProvisioningState;
+  drafts?: ProvisioningState;
+  hash?: number;
+  unchanged: boolean;
+  structured: boolean;
+}
+
+export function parseProvisioningStateResult(body: ProvisioningValue): ProvisioningStateResult {
+  const map = asMap(body);
+  const valuesBody = map.get(getStateResponseKeys.values);
+  const structured = valuesBody instanceof Map && (
+    map.has(getStateResponseKeys.drafts)
+    || map.has(getStateResponseKeys.hash)
+    || map.has(getStateResponseKeys.unchanged)
+    || Array.from(valuesBody.values()).every((value) => value instanceof Map)
+  );
+  if (!structured) {
+    return {
+      values: parseProvisioningStateMap(body),
+      unchanged: false,
+      structured: false,
+    };
+  }
+  const draftsBody = map.get(getStateResponseKeys.drafts);
+  return {
+    values: parseProvisioningStateMap(valuesBody),
+    ...(draftsBody instanceof Map ? { drafts: parseProvisioningStateMap(draftsBody) } : {}),
+    hash: optionalNumber(map.get(getStateResponseKeys.hash)),
+    unchanged: map.get(getStateResponseKeys.unchanged) === true,
+    structured: true,
+  };
+}
+
+export function parseProvisioningState(body: ProvisioningValue): ProvisioningState {
+  return parseProvisioningStateResult(body).values;
+}
+
+function rawProvisioningStatePayload(state: ProvisioningState): Map<ProvisioningValue, ProvisioningValue> {
   return new Map(Object.entries(state).map(([namespaceId, fields]) => [
     Number(namespaceId),
     new Map(Object.entries(fields).map(([fieldId, value]) => [Number(fieldId), value])),
   ]));
 }
 
-export function parseSetStateResult(body: ProvisioningValue): { applied: number; draftHasReboot: boolean; fieldErrors: Array<{ namespace: number; field: number; code: number }> } {
+export function provisioningStatePayload(
+  state: ProvisioningState,
+  structured = false,
+  includeState = false,
+): ProvisioningValue {
+  const raw = rawProvisioningStatePayload(state);
+  if (!structured) return raw;
+  return new Map<ProvisioningValue, ProvisioningValue>([
+    [stateRequestKeys.state, raw],
+    ...(includeState ? [[stateRequestKeys.includeState, true] as [ProvisioningValue, ProvisioningValue]] : []),
+  ]);
+}
+
+export interface ProvisioningSetStateResult {
+  applied: number;
+  draftHasReboot: boolean;
+  fieldErrors: Array<{ namespace: number; field: number; code: number }>;
+  values?: ProvisioningState;
+  drafts?: ProvisioningState;
+  hash?: number;
+}
+
+export function parseSetStateResult(body: ProvisioningValue): ProvisioningSetStateResult {
   const map = asMap(body);
   const errors = map.get(setStateKeys.fieldErrors);
+  const values = map.get(postOperationKeys.values);
+  const drafts = map.get(postOperationKeys.drafts);
   return {
     applied: Number(map.get(setStateKeys.applied) ?? 0),
     draftHasReboot: map.get(setStateKeys.draftHasReboot) === true,
@@ -494,12 +559,28 @@ export function parseSetStateResult(body: ProvisioningValue): { applied: number;
         ? [{ namespace: Number(entry[0]), field: Number(entry[1]), code: Number(entry[2]) }]
         : []
     )) : [],
+    ...(values instanceof Map ? { values: parseProvisioningStateMap(values) } : {}),
+    ...(drafts instanceof Map ? { drafts: parseProvisioningStateMap(drafts) } : {}),
+    hash: optionalNumber(map.get(postOperationKeys.hash)),
   };
 }
 
-export function parseCommitResult(body: ProvisioningValue): { applied: number; needsReboot: boolean } {
+export interface ProvisioningCommitResult {
+  applied: number;
+  needsReboot: boolean;
+  values?: ProvisioningState;
+  hash?: number;
+}
+
+export function parseCommitResult(body: ProvisioningValue): ProvisioningCommitResult {
   const map = asMap(body);
-  return { applied: Number(map.get(commitKeys.applied) ?? 0), needsReboot: map.get(commitKeys.needsReboot) === true };
+  const values = map.get(postOperationKeys.values);
+  return {
+    applied: Number(map.get(commitKeys.applied) ?? 0),
+    needsReboot: map.get(commitKeys.needsReboot) === true,
+    ...(values instanceof Map ? { values: parseProvisioningStateMap(values) } : {}),
+    hash: optionalNumber(map.get(postOperationKeys.hash)),
+  };
 }
 
 export function heatshrinkDecode(
@@ -564,4 +645,11 @@ export function getStatePayload(namespaceIds?: number[], pending = false): Provi
 
 export function namespaceListPayload(namespaceIds?: number[]): ProvisioningValue {
   return namespaceIds?.length ? namespaceIds : null;
+}
+
+export function commitPayload(namespaceIds?: number[], includeState = false): ProvisioningValue {
+  const payload = new Map<ProvisioningValue, ProvisioningValue>();
+  if (namespaceIds?.length) payload.set(getStateKeys.namespaceFilter, namespaceIds);
+  if (includeState) payload.set(stateRequestKeys.includeState, true);
+  return payload.size ? payload : null;
 }

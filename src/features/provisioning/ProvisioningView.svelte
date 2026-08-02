@@ -4,6 +4,7 @@
   import type { LoadedProvisioningDevice } from '../../infrastructure/reticulum/provisioning-client';
   import type {
     ProvisioningField,
+    ProvisioningNamespace,
     ProvisioningNode,
     ProvisioningState,
     ProvisioningValue,
@@ -31,6 +32,7 @@
   } from '../../lib/actions/contextMenuTrigger';
   import { copyText } from '../../lib/clipboard';
   import BookmarkEditor from '../../lib/components/BookmarkEditor.svelte';
+  import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
@@ -44,12 +46,14 @@
   let draft = $state<ProvisioningState>({});
   let commandValues = $state<Record<string, ProvisioningValue>>({});
   let dirtyFields = $state<string[]>([]);
+  let firmwareDraftFields = $state<string[]>([]);
   let busy = $state(false);
   let loadingDevice = $state(false);
   let stage = $state<string>();
   let transferProgress = $state<number>();
   let transferSize = $state<number>();
   let managementDestination = $state('');
+  let activeSection = $state('status');
   let query = $state('');
   let selectedNodeSnapshot = $state<ProvisioningNode>();
   let bookmarkEditor = $state<{ node: ProvisioningNode; mode: 'add' | 'edit' }>();
@@ -60,6 +64,13 @@
     autofocus: boolean;
     guardOpeningRelease: boolean;
   }>();
+  let confirmation = $state<
+    | { kind: 'commitAll' }
+    | { kind: 'discardAll' }
+    | { kind: 'command'; namespaceId: number; field: ProvisioningField }
+    | { kind: 'reboot' }
+    | { kind: 'factoryReset' }
+  >();
   let loadSequence = 0;
   const heardAtFormatter = $derived(createDateFormatter($locale));
   const destinationDirectory = $derived(knownDestinationDirectory(
@@ -117,6 +128,20 @@
   const bookmarkedNodes = $derived(filteredNodes.filter((node) => node.bookmarked === true));
   const announcedNodes = $derived(filteredNodes.filter((node) => node.bookmarked !== true));
   const normalizedDestination = $derived(normalizeDestinationHash(managementDestination));
+  const rootNamespaces = $derived(loaded?.schema.namespaces.filter((namespace) => namespace.parentId === 0) ?? []);
+  const activeNamespaceId = $derived(activeSection.startsWith('namespace:')
+    ? Number(activeSection.slice('namespace:'.length))
+    : undefined);
+  const visibleNamespaces = $derived(activeNamespaceId === undefined || !loaded
+    ? []
+    : namespaceTree(loaded.schema.namespaces, activeNamespaceId));
+  const activeNamespaceIds = $derived(new Set(visibleNamespaces.map((namespace) => namespace.id)));
+  const activeDirtyFieldCount = $derived(dirtyFields.filter((key) => (
+    activeNamespaceIds.has(Number(key.split(':', 1)[0]))
+  )).length);
+  const activeFirmwareDraftCount = $derived(firmwareDraftFields.filter((key) => (
+    activeNamespaceIds.has(Number(key.split(':', 1)[0]))
+  )).length);
 
   onDestroy(() => {
     loadSequence += 1;
@@ -143,6 +168,8 @@
       draft = {};
       commandValues = {};
       dirtyFields = [];
+      firmwareDraftFields = [];
+      activeSection = 'status';
     }
     selectedNodeSnapshot = node;
     selectedNodeId = node.id;
@@ -217,6 +244,10 @@
     else toast.error('common.copyFailed');
   }
 
+  function copyActiveDestination(): void {
+    if (selectedNode) void copyDestinationHash(selectedNode.destinationHash);
+  }
+
   function probeDestination(node: ProvisioningNode): void {
     closeDestinationActions();
     showDestinationProbeActivity({
@@ -240,8 +271,12 @@
       const nextLoaded = await activeClient.load();
       if (sequence !== loadSequence || client !== activeClient) return;
       loaded = nextLoaded;
-      draft = structuredClone(nextLoaded.state);
+      draft = provisioningStateWithDrafts(nextLoaded.state, nextLoaded.drafts);
       dirtyFields = [];
+      firmwareDraftFields = provisioningStateFieldKeys(nextLoaded.drafts);
+      if (activeSection !== 'status' && !nextLoaded.schema.namespaces.some((namespace) => (
+        namespace.parentId === 0 && namespace.id === activeNamespaceId
+      ))) activeSection = 'status';
       stage = undefined;
     } catch {
       if (sequence !== loadSequence || client !== activeClient) return;
@@ -254,9 +289,63 @@
     }
   }
 
-  function reloadDevice(): void {
-    if (!selectedNode || !client || busy) return;
-    void loadDevice();
+  async function refreshActiveSection(): Promise<void> {
+    if (!selectedNode || busy) return;
+    if (!loaded) {
+      client?.close();
+      client = createClient(selectedNode);
+      await loadDevice();
+      return;
+    }
+    if (!client) return;
+    const activeClient = client;
+    const activeLoaded = loaded;
+    const sequence = ++loadSequence;
+    busy = true;
+    stage = 'requesting';
+    transferProgress = undefined;
+    transferSize = undefined;
+    try {
+      if (activeSection === 'status') {
+        const info = await activeClient.getInfo();
+        if (sequence !== loadSequence || client !== activeClient) return;
+        loaded = { ...activeLoaded, info };
+      } else if (activeNamespaceId !== undefined) {
+        const namespaceIds = namespaceTree(activeLoaded.schema.namespaces, activeNamespaceId)
+          .map((namespace) => namespace.id);
+        if (!namespaceIds.length) {
+          stage = undefined;
+          return;
+        }
+        const snapshot = await activeClient.getStateSnapshot(namespaceIds, true);
+        if (sequence !== loadSequence || client !== activeClient) return;
+        const refreshedState = refreshedNamespaceState(namespaceIds, snapshot.values);
+        const refreshedDrafts = snapshot.drafts ?? {};
+        const retainedDrafts = Object.fromEntries(Object.entries(activeLoaded.drafts ?? {})
+          .filter(([namespaceId]) => !namespaceIds.includes(Number(namespaceId))));
+        loaded = {
+          ...activeLoaded,
+          state: { ...activeLoaded.state, ...refreshedState },
+          drafts: { ...retainedDrafts, ...refreshedDrafts },
+        };
+        draft = {
+          ...draft,
+          ...provisioningStateWithDrafts(refreshedState, refreshedDrafts),
+        };
+        const refreshedNamespaceIds = new Set(namespaceIds);
+        dirtyFields = dirtyFields.filter((key) => !refreshedNamespaceIds.has(Number(key.split(':', 1)[0])));
+        firmwareDraftFields = [
+          ...firmwareDraftFields.filter((key) => !refreshedNamespaceIds.has(Number(key.split(':', 1)[0]))),
+          ...provisioningStateFieldKeys(refreshedDrafts),
+        ];
+      }
+      stage = undefined;
+    } catch {
+      if (sequence !== loadSequence || client !== activeClient) return;
+      stage = undefined;
+    } finally {
+      if (sequence === loadSequence && client === activeClient) busy = false;
+    }
   }
 
   function disconnectDevice(): void {
@@ -270,11 +359,49 @@
     draft = {};
     commandValues = {};
     dirtyFields = [];
+    firmwareDraftFields = [];
     busy = false;
     loadingDevice = false;
     stage = undefined;
     transferProgress = undefined;
     transferSize = undefined;
+    activeSection = 'status';
+    confirmation = undefined;
+  }
+
+  function namespaceTree(namespaces: ProvisioningNamespace[], rootId: number): ProvisioningNamespace[] {
+    const result: ProvisioningNamespace[] = [];
+    const seen = new Set<number>();
+    const visit = (namespaceId: number): void => {
+      if (seen.has(namespaceId)) return;
+      const namespace = namespaces.find((candidate) => candidate.id === namespaceId);
+      if (!namespace) return;
+      seen.add(namespaceId);
+      result.push(namespace);
+      for (const child of namespaces) if (child.parentId === namespaceId) visit(child.id);
+    };
+    visit(rootId);
+    return result;
+  }
+
+  function namespaceDepth(namespaceId: number): number {
+    if (!loaded || activeNamespaceId === undefined || namespaceId === activeNamespaceId) return 0;
+    let current = loaded.schema.namespaces.find((namespace) => namespace.id === namespaceId);
+    let depth = 0;
+    const visited = new Set<number>();
+    while (current && current.id !== activeNamespaceId && !visited.has(current.id)) {
+      visited.add(current.id);
+      depth += 1;
+      current = loaded.schema.namespaces.find((namespace) => namespace.id === current?.parentId);
+    }
+    return current?.id === activeNamespaceId ? depth : 0;
+  }
+
+  function namespaceIsReadOnly(namespaceId: number): boolean {
+    if (!loaded) return false;
+    const fields = namespaceTree(loaded.schema.namespaces, namespaceId)
+      .flatMap((namespace) => namespace.fields);
+    return fields.length > 0 && fields.every((field) => fieldIsReadOnly(field));
   }
 
   function fieldKey(namespaceId: number, fieldId: number): string {
@@ -291,7 +418,64 @@
       [namespaceId]: { ...(draft[namespaceId] ?? {}), [field.id]: value },
     };
     const key = fieldKey(namespaceId, field.id);
-    if (!dirtyFields.includes(key)) dirtyFields = [...dirtyFields, key];
+    if (provisioningValuesEqual(value, originalFieldValue(namespaceId, field))) {
+      dirtyFields = dirtyFields.filter((candidate) => candidate !== key);
+    } else if (!dirtyFields.includes(key)) dirtyFields = [...dirtyFields, key];
+  }
+
+  function originalFieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
+    const firmwareDraft = loaded?.drafts?.[namespaceId];
+    if (firmwareDraft && Object.prototype.hasOwnProperty.call(firmwareDraft, field.id)) {
+      return firmwareDraft[field.id];
+    }
+    const committed = loaded?.state?.[namespaceId];
+    if (committed && Object.prototype.hasOwnProperty.call(committed, field.id)) {
+      return committed[field.id];
+    }
+    return field.defaultValue;
+  }
+
+  function provisioningValuesEqual(
+    left: ProvisioningValue | undefined,
+    right: ProvisioningValue | undefined,
+  ): boolean {
+    if (Object.is(left, right)) return true;
+    const leftBytes = byteArrayValue(left);
+    const rightBytes = byteArrayValue(right);
+    if (leftBytes && rightBytes) {
+      return leftBytes.length === rightBytes.length
+        && leftBytes.every((byte, index) => byte === rightBytes[index]);
+    }
+    if (Array.isArray(left) && Array.isArray(right)) {
+      return left.length === right.length && left.every((value, index) => (
+        provisioningValuesEqual(value, right[index])
+      ));
+    }
+    if (left instanceof Map && right instanceof Map) {
+      if (left.size !== right.size) return false;
+      return Array.from(left).every(([leftKey, leftValue]) => Array.from(right).some(
+        ([rightKey, rightValue]) => provisioningValuesEqual(leftKey, rightKey)
+          && provisioningValuesEqual(leftValue, rightValue),
+      ));
+    }
+    return false;
+  }
+
+  function byteArrayValue(value: ProvisioningValue | undefined): readonly number[] | undefined {
+    if (value instanceof Uint8Array) return Array.from(value);
+    if (Array.isArray(value) && value.every((byte) => (
+      typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255
+    ))) return value as number[];
+    if (value && typeof value === 'object' && !(value instanceof Map)) {
+      const indexedBytes = Object.entries(value)
+        .filter(([key]) => /^\d+$/.test(key))
+        .sort(([left], [right]) => Number(left) - Number(right))
+        .map(([, byte]) => byte);
+      if (indexedBytes.length > 0 && indexedBytes.every((byte) => (
+        typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255
+      ))) return indexedBytes as number[];
+    }
+    return undefined;
   }
 
   function editableFieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
@@ -318,10 +502,11 @@
     return (field.flags & provisioningFieldFlags.secret) !== 0;
   }
 
-  function editableState(): ProvisioningState {
+  function editableState(namespaceIds: ReadonlySet<number>): ProvisioningState {
     const result: ProvisioningState = {};
     for (const key of dirtyFields) {
       const [namespaceId, fieldId] = key.split(':').map(Number);
+      if (!namespaceIds.has(namespaceId)) continue;
       const value = draft[namespaceId]?.[fieldId];
       if (value === undefined) continue;
       result[namespaceId] = { ...(result[namespaceId] ?? {}), [fieldId]: value };
@@ -329,35 +514,152 @@
     return result;
   }
 
-  async function save(): Promise<void> {
-    if (!client || busy || dirtyFields.length === 0) return;
+  function refreshedNamespaceState(
+    namespaceIds: readonly number[],
+    nextState: ProvisioningState,
+  ): ProvisioningState {
+    return Object.fromEntries(namespaceIds.map((namespaceId) => [
+      namespaceId,
+      structuredClone(nextState[namespaceId] ?? {}),
+    ]));
+  }
+
+  function provisioningStateWithDrafts(
+    state: ProvisioningState,
+    drafts: ProvisioningState = {},
+  ): ProvisioningState {
+    const result = structuredClone(state);
+    for (const [namespaceId, fields] of Object.entries(drafts)) {
+      result[Number(namespaceId)] = {
+        ...(result[Number(namespaceId)] ?? {}),
+        ...structuredClone(fields),
+      };
+    }
+    return result;
+  }
+
+  function provisioningStateFieldKeys(state: ProvisioningState = {}): string[] {
+    return Object.entries(state).flatMap(([namespaceId, fields]) => (
+      Object.keys(fields).map((fieldId) => fieldKey(Number(namespaceId), Number(fieldId)))
+    ));
+  }
+
+  async function saveNamespace(): Promise<void> {
+    if (!client || !loaded || busy || activeDirtyFieldCount === 0) return;
+    const activeLoaded = loaded;
+    const namespaceIds = new Set(activeNamespaceIds);
+    const stagedKeys = dirtyFields.filter((key) => namespaceIds.has(Number(key.split(':', 1)[0])));
     busy = true;
     try {
-      const changedNamespaces = Array.from(new Set(dirtyFields.map((key) => Number(key.split(':', 1)[0]))));
-      const result = await client.save(editableState(), changedNamespaces);
-      toast.success(result.needsReboot ? 'provisioning.save.rebootRequired' : 'provisioning.save.success');
-      loaded = await client.load();
-      draft = structuredClone(loaded.state);
-      dirtyFields = [];
+      const result = await client.stage(editableState(namespaceIds));
+      if (result.values) {
+        const refreshedState = refreshedNamespaceState(Array.from(namespaceIds), result.values);
+        const refreshedDrafts = result.drafts ?? {};
+        const retainedDrafts = Object.fromEntries(Object.entries(activeLoaded.drafts ?? {})
+          .filter(([namespaceId]) => !namespaceIds.has(Number(namespaceId))));
+        loaded = {
+          ...activeLoaded,
+          state: { ...activeLoaded.state, ...refreshedState },
+          drafts: { ...retainedDrafts, ...refreshedDrafts },
+        };
+        draft = {
+          ...draft,
+          ...provisioningStateWithDrafts(refreshedState, refreshedDrafts),
+        };
+        firmwareDraftFields = [
+          ...firmwareDraftFields.filter((key) => !namespaceIds.has(Number(key.split(':', 1)[0]))),
+          ...provisioningStateFieldKeys(refreshedDrafts),
+        ];
+      } else if (result.applied > 0) firmwareDraftFields = Array.from(new Set([
+        ...firmwareDraftFields,
+        ...stagedKeys,
+      ]));
+      dirtyFields = dirtyFields.filter((key) => !namespaceIds.has(Number(key.split(':', 1)[0])));
+      toast.success('provisioning.namespace.save.success');
     } catch {
-      toast.error('provisioning.save.failed');
+      toast.error('provisioning.namespace.save.failed');
     } finally {
       busy = false;
       stage = undefined;
     }
   }
 
-  async function discard(): Promise<void> {
-    if (!client || busy) return;
+  async function revertNamespace(): Promise<void> {
+    if (!client || !loaded || busy || (activeDirtyFieldCount === 0 && activeFirmwareDraftCount === 0)) return;
+    const activeClient = client;
+    const activeLoaded = loaded;
+    const namespaceIds = Array.from(activeNamespaceIds);
     busy = true;
     try {
-      await client.discard();
-      loaded = await client.load();
-      draft = structuredClone(loaded.state);
-      dirtyFields = [];
-      toast.success('provisioning.discard.success');
+      await activeClient.discard(namespaceIds);
+      const nextState = await activeClient.getState(namespaceIds);
+      const refreshedState = refreshedNamespaceState(namespaceIds, nextState);
+      const retainedDrafts = Object.fromEntries(Object.entries(activeLoaded.drafts ?? {})
+        .filter(([namespaceId]) => !activeNamespaceIds.has(Number(namespaceId))));
+      loaded = {
+        ...activeLoaded,
+        state: { ...activeLoaded.state, ...refreshedState },
+        drafts: retainedDrafts,
+      };
+      draft = { ...draft, ...refreshedState };
+      dirtyFields = dirtyFields.filter((key) => !activeNamespaceIds.has(Number(key.split(':', 1)[0])));
+      firmwareDraftFields = firmwareDraftFields.filter((key) => !activeNamespaceIds.has(Number(key.split(':', 1)[0])));
+      toast.success('provisioning.namespace.revert.success');
     } catch {
-      toast.error('provisioning.discard.failed');
+      toast.error('provisioning.namespace.revert.failed');
+    } finally {
+      busy = false;
+      stage = undefined;
+    }
+  }
+
+  async function commitAll(): Promise<void> {
+    if (!client || !loaded || busy || firmwareDraftFields.length === 0) return;
+    const activeClient = client;
+    const activeLoaded = loaded;
+    const namespaceIds = activeLoaded.schema.namespaces.map((namespace) => namespace.id);
+    busy = true;
+    try {
+      const result = await activeClient.commit();
+      const nextState = await activeClient.getState(namespaceIds);
+      const refreshedState = refreshedNamespaceState(namespaceIds, nextState);
+      loaded = {
+        ...activeLoaded,
+        info: { ...activeLoaded.info, needsReboot: result.needsReboot },
+        state: refreshedState,
+        drafts: {},
+      };
+      draft = structuredClone(refreshedState);
+      dirtyFields = [];
+      firmwareDraftFields = [];
+      toast.success(result.needsReboot
+        ? 'provisioning.commitAll.rebootRequired'
+        : 'provisioning.commitAll.success');
+    } catch {
+      toast.error('provisioning.commitAll.failed');
+    } finally {
+      busy = false;
+      stage = undefined;
+    }
+  }
+
+  async function discardAll(): Promise<void> {
+    if (!client || !loaded || busy || firmwareDraftFields.length === 0) return;
+    const activeClient = client;
+    const activeLoaded = loaded;
+    const namespaceIds = activeLoaded.schema.namespaces.map((namespace) => namespace.id);
+    busy = true;
+    try {
+      await activeClient.discard();
+      const nextState = await activeClient.getState(namespaceIds);
+      const refreshedState = refreshedNamespaceState(namespaceIds, nextState);
+      loaded = { ...activeLoaded, state: refreshedState, drafts: {} };
+      draft = structuredClone(refreshedState);
+      dirtyFields = [];
+      firmwareDraftFields = [];
+      toast.success('provisioning.discardAll.success');
+    } catch {
+      toast.error('provisioning.discardAll.failed');
     } finally {
       busy = false;
       stage = undefined;
@@ -369,7 +671,7 @@
     const value = field.type === provisioningFieldTypes.void
       ? null
       : editableFieldValue(namespaceId, field);
-    if (value === undefined || !window.confirm($t('provisioning.command.confirm', { name: field.name }))) return;
+    if (value === undefined) return;
     busy = true;
     try {
       const result = await client.save({ [namespaceId]: { [field.id]: value } }, [namespaceId]);
@@ -385,7 +687,7 @@
   }
 
   async function reboot(): Promise<void> {
-    if (!client || busy || !window.confirm($t('provisioning.reboot.confirm'))) return;
+    if (!client || busy) return;
     busy = true;
     try {
       await client.reboot();
@@ -399,7 +701,7 @@
   }
 
   async function factoryReset(): Promise<void> {
-    if (!client || busy || !window.confirm($t('provisioning.factoryReset.confirm'))) return;
+    if (!client || busy) return;
     busy = true;
     try {
       await client.factoryReset();
@@ -412,12 +714,40 @@
     }
   }
 
+  function requestCommand(namespaceId: number, field: ProvisioningField): void {
+    if (!client || busy) return;
+    const value = field.type === provisioningFieldTypes.void
+      ? null
+      : editableFieldValue(namespaceId, field);
+    if (value !== undefined) confirmation = { kind: 'command', namespaceId, field };
+  }
+
+  async function confirmProvisioningAction(): Promise<void> {
+    const pending = confirmation;
+    if (!pending) return;
+    if (pending.kind === 'commitAll') await commitAll();
+    else if (pending.kind === 'discardAll') await discardAll();
+    else if (pending.kind === 'command') await sendCommand(pending.namespaceId, pending.field);
+    else if (pending.kind === 'reboot') await reboot();
+    else await factoryReset();
+    confirmation = undefined;
+  }
+
   function displayValue(value: ProvisioningValue | undefined): string {
     if (value === undefined || value === null) return '—';
     if (value instanceof Uint8Array) return bytesToHex(value);
     if (Array.isArray(value)) return value.map((item) => displayValue(item)).join(', ');
     if (value instanceof Map) return '—';
     return String(value);
+  }
+
+  function displayListValue(value: ProvisioningValue | undefined): string {
+    return Array.isArray(value)
+      ? value.map((item) => {
+        const bytes = byteArrayValue(item);
+        return bytes ? bytesToHex(Uint8Array.from(bytes)) : displayValue(item);
+      }).join('\n')
+      : displayValue(value);
   }
 
   function parseBytes(value: string): Uint8Array {
@@ -453,7 +783,9 @@
     </button>
     <div class="provisioning-header-copy">
       <p class="eyebrow">{$t('app.name')}</p>
-      <h1>{$t('provisioning.title')}</h1>
+      <h1>{selectedNode && nodeName(selectedNode)
+        ? $t('provisioning.title.connected', { name: nodeName(selectedNode) })
+        : $t('provisioning.title')}</h1>
       <p>{$t('provisioning.description')}</p>
     </div>
   </header>
@@ -478,28 +810,64 @@
         aria-label={$t('provisioning.refresh')}
         title={$t('provisioning.refresh')}
         disabled={!selectedNode || busy}
-        onclick={reloadDevice}
+        onclick={() => void refreshActiveSection()}
       ><Icon name="sync" size={19} /></button>
     </div>
-    <label class:connection-locked={Boolean(selectedNode)}>
-      <span class="sr-only">{$t('provisioning.destination.label')}</span>
-      <Icon name="network" size={19} />
-      <input
-        bind:value={managementDestination}
-        placeholder={$t('provisioning.destination.placeholder')}
-        autocapitalize="none"
-        spellcheck="false"
-        disabled={Boolean(selectedNode)}
-      />
-    </label>
+    <div class="provisioning-address-field">
+      <label class:connection-locked={Boolean(selectedNode)}>
+        <span class="sr-only">{$t('provisioning.destination.label')}</span>
+        <Icon name="network" size={19} />
+        <input
+          bind:value={managementDestination}
+          placeholder={$t('provisioning.destination.placeholder')}
+          autocapitalize="none"
+          spellcheck="false"
+          disabled={Boolean(selectedNode)}
+        />
+      </label>
+      {#if selectedNode}
+        <button
+          class="provisioning-address-copy-target"
+          type="button"
+          aria-label={$t('provisioning.bookmark.copyAddress')}
+          title={$t('provisioning.bookmark.copyAddress')}
+          onclick={copyActiveDestination}
+        ></button>
+      {/if}
+    </div>
     {#if !selectedNode}
       <button class="button primary" type="submit" disabled={!normalizedDestination}>
         {$t('provisioning.connect')}<Icon name="arrow-right" size={17} />
       </button>
+    {:else if loaded}
+      <select
+        class="provisioning-section-select"
+        aria-label={$t('provisioning.section.label')}
+        bind:value={activeSection}
+        disabled={busy}
+      >
+        <option value="status">{$t('provisioning.section.status')}</option>
+        {#each rootNamespaces as namespace (namespace.id)}
+          <option value={`namespace:${namespace.id}`}>{namespace.name}</option>
+        {/each}
+      </select>
+    {/if}
+    {#if selectedNode && loaded && firmwareDraftFields.length > 0}
+      <section class="provisioning-pending-bar">
+        <span>{$t('provisioning.pending.count', { count: firmwareDraftFields.length })}</span>
+        <div>
+          <button class="button secondary compact" type="button" onclick={() => { confirmation = { kind: 'discardAll' }; }}>
+            {$t('provisioning.discardAll')}
+          </button>
+          <button class="button primary compact" type="button" onclick={() => { confirmation = { kind: 'commitAll' }; }}>
+            {$t('provisioning.commitAll')}
+          </button>
+        </div>
+      </section>
     {/if}
   </form>
 
-  <div class="provisioning-workspace">
+  <div class="provisioning-workspace" class:sectioned={Boolean(selectedNode && loaded)}>
     {#if !selectedNode}
       <aside class="provisioning-directory">
         <label class="search-field">
@@ -586,6 +954,43 @@
         </div>
       </aside>
     {:else}
+      {#if loaded}
+        <nav class="provisioning-section-navigation" aria-label={$t('provisioning.section.label')}>
+          <div class="provisioning-section-navigation-list">
+            <button
+              class:active={activeSection === 'status'}
+              type="button"
+              aria-current={activeSection === 'status' ? 'page' : undefined}
+              disabled={busy}
+              onclick={() => activeSection = 'status'}
+            >
+              <span class="destination-mark provisioning-section-icon" data-icon="info">
+                <Icon name="info" size={16} />
+              </span>
+              <span>{$t('provisioning.section.status')}</span>
+            </button>
+            {#each rootNamespaces as namespace (namespace.id)}
+              {@const readOnlySection = namespaceIsReadOnly(namespace.id)}
+              <button
+                class:active={activeSection === `namespace:${namespace.id}`}
+                type="button"
+                aria-current={activeSection === `namespace:${namespace.id}` ? 'page' : undefined}
+                disabled={busy}
+                onclick={() => activeSection = `namespace:${namespace.id}`}
+              >
+                <span
+                  class="destination-mark provisioning-section-icon"
+                  class:read-only={readOnlySection}
+                  data-icon={readOnlySection ? 'info' : 'settings'}
+                >
+                  <Icon name={readOnlySection ? 'info' : 'settings'} size={16} />
+                </span>
+                <span>{namespace.name}</span>
+              </button>
+            {/each}
+          </div>
+        </nav>
+      {/if}
       <section class:device-loaded={Boolean(loaded) && !busy} class="provisioning-editor-card">
       <div class="provisioning-grid" aria-hidden="true"></div>
       {#if busy}
@@ -598,23 +1003,85 @@
           {/if}
         </div>
       {:else if loaded}
-        <header class="provisioning-device-header">
-          <div>
-            <h2>{nodeName(selectedNode)}</h2>
-            <p>{loaded.info.firmwareVersion ?? $t('provisioning.info.unknownFirmware')}</p>
+        {#if activeSection === 'status'}
+          <div class="provisioning-namespace-list provisioning-status-list">
+            <section class="provisioning-status-section">
+              <h3>{$t('provisioning.section.status')}</h3>
+              <dl class="provisioning-status-grid">
+                <div>
+                  <dt>{$t('provisioning.info.destination')}</dt>
+                  <dd><code>{selectedNode.destinationHash}</code></dd>
+                </div>
+                <div>
+                  <dt>{$t('provisioning.info.firmware')}</dt>
+                  <dd>{loaded.info.firmwareVersion ?? $t('provisioning.info.unknownFirmware')}</dd>
+                </div>
+                <div>
+                  <dt>{$t('provisioning.info.schema')}</dt>
+                  <dd>{loaded.info.schemaVersion ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt>{$t('provisioning.info.rebootRequired')}</dt>
+                  <dd>
+                    {#if loaded.info.needsReboot}
+                      <span class="badge experimental">{$t('provisioning.info.yes')}</span>
+                    {:else}
+                      <span class="badge success">{$t('provisioning.info.no')}</span>
+                    {/if}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{$t('provisioning.info.pendingChanges')}</dt>
+                  <dd class="provisioning-pending-summary">
+                    {#if firmwareDraftFields.length === 0 && dirtyFields.length === 0}
+                      <span class="badge success">{$t('provisioning.info.pendingNone')}</span>
+                    {:else}
+                      <span class="badge experimental">{$t('provisioning.info.pendingSaved', { count: firmwareDraftFields.length })}</span>
+                      <span class="badge experimental">{$t('provisioning.info.pendingUnsaved', { count: dirtyFields.length })}</span>
+                    {/if}
+                  </dd>
+                </div>
+              </dl>
+              <div class="provisioning-status-actions">
+                <button
+                  class="button secondary compact danger-text"
+                  type="button"
+                  onclick={() => { confirmation = { kind: 'factoryReset' }; }}
+                >{$t('provisioning.factoryReset')}</button>
+                <button
+                  class="button secondary compact"
+                  type="button"
+                  onclick={() => { confirmation = { kind: 'reboot' }; }}
+                ><Icon name="sync" size={16} />{$t('provisioning.reboot')}</button>
+              </div>
+            </section>
           </div>
-        </header>
-
-        <div class="provisioning-info-row">
-          <span>{$t('provisioning.info.schemaVersion', { version: loaded.info.schemaVersion ?? '—' })}</span>
-          {#if loaded.info.needsReboot}<span class="badge experimental">{$t('provisioning.info.rebootRequired')}</span>{/if}
-        </div>
-
+        {:else}
         <div class="provisioning-namespace-list">
-          {#each loaded.schema.namespaces as namespace (namespace.id)}
-            <fieldset class="provisioning-namespace">
-              <legend>{namespace.name}</legend>
-              <div class="provisioning-field-grid">
+          {#each visibleNamespaces as namespace (namespace.id)}
+            {@const depth = Math.min(namespaceDepth(namespace.id), 3)}
+            <section
+              class="provisioning-namespace-section"
+              class:depth-0={depth === 0}
+              class:depth-1={depth === 1}
+              class:depth-2={depth === 2}
+              class:depth-3={depth >= 3}
+            >
+              {#if depth === 1}
+                <h2 id={`provisioning-namespace-${namespace.id}`}>{namespace.name}</h2>
+              {:else if depth === 2}
+                <h3 id={`provisioning-namespace-${namespace.id}`}>{namespace.name}</h3>
+              {:else if depth >= 3}
+                <h4 id={`provisioning-namespace-${namespace.id}`}>{namespace.name}</h4>
+              {/if}
+              {#if namespace.fields.length > 0}
+              <div
+                class="provisioning-namespace-fields"
+                role="group"
+                aria-label={depth === 0 ? namespace.name : undefined}
+                aria-labelledby={depth === 0 ? undefined : `provisioning-namespace-${namespace.id}`}
+              >
+                <div class="provisioning-field-grid">
                 {#each namespace.fields as field (field.id)}
                   <label class="field provisioning-field" class:read-only={fieldIsReadOnly(field)}>
                     <span>
@@ -644,21 +1111,31 @@
                         max={field.type === provisioningFieldTypes.integer ? field.maxInteger : field.maxFloat}
                         step={field.type === provisioningFieldTypes.integer ? 1 : 'any'}
                         value={Number(editableFieldValue(namespace.id, field) ?? 0)}
-                        onchange={(event) => updateEditableField(namespace.id, field, event.currentTarget.valueAsNumber)}
+                        oninput={(event) => {
+                          if (Number.isFinite(event.currentTarget.valueAsNumber)) {
+                            updateEditableField(namespace.id, field, event.currentTarget.valueAsNumber);
+                          }
+                        }}
                       />
                     {:else if field.type === provisioningFieldTypes.bytes}
-                      <input value={displayValue(editableFieldValue(namespace.id, field))} onchange={(event) => {
+                      <input value={displayValue(editableFieldValue(namespace.id, field))} oninput={(event) => {
+                        try { updateEditableField(namespace.id, field, parseBytes(event.currentTarget.value)); }
+                        catch { /* Wait for a complete byte pair before updating the draft. */ }
+                      }} onchange={(event) => {
                         try { updateEditableField(namespace.id, field, parseBytes(event.currentTarget.value)); }
                         catch { toast.error('provisioning.field.bytesInvalid'); }
                       }} />
                     {:else if field.type === provisioningFieldTypes.bytesList}
-                      <textarea rows="3" value={displayValue(editableFieldValue(namespace.id, field))} onchange={(event) => {
+                      <textarea rows="3" value={displayListValue(editableFieldValue(namespace.id, field))} oninput={(event) => {
+                        try { updateEditableField(namespace.id, field, parseBytesList(event.currentTarget.value)); }
+                        catch { /* Wait for complete byte pairs before updating the draft. */ }
+                      }} onchange={(event) => {
                         try { updateEditableField(namespace.id, field, parseBytesList(event.currentTarget.value)); }
                         catch { toast.error('provisioning.field.bytesInvalid'); }
                       }}></textarea>
                     {:else if field.type === provisioningFieldTypes.void}
                       <button class="button secondary compact" type="button" onclick={() => fieldIsWriteOnly(field)
-                        ? void sendCommand(namespace.id, field)
+                        ? requestCommand(namespace.id, field)
                         : updateField(namespace.id, field, null)}>{$t('provisioning.field.trigger')}</button>
                     {:else}
                       <input
@@ -666,31 +1143,38 @@
                         maxlength={field.maxLength}
                         value={typeof editableFieldValue(namespace.id, field) === 'string' ? editableFieldValue(namespace.id, field) as string : ''}
                         placeholder={fieldIsSecret(field) ? $t('provisioning.field.secretPlaceholder') : undefined}
-                        onchange={(event) => updateEditableField(namespace.id, field, event.currentTarget.value)}
+                        oninput={(event) => updateEditableField(namespace.id, field, event.currentTarget.value)}
                       />
                     {/if}
                     {#if fieldIsWriteOnly(field) && field.type !== provisioningFieldTypes.void}
-                      <button class="button secondary compact provisioning-command-button" type="button" onclick={() => void sendCommand(namespace.id, field)}>
+                      <button class="button secondary compact provisioning-command-button" type="button" onclick={() => requestCommand(namespace.id, field)}>
                         {$t('provisioning.command.send')}
                       </button>
                     {/if}
                   </label>
                 {/each}
+                </div>
               </div>
-            </fieldset>
+              {/if}
+            </section>
           {/each}
+          <div class="provisioning-status-actions provisioning-namespace-actions">
+            <button
+              class="button secondary compact"
+              type="button"
+              disabled={activeDirtyFieldCount === 0 && activeFirmwareDraftCount === 0}
+              onclick={() => void revertNamespace()}
+            >{$t('provisioning.namespace.revert')}</button>
+            <button
+              class="button primary compact"
+              type="button"
+              disabled={activeDirtyFieldCount === 0}
+              onclick={() => void saveNamespace()}
+            >{$t('provisioning.namespace.save')}</button>
+          </div>
         </div>
+        {/if}
 
-        <footer class="provisioning-actions">
-          <div>
-            <button class="button secondary compact danger-text" onclick={() => void factoryReset()}>{$t('provisioning.factoryReset')}</button>
-            <button class="button secondary compact" onclick={() => void reboot()}>{$t('provisioning.reboot')}</button>
-          </div>
-          <div>
-            <button class="button secondary compact" disabled={dirtyFields.length === 0} onclick={() => void discard()}>{$t('provisioning.discard')}</button>
-            <button class="button primary compact" disabled={dirtyFields.length === 0} onclick={() => void save()}>{$t('common.save')}</button>
-          </div>
-        </footer>
       {:else}
         <EmptyState icon="network" title={$t('provisioning.load.empty.title')} body={$t('provisioning.load.empty.description')} />
       {/if}
@@ -715,6 +1199,47 @@
     currentName={bookmarkEditor.node.label ?? ''}
     oncancel={() => { bookmarkEditor = undefined; }}
     onsave={(_address, name) => saveBookmark(name)}
+  />
+{/if}
+
+{#if confirmation}
+  <ConfirmationDialog
+    titleId="provisioning-confirmation-title"
+    title={$t(confirmation.kind === 'commitAll'
+      ? 'provisioning.commitAll'
+      : confirmation.kind === 'discardAll'
+        ? 'provisioning.discardAll'
+        : confirmation.kind === 'command'
+          ? 'provisioning.command.dialog.title'
+          : confirmation.kind === 'reboot'
+            ? 'provisioning.reboot'
+            : 'provisioning.factoryReset')}
+    description={$t(confirmation.kind === 'commitAll'
+      ? 'provisioning.commitAll.confirm'
+      : confirmation.kind === 'discardAll'
+        ? 'provisioning.discardAll.confirm'
+        : confirmation.kind === 'command'
+          ? 'provisioning.command.confirm'
+          : confirmation.kind === 'reboot'
+            ? 'provisioning.reboot.confirm'
+            : 'provisioning.factoryReset.confirm', confirmation.kind === 'command'
+              ? { name: confirmation.field.name }
+              : undefined)}
+    icon={confirmation.kind === 'commitAll' ? 'check'
+      : confirmation.kind === 'command' ? 'send'
+        : confirmation.kind === 'reboot' ? 'sync' : 'trash'}
+    tone={confirmation.kind === 'discardAll' || confirmation.kind === 'factoryReset' ? 'danger' : 'primary'}
+    confirmLabel={$t(confirmation.kind === 'commitAll'
+      ? 'provisioning.commitAll'
+      : confirmation.kind === 'discardAll'
+        ? 'provisioning.discardAll'
+        : confirmation.kind === 'command'
+          ? 'provisioning.command.send'
+          : confirmation.kind === 'reboot'
+            ? 'provisioning.reboot'
+            : 'provisioning.factoryReset')}
+    oncancel={() => { confirmation = undefined; }}
+    onconfirm={confirmProvisioningAction}
   />
 {/if}
 

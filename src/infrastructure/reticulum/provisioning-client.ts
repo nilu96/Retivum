@@ -1,4 +1,5 @@
 import {
+  commitPayload,
   decodeProvisioningEnvelope,
   encodeProvisioningRequest,
   getStatePayload,
@@ -6,7 +7,7 @@ import {
   parseCommitResult,
   parseProvisioningInfo,
   parseProvisioningSchema,
-  parseProvisioningState,
+  parseProvisioningStateResult,
   parseSetStateResult,
   provisioningOperations,
   provisioningStatePayload,
@@ -14,6 +15,7 @@ import {
   type ProvisioningNode,
   type ProvisioningSchema,
   type ProvisioningState,
+  type ProvisioningStateResult,
   type ProvisioningValue,
 } from '../../domain/provisioning';
 import { BrowserProvisioningRepository } from '../database/provisioning-repository';
@@ -24,6 +26,7 @@ export interface LoadedProvisioningDevice {
   info: ProvisioningInfo;
   schema: ProvisioningSchema;
   state: ProvisioningState;
+  drafts?: ProvisioningState;
 }
 
 export type ProvisioningProgressHandler = (
@@ -34,6 +37,7 @@ export type ProvisioningProgressHandler = (
 
 export class ProvisioningClient {
   private sequence = 1;
+  private structuredStateProtocol = false;
   private readonly repository = new BrowserProvisioningRepository();
 
   constructor(
@@ -53,8 +57,11 @@ export class ProvisioningClient {
         await this.repository.saveSchema(info.schemaVersion, info.schemaHash, schema);
       }
     }
-    const state = await this.getState(schema.namespaces.map((namespace) => namespace.id));
-    return { info, schema, state };
+    const state = await this.getStateSnapshot(
+      schema.namespaces.map((namespace) => namespace.id),
+      true,
+    );
+    return { info, schema, state: state.values, drafts: state.drafts ?? {} };
   }
 
   async getInfo(): Promise<ProvisioningInfo> {
@@ -66,28 +73,48 @@ export class ProvisioningClient {
   }
 
   async getState(namespaceIds?: number[], pending = false): Promise<ProvisioningState> {
-    return parseProvisioningState(await this.request(
+    return (await this.getStateSnapshot(namespaceIds, pending)).values;
+  }
+
+  async getStateSnapshot(namespaceIds?: number[], pending = false): Promise<ProvisioningStateResult> {
+    const result = parseProvisioningStateResult(await this.request(
       provisioningOperations.getState,
       getStatePayload(namespaceIds, pending),
     ));
+    this.structuredStateProtocol = result.structured;
+    return result;
   }
 
-  async save(state: ProvisioningState, namespaceIds?: number[]): Promise<{ applied: number; needsReboot: boolean }> {
+  async stage(state: ProvisioningState): Promise<ReturnType<typeof parseSetStateResult>> {
     const staged = parseSetStateResult(await this.request(
       provisioningOperations.setState,
-      provisioningStatePayload(state),
+      provisioningStatePayload(state, this.structuredStateProtocol, this.structuredStateProtocol),
       false,
     ));
     if (staged.fieldErrors.length) {
       const first = staged.fieldErrors[0];
       throw new Error(`PROVISIONING_FIELD_ERROR_${first.namespace}_${first.field}_${first.code}`);
     }
-    const committed = parseCommitResult(await this.request(
+    return staged;
+  }
+
+  async commit(namespaceIds?: number[]): Promise<ReturnType<typeof parseCommitResult>> {
+    return parseCommitResult(await this.request(
       provisioningOperations.commit,
-      namespaceListPayload(namespaceIds),
+      this.structuredStateProtocol
+        ? commitPayload(namespaceIds, true)
+        : namespaceListPayload(namespaceIds),
       false,
     ));
-    return { applied: committed.applied || staged.applied, needsReboot: committed.needsReboot || staged.draftHasReboot };
+  }
+
+  async save(state: ProvisioningState, namespaceIds?: number[]): Promise<{ applied: number; needsReboot: boolean }> {
+    const staged = await this.stage(state);
+    const committed = await this.commit(namespaceIds);
+    return {
+      applied: committed.applied || staged.applied,
+      needsReboot: committed.needsReboot || staged.draftHasReboot,
+    };
   }
 
   async discard(namespaceIds?: number[]): Promise<void> {

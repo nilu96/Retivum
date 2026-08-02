@@ -7,6 +7,7 @@ import {
   parseProvisioningInfo,
   parseProvisioningSchema,
   parseProvisioningState,
+  parseProvisioningStateResult,
   provisioningOperations,
   sortProvisioningBookmarks,
   type ProvisioningValue,
@@ -70,6 +71,23 @@ describe('provisioning protocol', () => {
     expect(parseProvisioningState(new Map([[4, new Map([[2, 144_800_000]])]]))).toEqual({
       4: { 2: 144_800_000 },
     });
+
+    const structuredState = parseProvisioningStateResult(new Map<ProvisioningValue, ProvisioningValue>([
+      [1, new Map([[4, new Map([[2, 144_800_000], [3, 125_000]])]])],
+      [2, new Map([[4, new Map([[3, 250_000]])]])],
+      [3, 0x89abcdef],
+    ]));
+    expect(structuredState).toEqual({
+      values: { 4: { 2: 144_800_000, 3: 125_000 } },
+      drafts: { 4: { 3: 250_000 } },
+      hash: 0x89abcdef,
+      unchanged: false,
+      structured: true,
+    });
+    expect(parseProvisioningState(new Map<ProvisioningValue, ProvisioningValue>([
+      [1, new Map([[4, new Map([[2, 144_800_000]])]])],
+      [3, 1],
+    ]))).toEqual({ 4: { 2: 144_800_000 } });
   });
 
   it('decodes compressed response sentinels used by LoRa provisioning', () => {

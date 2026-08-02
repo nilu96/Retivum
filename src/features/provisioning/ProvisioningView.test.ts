@@ -1,7 +1,11 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProvisioningNode } from '../../domain/provisioning';
+import {
+  provisioningFieldFlags,
+  provisioningFieldTypes,
+  type ProvisioningNode,
+} from '../../domain/provisioning';
 import { ProvisioningClient } from '../../infrastructure/reticulum/provisioning-client';
 import { clearProbeHistory, probeHistory } from '../../infrastructure/reticulum/probe-history';
 import type { ProbeResult } from '../../infrastructure/reticulum/protocol';
@@ -50,6 +54,11 @@ describe('ProvisioningView', () => {
 
   it('connects to a valid custom hash, hides the directory, and locks the address field', async () => {
     let requestedNode: ProvisioningNode | undefined;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
     vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(function (this: ProvisioningClient) {
       requestedNode = this.provisioningNode;
       return new Promise(() => {});
@@ -72,6 +81,14 @@ describe('ProvisioningView', () => {
     expect(input.closest('label')).toHaveClass('connection-locked');
     expect(connect).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Connect/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Provisioning section' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: new RegExp(`Remote provisioning:.*${'a'.repeat(8)}`) }))
+      .not.toBeInTheDocument();
+    const copyTarget = screen.getByRole('button', { name: 'Copy management destination' });
+    expect(copyTarget.querySelectorAll('svg')).toHaveLength(0);
+    await fireEvent.click(copyTarget);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('a'.repeat(32)));
   });
 
   it('orders disconnect and reload immediately before the destination input', () => {
@@ -82,28 +99,59 @@ describe('ProvisioningView', () => {
     const actionButtons = actions.querySelectorAll('button');
 
     expect(actionButtons[0]).toBe(screen.getByRole('button', { name: 'Disconnect and return to destinations' }));
-    expect(actionButtons[1]).toBe(screen.getByRole('button', { name: 'Reload device configuration' }));
-    expect(actions.nextElementSibling).toBe(inputLabel);
+    expect(actionButtons[1]).toBe(screen.getByRole('button', { name: 'Refresh current section' }));
+    expect(actions.nextElementSibling).toBe(inputLabel?.parentElement);
   });
 
-  it('soft reloads through the existing client without closing its link', async () => {
+  it('refreshes node status through the existing client without reloading or closing its link', async () => {
     setProvisioningNodes([announcedNode]);
     const load = vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
       info: { needsReboot: false },
       schema: { namespaces: [] },
       state: {},
     });
+    const getInfo = vi.spyOn(ProvisioningClient.prototype, 'getInfo').mockResolvedValue({
+      firmwareVersion: '2.0.0',
+      schemaVersion: 2,
+      needsReboot: true,
+    });
     const close = vi.spyOn(reticulumRuntime, 'cancelProvisioning').mockImplementation(() => undefined);
     render(ProvisioningView);
 
     await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
     expect(load).toHaveBeenCalledTimes(1);
-    const reload = screen.getByRole('button', { name: 'Reload device configuration' });
-    expect(reload).toBeEnabled();
-    await fireEvent.click(reload);
+    const refresh = screen.getByRole('button', { name: 'Refresh current section' });
+    expect(refresh).toBeEnabled();
+    await fireEvent.click(refresh);
 
-    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getInfo).toHaveBeenCalledOnce());
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('2.0.0')).toBeInTheDocument();
+    const rebootStatus = screen.getByText('Reboot required').closest('div');
+    expect(within(rebootStatus!).getByText('Yes')).toBeInTheDocument();
+    expect(screen.getByText('Pending changes').closest('div')).toHaveTextContent('None');
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it('allows the connected device to be rebooted from node status', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { firmwareVersion: '1.2.3', needsReboot: false },
+      schema: { namespaces: [] },
+      state: {},
+    });
+    const reboot = vi.spyOn(ProvisioningClient.prototype, 'reboot').mockResolvedValue();
+    const nativeConfirm = vi.spyOn(window, 'confirm');
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Reboot device' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Reboot device' });
+    expect(within(dialog).getByText('Reboot this device now?')).toBeInTheDocument();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Reboot device' }));
+
+    await waitFor(() => expect(reboot).toHaveBeenCalledOnce());
+    expect(nativeConfirm).not.toHaveBeenCalled();
   });
 
   it('cancels loading, returns to the overview, and can then open another destination', async () => {
@@ -155,6 +203,32 @@ describe('ProvisioningView', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  it('closes the failed link and performs a full reload through a fresh client', async () => {
+    setProvisioningNodes([announcedNode]);
+    const clients: ProvisioningClient[] = [];
+    const load = vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(function (this: ProvisioningClient) {
+      clients.push(this);
+      if (clients.length === 1) return Promise.reject(new Error('unavailable'));
+      return Promise.resolve({
+        info: { firmwareVersion: '2.0.0', needsReboot: false },
+        schema: { namespaces: [] },
+        state: {},
+      });
+    });
+    const close = vi.spyOn(reticulumRuntime, 'cancelProvisioning').mockImplementation(() => undefined);
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+    await screen.findByRole('heading', { name: 'Device configuration unavailable' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh current section' }));
+
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    expect(close).toHaveBeenCalledWith(announcedNode.destinationHash, true);
+    expect(clients[1]).not.toBe(clients[0]);
+    expect(await screen.findByRole('heading', { name: 'Node status' })).toBeInTheDocument();
+    expect(screen.getByText('2.0.0')).toBeInTheDocument();
+  });
+
   it('disconnects a loaded destination and restores the unlocked overview', async () => {
     setProvisioningNodes([announcedNode]);
     vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
@@ -174,6 +248,359 @@ describe('ProvisioningView', () => {
     expect(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Management destination hash')).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Connect' })).toBeEnabled();
+  });
+
+  it('moves the connected node name into the page title instead of repeating a device header', async () => {
+    const namedNode: ProvisioningNode = {
+      ...announcedNode,
+      label: 'Node 123',
+      bookmarked: true,
+    };
+    setProvisioningNodes([namedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { firmwareVersion: 'microReticulum', needsReboot: false },
+      schema: { namespaces: [] },
+      state: {},
+    });
+    const { container } = render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(namedNode.destinationHash) }));
+
+    expect(await screen.findByRole('heading', { name: 'Remote provisioning: Node 123' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Node 123' })).not.toBeInTheDocument();
+    expect(container.querySelector('.provisioning-device-header')).not.toBeInTheDocument();
+  });
+
+  it('uses desktop section navigation with node status as the default and keeps the mobile selector in sync', async () => {
+    setProvisioningNodes([announcedNode]);
+    const load = vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: {
+        firmwareVersion: '1.2.3',
+        schemaVersion: 2,
+        needsReboot: false,
+      },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'RNode General Config',
+          parentId: 0,
+          fields: [{
+            id: 1,
+            name: 'Device name',
+            type: provisioningFieldTypes.string,
+            flags: 0,
+          }, {
+            id: 2,
+            name: 'Remote Management Allowed',
+            type: provisioningFieldTypes.bytesList,
+            flags: 0,
+          }],
+        }, {
+          id: 11,
+          name: 'Radio',
+          parentId: 10,
+          fields: [{
+            id: 1,
+            name: 'Radio enabled',
+            type: provisioningFieldTypes.boolean,
+            flags: 0,
+          }],
+        }, {
+          id: 20,
+          name: 'RNode General Metrics',
+          parentId: 0,
+          fields: [{
+            id: 1,
+            name: 'Uptime',
+            type: provisioningFieldTypes.integer,
+            flags: provisioningFieldFlags.readOnly,
+          }],
+        }, {
+          id: 21,
+          name: 'Interfaces',
+          parentId: 20,
+          fields: [],
+        }, {
+          id: 22,
+          name: 'LoRaInterface',
+          parentId: 21,
+          fields: [{
+            id: 1,
+            name: 'Frequency',
+            type: provisioningFieldTypes.integer,
+            flags: provisioningFieldFlags.readOnly,
+          }],
+        }],
+      },
+      state: {
+        10: { 1: 'Workshop node', 2: [Uint8Array.of(0xaa, 0xbb), Uint8Array.of(0xcc, 0xdd)] },
+        11: { 1: true },
+        20: { 1: 3600 },
+        21: {},
+        22: { 1: 869_462_500 },
+      },
+    });
+    const getState = vi.spyOn(ProvisioningClient.prototype, 'getStateSnapshot').mockResolvedValue({
+      values: {
+        10: { 1: 'Refreshed node' },
+        11: { 1: false },
+      },
+      unchanged: false,
+      structured: true,
+    });
+    const close = vi.spyOn(reticulumRuntime, 'cancelProvisioning').mockImplementation(() => undefined);
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+
+    const sectionNavigation = await screen.findByRole('navigation', { name: 'Provisioning section' });
+    const statusNavigationItem = within(sectionNavigation).getByRole('button', { name: 'Node status' });
+    expect(statusNavigationItem).toHaveAttribute('aria-current', 'page');
+    expect(within(sectionNavigation).getAllByRole('button').map((button) => button.textContent?.trim())).toEqual([
+      'Node status',
+      'RNode General Config',
+      'RNode General Metrics',
+    ]);
+    expect(within(sectionNavigation).getByRole('button', { name: 'Node status' })
+      .querySelector('.provisioning-section-icon')).toHaveAttribute('data-icon', 'info');
+    expect(within(sectionNavigation).getByRole('button', { name: 'RNode General Config' })
+      .querySelector('.provisioning-section-icon')).toHaveAttribute('data-icon', 'settings');
+    expect(within(sectionNavigation).getByRole('button', { name: 'RNode General Metrics' })
+      .querySelector('.provisioning-section-icon')).toHaveAttribute('data-icon', 'info');
+    const sectionSelect = await screen.findByRole('combobox', { name: 'Provisioning section' }) as HTMLSelectElement;
+    expect(sectionSelect).toHaveValue('status');
+    expect(Array.from(sectionSelect.options, (option) => option.textContent)).toEqual([
+      'Node status',
+      'RNode General Config',
+      'RNode General Metrics',
+    ]);
+    expect(screen.getByRole('heading', { name: 'Node status' })).toBeInTheDocument();
+    expect(screen.getByText('1.2.3')).toBeInTheDocument();
+    expect(screen.queryByText('Device name')).not.toBeInTheDocument();
+
+    await fireEvent.click(within(sectionNavigation).getByRole('button', { name: 'RNode General Config' }));
+
+    expect(sectionSelect).toHaveValue('namespace:10');
+    expect(screen.getByRole('group', { name: 'RNode General Config' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Radio' })).toBeInTheDocument();
+    expect(screen.getByText('Device name')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Remote Management Allowed' })).toHaveValue('aabb\nccdd');
+    expect(screen.queryByText('Uptime')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh current section' }));
+
+    await waitFor(() => expect(getState).toHaveBeenCalledWith([10, 11], true));
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(screen.getByDisplayValue('Refreshed node')).toBeInTheDocument();
+    expect(close).not.toHaveBeenCalled();
+
+    await fireEvent.click(within(sectionNavigation).getByRole('button', { name: 'RNode General Metrics' }));
+
+    expect(sectionSelect).toHaveValue('namespace:20');
+    expect(screen.getByRole('group', { name: 'RNode General Metrics' })).toBeInTheDocument();
+    expect(screen.getByText('Uptime')).toBeInTheDocument();
+    expect(screen.getByText('3600')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'RNode General Metrics' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'RNode General Metrics' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 2, name: 'Interfaces' })).toBeInTheDocument();
+    const interfaceHeading = screen.getByRole('heading', { level: 3, name: 'LoRaInterface' });
+    const interfaceFields = screen.getByRole('group', { name: 'LoRaInterface' });
+    expect(interfaceHeading.parentElement).toContainElement(interfaceFields);
+    expect(within(interfaceFields).getByText('Frequency')).toBeInTheDocument();
+    expect(within(interfaceFields).getByText('869462500')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Interfaces' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'RNode General Config' })).not.toBeInTheDocument();
+  });
+
+  it('loads committed values and overlays device-side namespace drafts', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { needsReboot: false },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'Config',
+          parentId: 0,
+          fields: [{ id: 1, name: 'Name', type: provisioningFieldTypes.string, flags: 0 }, {
+            id: 2,
+            name: 'Mode',
+            type: provisioningFieldTypes.string,
+            flags: 0,
+          }],
+        }],
+      },
+      state: { 10: { 1: 'Committed name', 2: 'gateway' } },
+      drafts: { 10: { 1: 'Pending name' } },
+    });
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+
+    expect(await screen.findByText('Saved fields pending: 1')).toBeInTheDocument();
+    const rebootStatus = screen.getByText('Reboot required').closest('div');
+    expect(within(rebootStatus!).getByText('No')).toBeInTheDocument();
+    const pendingStatus = screen.getByText('Pending changes').closest('div');
+    expect(within(pendingStatus!).getByText('Saved on device: 1')).toBeInTheDocument();
+    expect(within(pendingStatus!).getByText('Unsaved in Retivum: 0')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Commit all' })).toBeInTheDocument();
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Provisioning section' }), {
+      target: { value: 'namespace:10' },
+    });
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Pending name');
+    expect(screen.getByRole('textbox', { name: 'Mode' })).toHaveValue('gateway');
+    expect(screen.getByRole('button', { name: 'Revert' })).toBeEnabled();
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Mode' }), { target: { value: 'access-point' } });
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Provisioning section' }), {
+      target: { value: 'status' },
+    });
+    expect(screen.getByText('Unsaved in Retivum: 1')).toBeInTheDocument();
+  });
+
+  it('stages the active namespace before exposing commit-all and discard-all actions', async () => {
+    setProvisioningNodes([announcedNode]);
+    const load = vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { needsReboot: false },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'RNode General Config',
+          parentId: 0,
+          fields: [{
+            id: 1,
+            name: 'Device name',
+            type: provisioningFieldTypes.string,
+            flags: 0,
+          }],
+        }],
+      },
+      state: { 10: { 1: 'Original name' } },
+    });
+    const stage = vi.spyOn(ProvisioningClient.prototype, 'stage').mockResolvedValue({
+      applied: 1,
+      draftHasReboot: false,
+      fieldErrors: [],
+    });
+    const commit = vi.spyOn(ProvisioningClient.prototype, 'commit').mockResolvedValue({
+      applied: 1,
+      needsReboot: false,
+    });
+    const getState = vi.spyOn(ProvisioningClient.prototype, 'getState').mockResolvedValue({
+      10: { 1: 'Pending name' },
+    });
+    const close = vi.spyOn(reticulumRuntime, 'cancelProvisioning').mockImplementation(() => undefined);
+    const nativeConfirm = vi.spyOn(window, 'confirm');
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+    const sectionSelect = await screen.findByRole('combobox', { name: 'Provisioning section' });
+    await fireEvent.change(sectionSelect, { target: { value: 'namespace:10' } });
+
+    const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
+    const revert = screen.getByRole('button', { name: 'Revert' });
+    const namespaceActions = saveNamespace.parentElement;
+    expect(namespaceActions).toHaveClass('provisioning-status-actions', 'provisioning-namespace-actions');
+    expect(Array.from(namespaceActions?.children ?? [])).toEqual([revert, saveNamespace]);
+    expect(namespaceActions?.previousElementSibling).toContainElement(screen.getByRole('group', {
+      name: 'RNode General Config',
+    }));
+    expect(saveNamespace).toBeDisabled();
+    expect(revert).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Commit all' })).not.toBeInTheDocument();
+
+    const deviceName = screen.getByRole('textbox', { name: 'Device name' });
+    deviceName.focus();
+    await fireEvent.input(deviceName, {
+      target: { value: 'Pending name' },
+    });
+
+    expect(document.activeElement).toBe(deviceName);
+    expect(saveNamespace).toBeEnabled();
+    expect(revert).toBeEnabled();
+    await fireEvent.input(deviceName, { target: { value: 'Original name' } });
+    expect(saveNamespace).toBeDisabled();
+    expect(revert).toBeDisabled();
+    await fireEvent.input(deviceName, { target: { value: 'Pending name' } });
+    await fireEvent.click(saveNamespace);
+
+    await waitFor(() => expect(stage).toHaveBeenCalledWith({ 10: { 1: 'Pending name' } }));
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Save namespace' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Revert' })).toBeEnabled();
+    const pendingBar = screen.getByText('Saved fields pending: 1').closest('.provisioning-pending-bar');
+    expect(pendingBar).toBeInTheDocument();
+    expect(sectionSelect.nextElementSibling).toBe(pendingBar);
+    expect(pendingBar?.parentElement).toBe(sectionSelect.closest('form'));
+    expect(screen.getByRole('button', { name: 'Discard all' })).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Commit all' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Commit all' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Commit all' }));
+
+    await waitFor(() => expect(commit).toHaveBeenCalledWith());
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(getState).toHaveBeenCalledWith([10]);
+    expect(screen.queryByRole('button', { name: 'Commit all' })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue('Pending name')).toBeInTheDocument();
+    expect(close).not.toHaveBeenCalled();
+  });
+
+  it('reverts one namespace tree and can discard every staged namespace', async () => {
+    setProvisioningNodes([announcedNode]);
+    vi.spyOn(ProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { needsReboot: false },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'Config',
+          parentId: 0,
+          fields: [{ id: 1, name: 'Name', type: provisioningFieldTypes.string, flags: 0 }],
+        }, {
+          id: 11,
+          name: 'Child',
+          parentId: 10,
+          fields: [],
+        }],
+      },
+      state: { 10: { 1: 'Original' }, 11: {} },
+    });
+    vi.spyOn(ProvisioningClient.prototype, 'stage').mockResolvedValue({
+      applied: 1,
+      draftHasReboot: false,
+      fieldErrors: [],
+    });
+    const discard = vi.spyOn(ProvisioningClient.prototype, 'discard').mockResolvedValue();
+    const getState = vi.spyOn(ProvisioningClient.prototype, 'getState').mockResolvedValue({
+      10: { 1: 'Original' },
+      11: {},
+    });
+    const nativeConfirm = vi.spyOn(window, 'confirm');
+    render(ProvisioningView);
+
+    await fireEvent.click(screen.getByRole('button', { name: new RegExp(announcedNode.destinationHash) }));
+    await fireEvent.change(await screen.findByRole('combobox', { name: 'Provisioning section' }), {
+      target: { value: 'namespace:10' },
+    });
+    const name = screen.getByRole('textbox', { name: 'Name' });
+
+    await fireEvent.input(name, { target: { value: 'Local edit' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+
+    await waitFor(() => expect(discard).toHaveBeenCalledWith([10, 11]));
+    expect(getState).toHaveBeenCalledWith([10, 11]);
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Original');
+
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Name' }), { target: { value: 'Saved edit' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save namespace' }));
+    await screen.findByRole('button', { name: 'Discard all' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Discard all' }));
+    const dialog = await screen.findByRole('alertdialog', { name: 'Discard all' });
+    expect(within(dialog).getByText('Discard all pending changes on the device?')).toBeInTheDocument();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Discard all' }));
+
+    await waitFor(() => expect(discard).toHaveBeenCalledWith());
+    expect(nativeConfirm).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Discard all' })).not.toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Name' })).toHaveValue('Original');
   });
 
   it('closes every provisioning link when leaving the tool', () => {
@@ -367,7 +794,9 @@ describe('ProvisioningView', () => {
     await fireEvent.keyDown(window, { key: 'Escape' });
     await fireEvent.click(row);
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Workshop router' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', {
+      name: 'Remote provisioning: Workshop router',
+    })).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: /Workshop router/ })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText('Management destination hash')).toBeDisabled();
   });
