@@ -1345,6 +1345,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     padding-inline-end: calc(env(safe-area-inset-right, 0px) + 16px);
   }
   .app-shell {
+    --mobile-identity-actions-edge-gap: 10px;
+    --mobile-conversation-header-height: 77px;
+    --mobile-conversation-tray-top: calc(env(safe-area-inset-top, 0px) + var(--mobile-conversation-header-height) + var(--mobile-identity-actions-edge-gap));
     display: block;
     height: auto;
     min-height: 100dvh;
@@ -1359,7 +1362,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .bottom-navigation .navigation-copy { gap: 4px; }
   .bottom-navigation .navigation-unread-badge { min-width: 16px; height: 16px; padding-inline: 4px; font-size: .54rem; }
   .bottom-navigation button.active { color: var(--accent-strong); background: var(--accent-soft); }
-  .mobile-identity-actions { --mobile-action-reveal-offset: 10px; position: fixed; z-index: 21; display: flex; width: 50px; flex-direction: row; justify-content: flex-end; gap: 7px; inset-block-end: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 10px); inset-inline-end: calc(12px + env(safe-area-inset-right, 0px)); padding: 5px; overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: color-mix(in srgb, var(--surface-1) 92%, transparent); box-shadow: 0 8px 30px rgba(0,0,0,.16); backdrop-filter: blur(16px); transition: width .2s cubic-bezier(.22, .8, .3, 1); will-change: width, left, top; }
+  .mobile-identity-actions { --mobile-action-reveal-offset: 10px; position: fixed; z-index: 21; display: flex; width: 50px; flex-direction: row; justify-content: flex-end; gap: 7px; inset-block-end: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + var(--mobile-identity-actions-edge-gap)); inset-inline-end: calc(12px + env(safe-area-inset-right, 0px)); padding: 5px; overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: color-mix(in srgb, var(--surface-1) 92%, transparent); box-shadow: 0 8px 30px rgba(0,0,0,.16); backdrop-filter: blur(16px); transition: width .2s cubic-bezier(.22, .8, .3, 1); will-change: width, left, top; }
   .mobile-identity-actions.side-left { --mobile-action-reveal-offset: -10px; justify-content: flex-start; inset-inline-start: calc(12px + env(safe-area-inset-left, 0px)); inset-inline-end: auto; }
   .mobile-identity-actions.expanded { width: 140px; }
   .mobile-identity-actions .icon-button { width: 38px; height: 38px; flex: 0 0 38px; color: var(--accent-strong); }
@@ -1393,7 +1396,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     to { opacity: 1; transform: translateX(0) scale(1); }
   }
   .app-shell:has(.chat-workspace.conversation-selected) .mobile-identity-actions:not(.dragging):not(.snapping) {
-    inset-block-start: calc(env(safe-area-inset-top, 0px) + 77px);
+    inset-block-start: var(--mobile-conversation-tray-top);
     inset-block-end: auto;
   }
   .page { --mobile-page-bottom-inset: 32px; min-height: auto; padding: 25px 17px var(--mobile-page-bottom-inset); }
