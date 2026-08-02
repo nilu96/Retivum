@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IdentitySummary } from '../../domain/identity';
 import { defaultAppPreferences } from '../../domain/settings';
 import { BrowserSettingsRepository } from '../../infrastructure/database/settings-repository';
@@ -22,6 +22,10 @@ describe('OnboardingView', () => {
     vi.restoreAllMocks();
     activeIdentity.set(anonymous);
     appPreferences.set(structuredClone(defaultAppPreferences));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('guides the default identity through naming before interface selection', async () => {
@@ -48,9 +52,12 @@ describe('OnboardingView', () => {
   });
 
   it('saves a disabled first interface and applies it to the runtime', async () => {
+    vi.stubGlobal('retivumDesktopSockets', {});
     activeIdentity.set({ ...anonymous, displayName: 'Alice' });
     const saveInterface = vi.spyOn(BrowserSettingsRepository.prototype, 'saveInterface').mockResolvedValue();
-    const applyConfiguration = vi.spyOn(reticulumRuntime, 'applyConfiguration').mockResolvedValue();
+    const applyConfiguration = vi.spyOn(reticulumRuntime, 'applyConfiguration').mockImplementation(
+      async (_preferences, interfaces) => { structuredClone(interfaces); },
+    );
     const oncomplete = vi.fn();
     render(OnboardingView, { onskip: vi.fn(), oncomplete });
 
@@ -68,8 +75,35 @@ describe('OnboardingView', () => {
       defaultAppPreferences,
       [expect.objectContaining({ name: 'Home relay', enabled: false })],
     );
-    expect(screen.getByText('Interface configuration saved')).toBeInTheDocument();
+    const configuredInterface = screen.getByRole('button', { name: 'Edit Home relay' });
+    expect(configuredInterface).toHaveTextContent('Interface configuration saved');
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
+
+    await fireEvent.click(configuredInterface);
+    expect(await screen.findByRole('heading', { name: 'Edit WebSocket interface' })).toBeInTheDocument();
+    const editedName = screen.getByLabelText('Name');
+    expect(editedName).toHaveValue('Home relay');
+    await fireEvent.input(editedName, { target: { value: 'Updated relay' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Updated relay' })).toBeInTheDocument());
+    expect(saveInterface).toHaveBeenCalledTimes(2);
+    expect(applyConfiguration).toHaveBeenLastCalledWith(
+      defaultAppPreferences,
+      [expect.objectContaining({ name: 'Updated relay', enabled: false })],
+    );
+
+    await fireEvent.click(screen.getByRole('button', { name: /TCP/ }));
+    await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'TCP relay' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit TCP relay' })).toBeInTheDocument());
+    const appliedInterfaces = applyConfiguration.mock.lastCall?.[1];
+    expect(appliedInterfaces).toHaveLength(2);
+    expect(appliedInterfaces).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'websocket', name: 'Updated relay' }),
+      expect.objectContaining({ type: 'tcp', name: 'TCP relay' }),
+    ]));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Next' }));
     expect(await screen.findByRole('heading', { name: "You're ready to use Retivum" })).toBeInTheDocument();

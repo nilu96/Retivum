@@ -1,5 +1,9 @@
 <script lang="ts">
-  import type { InterfaceConfig, InterfaceType } from '../../domain/settings';
+  import {
+    sortInterfaceConfigurations,
+    type InterfaceConfig,
+    type InterfaceType,
+  } from '../../domain/settings';
   import { t } from '../../i18n';
   import { BrowserSettingsRepository } from '../../infrastructure/database/settings-repository';
   import { detectInterfaceCapabilities, supportedInterfaceTypes } from '../../infrastructure/platform/interface-capabilities';
@@ -24,8 +28,9 @@
   let displayName = $state('');
   let chosenDisplayName = $state<string>();
   let editorType = $state<InterfaceType>();
-  let interfaceConfigured = $state(false);
-  let configuredInterfaceName = $state<string>();
+  let editorConfig = $state<InterfaceConfig>();
+  let configuredInterfaces = $state<InterfaceConfig[]>([]);
+  let identityCommitted = $state(false);
   let currentStep = $state<1 | 2 | 3>(1);
 
   const defaultDisplayName = $derived($t('settings.identity.defaultDisplayName'));
@@ -50,10 +55,20 @@
     currentStep = 2;
   }
 
+  function openInterfaceEditor(type: InterfaceType, config?: InterfaceConfig): void {
+    editorType = type;
+    editorConfig = config;
+  }
+
+  function closeInterfaceEditor(): void {
+    editorType = undefined;
+    editorConfig = undefined;
+  }
+
   async function saveInterface(config: InterfaceConfig): Promise<void> {
     try {
       await repository.saveInterface(config);
-      if (chosenDisplayName && $activeIdentity?.displayName === defaultDisplayName) {
+      if (chosenDisplayName && $activeIdentity?.displayName === defaultDisplayName && !identityCommitted) {
         let identitySaved = false;
         try {
           identitySaved = await reticulumRuntime.updateActiveIdentityDisplayName(chosenDisplayName);
@@ -65,14 +80,20 @@
           toast.error('settings.identity.displayName.saveError');
           return;
         }
+        identityCommitted = true;
       }
+      const currentInterfaces = $state.snapshot(configuredInterfaces);
+      const nextInterfaces = sortInterfaceConfigurations(
+        currentInterfaces.some((item) => item.id === config.id)
+          ? currentInterfaces.map((item) => item.id === config.id ? config : item)
+          : [...currentInterfaces, config],
+      );
       await reticulumRuntime.applyConfiguration(
         $state.snapshot($appPreferences),
-        [config],
+        nextInterfaces,
       );
-      editorType = undefined;
-      interfaceConfigured = true;
-      configuredInterfaceName = config.name;
+      configuredInterfaces = nextInterfaces;
+      closeInterfaceEditor();
     } catch {
       toast.error('settings.interfaces.saveError');
     }
@@ -156,15 +177,25 @@
               <p>{$t('onboarding.interface.description')}</p>
             </div>
           </div>
-          {#if interfaceConfigured}
-            <div class="onboarding-interface-saved">
-              <span><Icon name="check" size={18} /></span>
-              <div><strong>{configuredInterfaceName}</strong><small>{$t('onboarding.interface.saved')}</small></div>
-            </div>
-          {:else}
-            <div class="onboarding-interface-types">
-              {#each availableDescriptors as descriptor (descriptor.type)}
-                <button type="button" class="onboarding-interface-type" onclick={() => { editorType = descriptor.type; }}>
+          <div class="onboarding-interface-types">
+            {#each availableDescriptors as descriptor (descriptor.type)}
+              {@const configuredInterface = configuredInterfaces.find((item) => item.type === descriptor.type)}
+              {#if configuredInterface}
+                <button
+                  type="button"
+                  class="onboarding-interface-type configured"
+                  aria-label={$t('onboarding.interface.edit', { name: configuredInterface.name })}
+                  onclick={() => { openInterfaceEditor(descriptor.type, configuredInterface); }}
+                >
+                  <span class="interface-type-icon"><Icon name="check" size={19} /></span>
+                  <span>
+                    <strong>{configuredInterface.name}</strong>
+                    <small>{$t('onboarding.interface.saved')}</small>
+                  </span>
+                  <Icon name="edit" size={17} />
+                </button>
+              {:else}
+                <button type="button" class="onboarding-interface-type" onclick={() => { openInterfaceEditor(descriptor.type); }}>
                   <span class="interface-type-icon"><Icon name={descriptor.icon} size={21} /></span>
                   <span>
                     <strong>{$t(descriptor.title)}</strong>
@@ -172,19 +203,19 @@
                   </span>
                   <Icon name="arrow-right" size={17} />
                 </button>
-              {/each}
-            </div>
-            <p class="onboarding-interface-note">
-              <span class="onboarding-interface-note-icon"><Icon name="info" size={16} /></span>
-              <span>{$t('onboarding.interface.disabledCounts')}</span>
-            </p>
-          {/if}
+              {/if}
+            {/each}
+          </div>
+          <p class="onboarding-interface-note">
+            <span class="onboarding-interface-note-icon"><Icon name="info" size={16} /></span>
+            <span>{$t('onboarding.interface.disabledCounts')}</span>
+          </p>
           <div class="onboarding-actions">
             <button class="button secondary" type="button" onclick={onskip}>{$t('onboarding.skip')}</button>
             <button
               class="button primary"
               type="button"
-              disabled={!interfaceConfigured}
+              disabled={configuredInterfaces.length === 0}
               onclick={() => { currentStep = 3; }}
             >
               {$t('onboarding.next')}
@@ -220,17 +251,30 @@
 </main>
 
 {#if editorType === 'websocket'}
-  <WebSocketInterfaceEditor oncancel={() => { editorType = undefined; }} onsave={saveInterface} />
+  <WebSocketInterfaceEditor
+    config={editorConfig?.type === 'websocket' ? editorConfig : undefined}
+    oncancel={closeInterfaceEditor}
+    onsave={saveInterface}
+  />
 {:else if editorType === 'rnode'}
   <RNodeInterfaceEditor
+    config={editorConfig?.type === 'rnode' ? editorConfig : undefined}
     connections={interfaceCapabilities.rnodeConnections}
-    oncancel={() => { editorType = undefined; }}
+    oncancel={closeInterfaceEditor}
     onsave={saveInterface}
   />
 {:else if editorType === 'tcp'}
-  <TcpInterfaceEditor oncancel={() => { editorType = undefined; }} onsave={saveInterface} />
+  <TcpInterfaceEditor
+    config={editorConfig?.type === 'tcp' ? editorConfig : undefined}
+    oncancel={closeInterfaceEditor}
+    onsave={saveInterface}
+  />
 {:else if editorType === 'udp'}
-  <UdpInterfaceEditor oncancel={() => { editorType = undefined; }} onsave={saveInterface} />
+  <UdpInterfaceEditor
+    config={editorConfig?.type === 'udp' ? editorConfig : undefined}
+    oncancel={closeInterfaceEditor}
+    onsave={saveInterface}
+  />
 {/if}
 
 <style>
@@ -290,16 +334,13 @@
   .onboarding-interface-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-inline-start: 51px; }
   .onboarding-interface-type { display: grid; min-width: 0; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px; border: 1px solid var(--border); border-radius: 11px; color: var(--text); background: var(--surface-1); text-align: start; }
   .onboarding-interface-type:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+  .onboarding-interface-type.configured { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+  .onboarding-interface-type.configured .interface-type-icon { color: var(--accent-strong); background: var(--accent-soft); }
   .onboarding-interface-type > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; }
   .onboarding-interface-type strong { font-size: .8rem; }
   .onboarding-interface-type small { margin-block-start: 3px; color: var(--text-subtle); font-size: .68rem; line-height: 1.35; }
   .onboarding-interface-note { display: flex; align-items: flex-start; gap: 8px; margin: 16px 2px 0 53px; color: var(--text-subtle); font-size: .7rem; line-height: 1.4; }
   .onboarding-interface-note-icon { display: grid; flex: none; width: 16px; height: 16px; place-items: center; }
-  .onboarding-interface-saved { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 11px; margin-inline-start: 51px; padding: 13px; border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 11px; background: var(--surface-1); }
-  .onboarding-interface-saved > span { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 9px; color: var(--accent-strong); background: var(--accent-soft); }
-  .onboarding-interface-saved > div { display: flex; min-width: 0; flex-direction: column; }
-  .onboarding-interface-saved strong { overflow: hidden; font-size: .8rem; text-overflow: ellipsis; white-space: nowrap; }
-  .onboarding-interface-saved small { margin-block-start: 3px; color: var(--text-subtle); font-size: .68rem; }
 
   .onboarding-ready { display: grid; min-height: 244px; place-content: center; justify-items: center; text-align: center; }
   .onboarding-ready-mark { display: grid; width: 64px; height: 64px; margin-block-end: 16px; place-items: center; border-radius: 50%; color: var(--accent-strong); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent); }
@@ -346,7 +387,6 @@
     .onboarding-form { margin-inline: 0; }
     .onboarding-interface-types { grid-template-columns: 1fr; margin-inline-start: 0; }
     .onboarding-interface-note { margin-inline-start: 2px; }
-    .onboarding-interface-saved { margin-inline-start: 0; }
     .onboarding-actions { display: grid; grid-template-columns: minmax(0, 1fr); margin-block-start: 22px; padding-block-start: 0; }
     .onboarding-actions .button { width: 100%; min-width: 0; }
     .onboarding-ready-summary { grid-template-columns: 1fr; }
