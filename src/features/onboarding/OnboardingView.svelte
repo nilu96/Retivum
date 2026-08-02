@@ -337,7 +337,12 @@
 
   .onboarding-interface-types { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-inline-start: 51px; }
   .onboarding-interface-type { display: grid; min-width: 0; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 13px; border: 1px solid var(--border); border-radius: 11px; color: var(--text); background: var(--surface-1); text-align: start; }
-  .onboarding-interface-type:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+  @media (hover: hover) and (pointer: fine) {
+    .onboarding-interface-type:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+  }
+  @media (hover: none) and (pointer: coarse) {
+    .onboarding-interface-type:active { border-color: var(--border-strong); background: var(--surface-hover); }
+  }
   .onboarding-interface-type.configured { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
   .onboarding-interface-type.configured .interface-type-icon { color: var(--accent-strong); background: var(--accent-soft); }
   .onboarding-interface-type > span:nth-child(2) { display: flex; min-width: 0; flex-direction: column; }
