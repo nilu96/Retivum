@@ -14,20 +14,20 @@
 
   const tools: ToolDefinition[] = [
     {
-      id: 'provisioning',
-      title: 'tools.provisioning.title',
-      description: 'tools.provisioning.description',
-      icon: 'network',
-      available: true,
-      route: 'provisioning',
-    },
-    {
       id: 'pathTable',
       title: 'tools.pathTable.title',
       description: 'tools.pathTable.description',
       icon: 'route',
       available: true,
       route: 'path-management',
+    },
+    {
+      id: 'status',
+      title: 'tools.status.title',
+      description: 'tools.status.description',
+      icon: 'interface',
+      available: true,
+      route: 'status',
     },
     {
       id: 'probe',
@@ -38,12 +38,12 @@
       route: 'probe',
     },
     {
-      id: 'status',
-      title: 'tools.status.title',
-      description: 'tools.status.description',
-      icon: 'interface',
+      id: 'provisioning',
+      title: 'tools.provisioning.title',
+      description: 'tools.provisioning.description',
+      icon: 'network',
       available: true,
-      route: 'status',
+      route: 'provisioning',
     },
     {
       id: 'logs',

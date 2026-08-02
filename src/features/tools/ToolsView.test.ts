@@ -13,10 +13,10 @@ describe('ToolsView', () => {
     expect(screen.getByRole('heading', { name: 'Status details' })).toBeInTheDocument();
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
-      'Remote provisioning',
       'Path management',
-      'Probing',
       'Status details',
+      'Probing',
+      'Remote provisioning',
       'Reticulum logs',
     ]);
   });
