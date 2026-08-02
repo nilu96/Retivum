@@ -120,6 +120,26 @@ describe('ChatView', () => {
     expect(screen.getByPlaceholderText('Search contacts')).toBeInTheDocument();
   });
 
+  it('clears searches in the chats, contacts, and announces scopes', async () => {
+    render(ChatView);
+
+    for (const { tab, placeholder } of [
+      { tab: 'Chats', placeholder: 'Search chats' },
+      { tab: 'Contacts', placeholder: 'Search contacts' },
+      { tab: 'Announces', placeholder: 'Search announces' },
+    ]) {
+      await fireEvent.click(screen.getByRole('tab', { name: tab }));
+      const input = screen.getByPlaceholderText(placeholder);
+
+      expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+      await fireEvent.input(input, { target: { value: 'needle' } });
+      expect(input).toHaveValue('needle');
+      await fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+      expect(input).toHaveValue('');
+      expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+    }
+  });
+
   it('shows the interface hint only while every interface is disconnected', async () => {
     render(ChatView);
 

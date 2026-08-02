@@ -1322,16 +1322,28 @@
             >{$t(item.label)}</button>
           {/each}
         </div>
-        <label class="search-field">
+        <div class="search-field">
           <Icon name="search" size={18} />
-          <span class="sr-only">{$t('nomadnet.search.label', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}</span>
+          <label class="sr-only" for="nomadnet-directory-search">
+            {$t('nomadnet.search.label', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}
+          </label>
           <input
+            id="nomadnet-directory-search"
             bind:value={query}
             type="search"
             placeholder={$t('nomadnet.search.placeholder', { scope: $t(scopes.find((item) => item.id === scope)?.searchName ?? 'nomadnet.scope.announces.searchName') })}
             onfocus={() => { setDirectoryExpanded(true); }}
           />
-        </label>
+          {#if query}
+            <button
+              class="search-clear-button"
+              type="button"
+              aria-label={$t('common.clearSearch')}
+              title={$t('common.clearSearch')}
+              onclick={() => { query = ''; }}
+            ><Icon name="close" size={16} /></button>
+          {/if}
+        </div>
         <div id="nomad-destination-results" class="nomad-directory-content" role="tabpanel">
         {#if scope === 'announces' && filteredAnnounces.length}
           <div class="nomad-destination-list">

@@ -55,6 +55,19 @@ describe('ProvisioningView', () => {
     clearToasts();
   });
 
+  it('clears the shared bookmarks and announces search', async () => {
+    render(ProvisioningView);
+
+    const input = screen.getByPlaceholderText('Search devices');
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+
+    await fireEvent.input(input, { target: { value: 'needle' } });
+    expect(input).toHaveValue('needle');
+    await fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(input).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+  });
+
   it('connects to a valid custom hash, hides the directory, and locks the address field', async () => {
     let requestedNode: ProvisioningNode | undefined;
     vi.spyOn(ProvisioningClient.prototype, 'load').mockImplementation(function (this: ProvisioningClient) {

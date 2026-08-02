@@ -1024,15 +1024,27 @@
   <div class="provisioning-workspace" class:sectioned={Boolean(selectedNode && loaded)}>
     {#if !selectedNode}
       <aside class="provisioning-directory">
-        <label class="search-field">
+        <div class="search-field">
           <Icon name="search" size={18} />
-          <span class="sr-only">{$t('provisioning.search.label')}</span>
+          <label class="sr-only" for="provisioning-directory-search">
+            {$t('provisioning.search.label')}
+          </label>
           <input
+            id="provisioning-directory-search"
             bind:value={query}
             type="search"
             placeholder={$t('provisioning.search.placeholder')}
           />
-        </label>
+          {#if query}
+            <button
+              class="search-clear-button"
+              type="button"
+              aria-label={$t('common.clearSearch')}
+              title={$t('common.clearSearch')}
+              onclick={() => { query = ''; }}
+            ><Icon name="close" size={16} /></button>
+          {/if}
+        </div>
         <div
           id="provisioning-destination-results"
           class="provisioning-directory-content"

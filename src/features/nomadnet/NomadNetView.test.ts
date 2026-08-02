@@ -68,6 +68,25 @@ describe('NomadNetView', () => {
     expect(screen.getByPlaceholderText('Search bookmarks')).toBeInTheDocument();
   });
 
+  it('clears searches in the bookmarks and announces scopes', async () => {
+    render(NomadNetView);
+
+    for (const { tab, placeholder } of [
+      { tab: 'Bookmarks', placeholder: 'Search bookmarks' },
+      { tab: 'Announces', placeholder: 'Search announces' },
+    ]) {
+      await fireEvent.click(screen.getByRole('tab', { name: tab }));
+      const input = screen.getByPlaceholderText(placeholder);
+
+      expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+      await fireEvent.input(input, { target: { value: 'needle' } });
+      expect(input).toHaveValue('needle');
+      await fireEvent.click(screen.getByRole('button', { name: 'Clear search' }));
+      expect(input).toHaveValue('');
+      expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+    }
+  });
+
   it('keeps the mobile page controls available while toggling the floating destination panel', async () => {
     useMobileViewport();
     const { container } = render(NomadNetView);

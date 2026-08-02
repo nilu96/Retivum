@@ -1280,15 +1280,27 @@
       {/each}
     </div>
 
-    <label class="search-field">
+    <div class="search-field">
       <Icon name="search" size={18} />
-      <span class="sr-only">{$t('chat.search.label', { scope: $t(searchName[scope]) })}</span>
+      <label class="sr-only" for="chat-directory-search">
+        {$t('chat.search.label', { scope: $t(searchName[scope]) })}
+      </label>
       <input
+        id="chat-directory-search"
         bind:value={query}
         placeholder={$t('chat.search.placeholder', { scope: $t(searchName[scope]) })}
         type="search"
       />
-    </label>
+      {#if query}
+        <button
+          class="search-clear-button"
+          type="button"
+          aria-label={$t('common.clearSearch')}
+          title={$t('common.clearSearch')}
+          onclick={() => { query = ''; }}
+        ><Icon name="close" size={16} /></button>
+      {/if}
+    </div>
 
     <div
       class="overview-content"
