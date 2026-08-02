@@ -111,7 +111,9 @@ describe('OnboardingView', () => {
     expect(screen.getByText('Configuration saved')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument();
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Start messaging' }));
+    const startMessaging = screen.getByRole('button', { name: 'Start messaging' });
+    expect(startMessaging.parentElement).toHaveClass('onboarding-actions');
+    await fireEvent.click(startMessaging);
     expect(oncomplete).toHaveBeenCalledOnce();
   });
 

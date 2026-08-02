@@ -230,25 +230,29 @@
         </div>
       {:else}
         <div class="onboarding-ready">
-          <div class="onboarding-ready-mark" aria-hidden="true"><Icon name="check" size={32} /></div>
-          <div class="onboarding-ready-copy">
-            <h2>{$t('onboarding.ready.title')}</h2>
-            <p>{$t('onboarding.ready.description')}</p>
-          </div>
-          <div class="onboarding-ready-summary">
-            <div>
-              <span><Icon name="check" size={15} /></span>
-              <p><strong>{$t('onboarding.ready.identity')}</strong><small>{configuredDisplayName}</small></p>
+          <div class="onboarding-ready-body">
+            <div class="onboarding-ready-mark" aria-hidden="true"><Icon name="check" size={32} /></div>
+            <div class="onboarding-ready-copy">
+              <h2>{$t('onboarding.ready.title')}</h2>
+              <p>{$t('onboarding.ready.description')}</p>
             </div>
-            <div>
-              <span><Icon name="check" size={15} /></span>
-              <p><strong>{$t('onboarding.ready.interface')}</strong><small>{$t('onboarding.ready.interfaceSaved')}</small></p>
+            <div class="onboarding-ready-summary">
+              <div>
+                <span><Icon name="check" size={15} /></span>
+                <p><strong>{$t('onboarding.ready.identity')}</strong><small>{configuredDisplayName}</small></p>
+              </div>
+              <div>
+                <span><Icon name="check" size={15} /></span>
+                <p><strong>{$t('onboarding.ready.interface')}</strong><small>{$t('onboarding.ready.interfaceSaved')}</small></p>
+              </div>
             </div>
           </div>
-          <button class="button primary onboarding-start" type="button" onclick={oncomplete}>
-            {$t('onboarding.ready.action')}
-            <Icon name="arrow-right" size={17} />
-          </button>
+          <div class="onboarding-actions">
+            <button class="button primary" type="button" onclick={oncomplete}>
+              {$t('onboarding.ready.action')}
+              <Icon name="arrow-right" size={17} />
+            </button>
+          </div>
         </div>
       {/if}
     </div>
@@ -347,7 +351,8 @@
   .onboarding-interface-note { display: flex; align-items: flex-start; gap: 8px; margin: 16px 2px 0 53px; color: var(--text-subtle); font-size: .7rem; line-height: 1.4; }
   .onboarding-interface-note-icon { display: grid; flex: none; width: 16px; height: 16px; place-items: center; }
 
-  .onboarding-ready { display: grid; min-height: 244px; place-content: center; justify-items: center; text-align: center; }
+  .onboarding-ready { display: flex; min-height: 238px; flex-direction: column; }
+  .onboarding-ready-body { display: grid; justify-items: center; text-align: center; }
   .onboarding-ready-mark { display: grid; width: 64px; height: 64px; margin-block-end: 16px; place-items: center; border-radius: 50%; color: var(--accent-strong); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent); }
   .onboarding-ready-copy h2 { margin-block-end: 7px; font-size: 1.18rem; }
   .onboarding-ready-copy p { max-width: 500px; margin: 0; font-size: .8rem; }
@@ -357,7 +362,6 @@
   .onboarding-ready-summary p { display: flex; min-width: 0; flex-direction: column; margin: 0; }
   .onboarding-ready-summary strong { font-size: .75rem; }
   .onboarding-ready-summary small { overflow: hidden; margin-block-start: 2px; color: var(--text-subtle); font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
-  .onboarding-start { min-width: 180px; }
 
   @media (max-width: 760px) {
     .onboarding-progress { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -395,7 +399,6 @@
     .onboarding-actions { display: grid; grid-template-columns: minmax(0, 1fr); margin-block-start: 22px; padding-block-start: 0; }
     .onboarding-actions .button { width: 100%; min-width: 0; }
     .onboarding-ready-summary { grid-template-columns: 1fr; }
-    .onboarding-start { width: 100%; }
   }
 
   @media (max-width: 600px) and (max-height: 700px) {
