@@ -53,7 +53,7 @@
   type IdentificationIntent = {
     identityId: string;
     destinationHash: string;
-    source: 'manual' | 'bookmark';
+    source: 'manual' | 'destination';
     bookmarkId?: string;
   };
   type DestinationActionTarget = {
@@ -347,30 +347,36 @@
     if (intent.source === 'manual') return intent;
     const source = $nomadBookmarks.find((bookmark) => bookmark.id === intent.bookmarkId);
     return source?.destinationHash === destinationHash
-      && source.identificationPolicy !== 'never'
+      && source.identificationPolicy === 'destination'
       ? intent
       : undefined;
   }
 
-  function activateBookmarkPolicy(
+  function identifyBeforeRequestForPage(
     destinationHash: string,
     path: string,
     requestData: NomadRequestData = {},
-  ): IdentificationIntent | undefined {
+    evaluateBookmarkPolicy = true,
+  ): boolean {
     const identityId = $activeIdentity?.id;
-    const bookmark = identityId
-      ? bookmarkPolicyForPage(destinationHash, path, requestData)
-      : undefined;
-    if (!identityId || !bookmark) return validIdentificationIntent(destinationHash);
+    if (!identityId) return false;
     const currentIntent = validIdentificationIntent(destinationHash);
-    if (currentIntent?.source === 'manual') return currentIntent;
-    identificationIntent = {
-      identityId,
-      destinationHash,
-      source: 'bookmark',
-      bookmarkId: bookmark.id,
-    };
-    return identificationIntent;
+    if (!evaluateBookmarkPolicy) return Boolean(currentIntent);
+    const bookmark = bookmarkPolicyForPage(destinationHash, path, requestData);
+    if (bookmark?.identificationPolicy === 'destination'
+      && currentIntent?.source !== 'manual') {
+      identificationIntent = {
+        identityId,
+        destinationHash,
+        source: 'destination',
+        bookmarkId: bookmark.id,
+      };
+    }
+    return Boolean(
+      currentIntent
+      || bookmark?.identificationPolicy === 'bookmark'
+      || bookmark?.identificationPolicy === 'destination',
+    );
   }
 
   function isIdentificationActive(destinationHash: string): boolean {
@@ -695,10 +701,12 @@
       && previousDestinationHash !== destinationHash)) {
       identificationIntent = undefined;
     }
-    const intent = options.evaluateBookmarkPolicy === false
-      ? validIdentificationIntent(destinationHash)
-      : activateBookmarkPolicy(destinationHash, requestPath, plainRequestData);
-    const identifyThisLoad = Boolean(intent);
+    const identifyThisLoad = identifyBeforeRequestForPage(
+      destinationHash,
+      requestPath,
+      plainRequestData,
+      options.evaluateBookmarkPolicy !== false,
+    );
     const freshLink = options.freshLink === true;
     setNomadAddress(formatNomadAddress(destinationHash, requestPath, plainRequestData));
     const previousPage = loadedPage;
@@ -916,7 +924,7 @@
 
   function restoreIdentificationForPage(page: LoadedNomadPage): void {
     identificationIntent = undefined;
-    activateBookmarkPolicy(page.destinationHash, page.path, page.requestData ?? {});
+    identifyBeforeRequestForPage(page.destinationHash, page.path, page.requestData ?? {});
   }
 
   function goBack(): void {

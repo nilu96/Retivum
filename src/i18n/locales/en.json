@@ -273,7 +273,7 @@
   "nomadnet.bookmark.identification.never.label": "Never identify",
   "nomadnet.bookmark.identification.never.help": "Open this bookmark anonymously unless identification is already active for the destination.",
   "nomadnet.bookmark.identification.bookmark.label": "When opening this bookmark",
-  "nomadnet.bookmark.identification.bookmark.help": "Opening this exact address starts identified browsing for this destination until you leave it.",
+  "nomadnet.bookmark.identification.bookmark.help": "Identify the current link when opening this exact address. A replacement link remains anonymous until this address is opened again.",
   "nomadnet.bookmark.identification.destination.label": "Any page on this destination",
   "nomadnet.bookmark.identification.destination.help": "Opening any page on this destination starts identified browsing.",
   "nomadnet.bookmark.identification.destinationInherited": "The bookmark “{name}” already enables identity sharing for this entire destination.",
