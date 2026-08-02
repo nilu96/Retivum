@@ -97,7 +97,7 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.8.0`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `086355b8e8c36b94a9b6e3cc4951d5b71ec8b06a`. The generated WASM below corresponds to this `feat/wasm` source. It projects the request destination hash through WASM, makes request-handler deregistration destination-scoped, normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, and optional `interfaceIndex` targeting for `announceLxmf()`.
+The local Leviculum checkout currently reports version `0.8.0`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `ac0f6a0181c6b45f9def6b8d4706e63d06f9961c`. The generated WASM below corresponds to this `feat/wasm` source. It projects the request destination hash through WASM, makes request-handler deregistration destination-scoped, normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, optional `interfaceIndex` targeting for `announceLxmf()`, and current core path-response behavior that regenerates announces while retaining the last explicitly announced application data.
 
 Use the immutable Leviculum commit above together with the recorded toolchain, build command, and artifact hashes when publishing or reproducing this generated build.
 
@@ -115,7 +115,7 @@ Current fingerprints:
 | Artifact | SHA-256 |
 | --- | --- |
 | `leviculum_wasm.js` | `dfda4c5fee11ddee4c2b61e8ef08294c01b720058f4c20ab7db62138c9a55ad3` |
-| `leviculum_wasm_bg.wasm` | `4712b82c4e02a92b94c6a25abc78cca9500a49acd0bf31bf583c0386c3cd0858` |
+| `leviculum_wasm_bg.wasm` | `a8d52631d89f8a81cd5610e1ca6888be4f62202921b7cf0654f9365022c5f83a` |
 | `leviculum_wasm.d.ts` | `d10885f80977b246ac6de7eac9967556011e936d6f36002ecd79c3dbf9701039` |
 | `leviculum_wasm_bg.wasm.d.ts` | `f8f304cd4be42fc7fa6c088976906fcdc1cf62a136e881293271e3fd843913a7` |
 
