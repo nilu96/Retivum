@@ -1,22 +1,34 @@
 <script lang="ts">
   import { t } from '../../i18n';
+  import {
+    nomadIdentificationPolicies,
+    type NomadIdentificationPolicy,
+  } from '../../domain/nomadnet';
   import BookmarkEditor from '../../lib/components/BookmarkEditor.svelte';
 
   let {
     address,
     currentName = '',
-    currentIdentifyBeforeLoad = false,
+    currentIdentificationPolicy = 'never',
+    destinationPolicySourceName,
     mode = 'add',
     oncancel,
     onsave,
   }: {
     address: string;
     currentName?: string;
-    currentIdentifyBeforeLoad?: boolean;
+    currentIdentificationPolicy?: NomadIdentificationPolicy;
+    destinationPolicySourceName?: string;
     mode?: 'add' | 'edit';
     oncancel: () => void;
-    onsave: (address: string, name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
+    onsave: (address: string, name: string, policy: NomadIdentificationPolicy) => Promise<boolean>;
   } = $props();
+
+  const identificationOptions = $derived(nomadIdentificationPolicies.map((value) => ({
+    value,
+    label: $t(`nomadnet.bookmark.identification.${value}.label`),
+    help: $t(`nomadnet.bookmark.identification.${value}.help`),
+  })));
 
 </script>
 
@@ -31,9 +43,20 @@
   nameHelp={$t('nomadnet.bookmark.name.help')}
   saveErrorKey="nomadnet.bookmark.saveError"
   {currentName}
-  {currentIdentifyBeforeLoad}
-  identifyLabel={$t('nomadnet.bookmark.identifyBeforeLoad')}
-  identifyHelp={$t('nomadnet.bookmark.identifyBeforeLoad.help')}
+  currentOption={currentIdentificationPolicy}
+  optionLabel={$t('nomadnet.bookmark.identification.label')}
+  optionNotice={destinationPolicySourceName
+    ? $t('nomadnet.bookmark.identification.destinationInherited', {
+        name: destinationPolicySourceName,
+      })
+    : undefined}
+  options={identificationOptions}
   {oncancel}
-  {onsave}
+  onsave={(savedAddress, name, policy) => onsave(
+    savedAddress,
+    name,
+    nomadIdentificationPolicies.includes(policy as NomadIdentificationPolicy)
+      ? policy as NomadIdentificationPolicy
+      : 'never',
+  )}
 />

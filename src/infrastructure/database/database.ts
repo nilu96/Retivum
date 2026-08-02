@@ -2,9 +2,10 @@ import type { KnownDestinationRecord } from '../../domain/known-destination';
 import type { ChatMessage } from '../../domain/chat';
 import { assignChatMessageOrderings } from '../../domain/chat-ordering';
 import { normalizeInterfaceConfig } from '../../domain/settings';
+import { normalizeNomadIdentificationPolicy } from '../../domain/nomadnet';
 
 const databaseName = 'retivum';
-const databaseVersion = 16;
+const databaseVersion = 17;
 
 export function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -57,8 +58,31 @@ export async function openRetivumDatabase(): Promise<IDBDatabase> {
     }
     if (event.oldVersion > 0 && event.oldVersion < 14) migrateChatMessageOrdering(request);
     if (event.oldVersion > 0 && event.oldVersion < 16) migrateInterfaceCreationTimes(request);
+    if (event.oldVersion > 0 && event.oldVersion < 17) migrateNomadIdentificationPolicies(request);
   };
   return requestResult(request);
+}
+
+function migrateNomadIdentificationPolicies(request: IDBOpenDBRequest): void {
+  const transaction = request.transaction;
+  if (!transaction) return;
+  const store = transaction.objectStore('nomadBookmarks');
+  const bookmarksRequest = store.getAll();
+  bookmarksRequest.onsuccess = () => {
+    for (const value of bookmarksRequest.result) {
+      if (!value || typeof value !== 'object') continue;
+      const source = value as Record<string, unknown>;
+      const migrated: Record<string, unknown> = {
+        ...source,
+        identificationPolicy: normalizeNomadIdentificationPolicy(
+          source.identificationPolicy,
+          source.identifyBeforeLoad,
+        ),
+      };
+      delete migrated.identifyBeforeLoad;
+      store.put(migrated);
+    }
+  };
 }
 
 function migrateInterfaceCreationTimes(request: IDBOpenDBRequest): void {

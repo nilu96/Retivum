@@ -43,6 +43,7 @@ function createLegacyNomadDatabase(): Promise<void> {
         identityId: 'identity-2',
         destinationHash: 'a'.repeat(32),
         path: '/page/index.mu',
+        identifyBeforeLoad: true,
         createdAt: '2026-07-16T12:00:00.000Z',
       });
       transaction.oncomplete = () => {
@@ -65,6 +66,7 @@ describe('BrowserNomadRepository', () => {
       identityId: 'identity-1',
       destinationHash: '0123456789abcdef0123456789abcdef',
       path: '/start',
+      identificationPolicy: 'never',
       label: 'Community node',
       createdAt: '2026-07-16T10:01:00.000Z',
     });
@@ -86,6 +88,7 @@ describe('BrowserNomadRepository', () => {
         identityId: 'identity-1',
         destinationHash: 'c'.repeat(32),
         path: '/page/index.mu',
+        identificationPolicy: 'never' as const,
         label: 'Zulu',
         createdAt: '2026-07-16T10:01:00.000Z',
       },
@@ -94,6 +97,7 @@ describe('BrowserNomadRepository', () => {
         identityId: 'identity-1',
         destinationHash: 'b'.repeat(32),
         path: '/page/index.mu',
+        identificationPolicy: 'never' as const,
         label: 'Alpha',
         createdAt: '2026-07-16T10:02:00.000Z',
       },
@@ -102,6 +106,7 @@ describe('BrowserNomadRepository', () => {
         identityId: 'identity-1',
         destinationHash: 'a'.repeat(32),
         path: '/page/index.mu',
+        identificationPolicy: 'never' as const,
         label: 'Alpha',
         createdAt: '2026-07-16T10:03:00.000Z',
       },
@@ -123,6 +128,7 @@ describe('BrowserNomadRepository', () => {
       identityId: 'identity-1',
       destinationHash: 'a'.repeat(32),
       path: '/start',
+      identificationPolicy: 'never',
       label: 'Community node',
       createdAt: '2026-07-16T10:01:00.000Z',
     });
@@ -132,6 +138,7 @@ describe('BrowserNomadRepository', () => {
       destinationHash: 'b'.repeat(32),
       path: '/page/edited.mu',
       requestData: { var_c: 'heap' },
+      identificationPolicy: 'destination' as const,
       label: 'Edited node',
       createdAt: '2026-07-16T10:01:00.000Z',
     };
@@ -152,7 +159,11 @@ describe('BrowserNomadRepository', () => {
       metadata: {},
     }]);
     expect(await new BrowserNomadRepository().loadBookmarks('identity-2')).toEqual([
-      expect.objectContaining({ id: 'identity-2:bookmark', identityId: 'identity-2' }),
+      expect.objectContaining({
+        id: 'identity-2:bookmark',
+        identityId: 'identity-2',
+        identificationPolicy: 'bookmark',
+      }),
     ]);
   });
 });

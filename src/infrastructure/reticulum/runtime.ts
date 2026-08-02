@@ -39,6 +39,7 @@ import type {
   NomadPage,
   NomadPageLoadUpdate,
   NomadRequestData,
+  NomadIdentificationPolicy,
 } from '../../domain/nomadnet';
 import {
   sortProvisioningBookmarks,
@@ -126,6 +127,7 @@ export const propagationSyncActive = writable(false);
 export const propagationSyncStatus = writable<LxmfPropagationSyncStatus>({ syncing: false });
 export const nomadBookmarks = writable<NomadBookmark[]>([]);
 export const nomadDirectoryReady = writable(false);
+export const nomadLinkStatuses = writable<Record<string, NomadLinkStatus>>({});
 export const provisioningBookmarks = writable<ProvisioningBookmark[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
 export const pathTableEntries = writable<PathTableEntry[]>([]);
@@ -198,10 +200,6 @@ class ReticulumRuntimeController {
     onUpdate?: (update: NomadPageLoadUpdate) => void;
   }>();
   private readonly nomadLinkWaiters = new Map<string, (ok: boolean) => void>();
-  private readonly nomadLinkStatusWaiters = new Map<
-    string,
-    (status: NomadLinkStatus | undefined) => void
-  >();
   private readonly nomadIdentityWaiters = new Map<string, (ok: boolean) => void>();
   private readonly provisioningWaiters = new Map<string, {
     resolve: (data: Uint8Array) => void;
@@ -227,6 +225,7 @@ class ReticulumRuntimeController {
     this.started = true;
     runtimeStatus.set('starting');
     nomadDirectoryReady.set(false);
+    nomadLinkStatuses.set({});
     chatDirectoryReady.set(false);
 
     try {
@@ -892,7 +891,11 @@ class ReticulumRuntimeController {
     }
   }
 
-  async addNomadBookmark(address: string, label: string, identifyBeforeLoad = false): Promise<boolean> {
+  async addNomadBookmark(
+    address: string,
+    label: string,
+    identificationPolicy: NomadIdentificationPolicy = 'never',
+  ): Promise<boolean> {
     const parsed = parseNomadAddress(address);
     const identity = get(activeIdentity);
     const normalizedLabel = label.trim();
@@ -904,7 +907,7 @@ class ReticulumRuntimeController {
       destinationHash: parsed.destinationHash,
       path: parsed.path,
       requestData: { ...parsed.requestData },
-      identifyBeforeLoad,
+      identificationPolicy,
       label: normalizedLabel,
       createdAt: new Date().toISOString(),
     };
@@ -923,7 +926,7 @@ class ReticulumRuntimeController {
     requestData: NomadRequestData = {},
     onUpdate?: (update: NomadPageLoadUpdate) => void,
     freshLink = false,
-    identifyBeforeLoad = false,
+    identifyBeforeRequest = false,
   ): Promise<NomadPage | undefined> {
     const identity = get(activeIdentity);
     const normalizedDestination = normalizeDestinationHash(destinationHash);
@@ -941,7 +944,7 @@ class ReticulumRuntimeController {
         path: nomadRequestPath(path),
         requestData,
         ...(freshLink ? { freshLink: true } : {}),
-        ...(identifyBeforeLoad ? { identifyBeforeLoad: true } : {}),
+        ...(identifyBeforeRequest ? { identifyBeforeRequest: true } : {}),
       });
     });
   }
@@ -967,27 +970,6 @@ class ReticulumRuntimeController {
         resolve(ok);
       });
       this.post({ type: 'establishNomadLink', requestId, destinationHash: normalizedDestination });
-    });
-  }
-
-  async queryNomadLinkStatus(destinationHash: string): Promise<NomadLinkStatus | undefined> {
-    const normalizedDestination = normalizeDestinationHash(destinationHash);
-    if (!this.worker || !get(activeIdentity) || !normalizedDestination) return undefined;
-    const requestId = crypto.randomUUID();
-    return new Promise((resolve) => {
-      const timeout = window.setTimeout(() => {
-        this.nomadLinkStatusWaiters.delete(requestId);
-        resolve(undefined);
-      }, 5_000);
-      this.nomadLinkStatusWaiters.set(requestId, (status) => {
-        window.clearTimeout(timeout);
-        resolve(status);
-      });
-      this.post({
-        type: 'queryNomadLinkStatus',
-        requestId,
-        destinationHash: normalizedDestination,
-      });
     });
   }
 
@@ -1098,7 +1080,7 @@ class ReticulumRuntimeController {
     id: string,
     address: string,
     name: string,
-    identifyBeforeLoad: boolean,
+    identificationPolicy: NomadIdentificationPolicy,
   ): Promise<boolean> {
     const parsed = parseNomadAddress(address);
     const identity = get(activeIdentity);
@@ -1112,7 +1094,7 @@ class ReticulumRuntimeController {
       destinationHash: parsed.destinationHash,
       path: parsed.path,
       requestData: { ...parsed.requestData },
-      identifyBeforeLoad,
+      identificationPolicy,
       label: normalizedName,
     };
     await this.nomadRepository.replaceBookmark(id, updated);
@@ -1242,6 +1224,7 @@ class ReticulumRuntimeController {
 
   stop(): void {
     nomadDirectoryReady.set(false);
+    nomadLinkStatuses.set({});
     chatDirectoryReady.set(false);
     if (this.messageRetentionTimer !== undefined) {
       window.clearInterval(this.messageRetentionTimer);
@@ -1261,8 +1244,6 @@ class ReticulumRuntimeController {
     this.nomadPageWaiters.clear();
     for (const resolve of this.nomadLinkWaiters.values()) resolve(false);
     this.nomadLinkWaiters.clear();
-    for (const resolve of this.nomadLinkStatusWaiters.values()) resolve(undefined);
-    this.nomadLinkStatusWaiters.clear();
     for (const waiter of this.provisioningWaiters.values()) waiter.reject(new ProvisioningRequestFailure('PROVISIONING_RUNTIME_STOPPED'));
     this.provisioningWaiters.clear();
     for (const resolve of this.nomadIdentityWaiters.values()) resolve(false);
@@ -1332,6 +1313,7 @@ class ReticulumRuntimeController {
       return;
     }
     if (event.type === 'identityReady') {
+      if (get(activeIdentity)?.id !== event.identity.id) nomadLinkStatuses.set({});
       activeIdentity.set(identitySummary(event.identity));
       deliveryDestinationHash.set(event.deliveryDestinationHashHex);
       runtimeErrorCode.set(undefined);
@@ -1472,12 +1454,14 @@ class ReticulumRuntimeController {
       if (!event.ok) appendLocalLog('warning', 'runtime', event.code ?? 'NOMAD_LINK_ESTABLISHMENT_FAILED');
       return;
     }
-    if (event.type === 'nomadLinkStatus') {
-      this.nomadLinkStatusWaiters.get(event.requestId)?.({
-        active: event.active,
-        identified: event.identified,
-      });
-      this.nomadLinkStatusWaiters.delete(event.requestId);
+    if (event.type === 'nomadLinkStatusChanged') {
+      nomadLinkStatuses.update((statuses) => ({
+        ...statuses,
+        [event.destinationHash]: {
+          active: event.active,
+          identified: event.identified,
+        },
+      }));
       return;
     }
     if (event.type === 'nomadIdentityResult') {
@@ -1774,6 +1758,7 @@ class ReticulumRuntimeController {
         else await this.identityRepository.save(event.identity);
         this.upsertIdentitySummary(event.identity);
         if (event.activate || get(activeIdentity)?.id === event.identity.id) {
+          if (get(activeIdentity)?.id !== event.identity.id) nomadLinkStatuses.set({});
           activeIdentity.set(identitySummary(event.identity));
         }
         ok = true;

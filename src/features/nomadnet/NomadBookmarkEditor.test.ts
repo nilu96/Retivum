@@ -47,7 +47,7 @@ describe('NomadBookmarkEditor', () => {
     render(NomadBookmarkEditor, {
       address,
       currentName: 'Node',
-      currentIdentifyBeforeLoad: false,
+      currentIdentificationPolicy: 'never',
       mode: 'edit',
       onsave,
       oncancel,
@@ -57,13 +57,15 @@ describe('NomadBookmarkEditor', () => {
     expect(nameInput).toHaveValue('Node');
     expect(nameInput).toBeRequired();
     await fireEvent.input(nameInput, { target: { value: '  Community node  ' } });
-    await fireEvent.click(screen.getByRole('switch', { name: /Identify before loading/ }));
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Identity sharing' }), {
+      target: { value: 'bookmark' },
+    });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(onsave).toHaveBeenCalledWith(
       address,
       'Community node',
-      true,
+      'bookmark',
     ));
     expect(oncancel).toHaveBeenCalledOnce();
   });
@@ -81,5 +83,19 @@ describe('NomadBookmarkEditor', () => {
     await fireEvent.click(save);
 
     expect(onsave).not.toHaveBeenCalled();
+  });
+
+  it('warns when another bookmark enables destination-wide identification', () => {
+    render(NomadBookmarkEditor, {
+      address: `${'a'.repeat(32)}:/start`,
+      currentName: 'Node',
+      destinationPolicySourceName: 'Home',
+      onsave: vi.fn().mockResolvedValue(true),
+      oncancel: vi.fn(),
+    });
+
+    expect(screen.getByText(
+      'The bookmark “Home” already enables identity sharing for this entire destination.',
+    )).toBeInTheDocument();
   });
 });

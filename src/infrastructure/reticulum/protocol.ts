@@ -216,15 +216,10 @@ export type RuntimeCommand =
       path: string;
       requestData: NomadRequestData;
       freshLink?: boolean;
-      identifyBeforeLoad?: boolean;
+      identifyBeforeRequest?: boolean;
     }
   | {
       type: 'establishNomadLink';
-      requestId: string;
-      destinationHash: string;
-    }
-  | {
-      type: 'queryNomadLinkStatus';
       requestId: string;
       destinationHash: string;
     }
@@ -390,7 +385,7 @@ export type RuntimeEvent =
       dataSize?: number;
     }
   | { type: 'nomadLinkResult'; requestId: string; ok: boolean; code?: string }
-  | ({ type: 'nomadLinkStatus'; requestId: string } & NomadLinkStatus)
+  | ({ type: 'nomadLinkStatusChanged'; destinationHash: string } & NomadLinkStatus)
   | { type: 'nomadIdentityResult'; requestId: string; ok: boolean; code?: string }
   | { type: 'nomadPageFailed'; requestId: string; code: string }
   | {

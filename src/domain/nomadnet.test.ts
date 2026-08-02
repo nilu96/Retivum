@@ -48,6 +48,7 @@ describe('sortNomadBookmarks', () => {
       identityId: 'identity-1',
       destinationHash,
       path,
+      identificationPolicy: 'never' as const,
       label,
       createdAt: '2026-07-27T10:00:00.000Z',
     });

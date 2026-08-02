@@ -883,6 +883,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .propagation-node-menu code { max-width: 100%; overflow: hidden; font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .propagation-node-menu small { color: var(--text-subtle); font-size: .64rem; }
 .field small { color: var(--text-subtle); font-weight: 400; line-height: 1.4; }
+.field small.field-warning { color: var(--warning); font-weight: 600; }
 .field small.field-error { color: var(--danger); }
 .field.full-span { grid-column: 1 / -1; }
 .propagation-toggle { min-height: 74px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
@@ -1004,8 +1005,6 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .editor-address-copy { -webkit-tap-highlight-color: transparent; }
   .editor-address-copy:active { background: var(--surface-hover); }
 }
-.bookmark-identify-option { padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); cursor: pointer; }
-.bookmark-identify-option span { min-width: 0; }
 .identity-address-content { display: grid; min-width: 0; gap: 14px; padding: 8px 22px 22px; }
 .identity-qr { display: grid; min-width: 0; min-height: 300px; place-items: center; padding: 10px 0 0; }
 .identity-qr canvas { display: block; width: 100% !important; max-width: 320px; height: auto !important; border: 1px solid var(--border); border-radius: 12px; background: #fff; }

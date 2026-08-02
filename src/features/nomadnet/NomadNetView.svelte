@@ -9,6 +9,7 @@
     parseNomadAddress,
     resolveNomadLink,
     type NomadBookmark,
+    type NomadIdentificationPolicy,
     type NomadPage,
     type NomadPageLoadStage,
     type NomadPageLoadUpdate,
@@ -22,6 +23,7 @@
     knownDestinations,
     nomadBookmarks,
     nomadDirectoryReady,
+    nomadLinkStatuses,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import EmptyState from '../../lib/components/EmptyState.svelte';
@@ -38,15 +40,21 @@
   import NomadBookmarkEditor from './NomadBookmarkEditor.svelte';
   import { toast } from '../../lib/notifications/toasts';
 
-  type LoadedNomadPage = NomadPage & { identifyBeforeLoad?: boolean };
+  type LoadedNomadPage = NomadPage;
   type NomadDirectoryScope = 'announces' | 'bookmarks';
   type NomadPageRequest = {
     destinationHash: string;
     path: string;
     requestData: NomadRequestData;
-    identifyBeforeLoad: boolean;
     mode: 'push' | 'replace';
     freshLink: boolean;
+    evaluateBookmarkPolicy: boolean;
+  };
+  type IdentificationIntent = {
+    identityId: string;
+    destinationHash: string;
+    source: 'manual' | 'bookmark';
+    bookmarkId?: string;
   };
   type DestinationActionTarget = {
     destinationHash: string;
@@ -74,7 +82,7 @@
   let pendingPageRequest = $state<NomadPageRequest>();
   let failedPageRequest = $state<NomadPageRequest>();
   let sharingIdentity = $state(false);
-  let identifiedDestinationKeys = $state<string[]>([]);
+  let identificationIntent = $state<IdentificationIntent>();
   let identityShareConfirmationOpen = $state(false);
   let pageError = $state<'load' | 'link'>();
   let pageErrorCode = $state<string>();
@@ -91,7 +99,7 @@
   let bookmarkEditor = $state<{
     address: string;
     currentName: string;
-    currentIdentifyBeforeLoad: boolean;
+    currentIdentificationPolicy: NomadIdentificationPolicy;
     bookmarkId?: string;
   }>();
   let destinationActions = $state<(DestinationActionTarget & {
@@ -140,8 +148,8 @@
     )
     : undefined);
   const currentDestinationIdentified = $derived(Boolean(
-    parsedAddress
-      && isDestinationIdentified(parsedAddress.destinationHash),
+    currentPageTarget
+      && isIdentificationActive(currentPageTarget.destinationHash),
   ));
   const normalizedQuery = $derived(query.trim().toLowerCase());
   const nomadDestinations = $derived(destinationsByFullName(
@@ -173,6 +181,9 @@
   const destinationActionBookmark = $derived(destinationActions?.bookmarkId
     ? $nomadBookmarks.find((bookmark) => bookmark.id === destinationActions?.bookmarkId)
     : undefined);
+  const bookmarkEditorDestinationPolicy = $derived(
+    bookmarkEditor ? otherDestinationPolicy(bookmarkEditor) : undefined,
+  );
   const interfaceRequiredHint = $derived(
     Object.values($interfaceStatuses).some((state) => state === 'online')
       ? undefined
@@ -300,6 +311,74 @@
       item.destinationHash === destinationHash
         && nomadRequestPath(item.path) === nomadRequestPath(path)
         && sameRequestData(item.requestData ?? {}, requestData));
+  }
+
+  function bookmarkPolicyForPage(
+    destinationHash: string,
+    path: string,
+    requestData: NomadRequestData = {},
+  ): NomadBookmark | undefined {
+    const destinationPolicy = $nomadBookmarks.find((bookmark) =>
+      bookmark.destinationHash === destinationHash
+        && bookmark.identificationPolicy === 'destination');
+    if (destinationPolicy) return destinationPolicy;
+    const exactBookmark = bookmarkForPage(destinationHash, path, requestData);
+    return exactBookmark?.identificationPolicy === 'bookmark' ? exactBookmark : undefined;
+  }
+
+  function otherDestinationPolicy(editor: {
+    address: string;
+    bookmarkId?: string;
+  }): NomadBookmark | undefined {
+    const editorAddress = parseNomadAddress(editor.address);
+    return editorAddress
+      ? $nomadBookmarks.find((bookmark) =>
+          bookmark.id !== editor.bookmarkId
+            && bookmark.destinationHash === editorAddress.destinationHash
+            && bookmark.identificationPolicy === 'destination')
+      : undefined;
+  }
+
+  function validIdentificationIntent(destinationHash: string): IdentificationIntent | undefined {
+    const intent = identificationIntent;
+    const identityId = $activeIdentity?.id;
+    if (!intent || !identityId || intent.identityId !== identityId
+      || intent.destinationHash !== destinationHash) return undefined;
+    if (intent.source === 'manual') return intent;
+    const source = $nomadBookmarks.find((bookmark) => bookmark.id === intent.bookmarkId);
+    return source?.destinationHash === destinationHash
+      && source.identificationPolicy !== 'never'
+      ? intent
+      : undefined;
+  }
+
+  function activateBookmarkPolicy(
+    destinationHash: string,
+    path: string,
+    requestData: NomadRequestData = {},
+  ): IdentificationIntent | undefined {
+    const identityId = $activeIdentity?.id;
+    const bookmark = identityId
+      ? bookmarkPolicyForPage(destinationHash, path, requestData)
+      : undefined;
+    if (!identityId || !bookmark) return validIdentificationIntent(destinationHash);
+    const currentIntent = validIdentificationIntent(destinationHash);
+    if (currentIntent?.source === 'manual') return currentIntent;
+    identificationIntent = {
+      identityId,
+      destinationHash,
+      source: 'bookmark',
+      bookmarkId: bookmark.id,
+    };
+    return identificationIntent;
+  }
+
+  function isIdentificationActive(destinationHash: string): boolean {
+    const link = $nomadLinkStatuses[destinationHash];
+    return Boolean(
+      (link?.active && link.identified)
+      || validIdentificationIntent(destinationHash),
+    );
   }
 
   function destinationActionTarget(
@@ -572,36 +651,6 @@
     address = nextAddress;
   }
 
-  function identifiedDestinationKey(identityId: string, destinationHash: string): string {
-    return `${identityId}\u0000${destinationHash.toLowerCase()}`;
-  }
-
-  function isDestinationIdentified(destinationHash: string): boolean {
-    const identityId = $activeIdentity?.id;
-    return Boolean(
-      identityId
-      && identifiedDestinationKeys.includes(
-        identifiedDestinationKey(identityId, destinationHash),
-      ),
-    );
-  }
-
-  function rememberIdentifiedDestination(destinationHash: string): void {
-    const identityId = $activeIdentity?.id;
-    if (!identityId) return;
-    const key = identifiedDestinationKey(identityId, destinationHash);
-    if (!identifiedDestinationKeys.includes(key)) {
-      identifiedDestinationKeys = [...identifiedDestinationKeys, key];
-    }
-  }
-
-  function forgetIdentifiedDestination(destinationHash: string): void {
-    const identityId = $activeIdentity?.id;
-    if (!identityId) return;
-    const key = identifiedDestinationKey(identityId, destinationHash);
-    identifiedDestinationKeys = identifiedDestinationKeys.filter((item) => item !== key);
-  }
-
   function handleAddressInput(event: Event): void {
     if (event.currentTarget instanceof HTMLInputElement) {
       setNomadAddress(event.currentTarget.value);
@@ -621,7 +670,7 @@
     bookmarkEditor = {
       address: formatNomadAddress(target.destinationHash, target.path, target.requestData),
       currentName: target.suggestedName,
-      currentIdentifyBeforeLoad: false,
+      currentIdentificationPolicy: 'never',
     };
   }
 
@@ -630,26 +679,37 @@
     path = '/',
     mode: 'push' | 'replace' = 'push',
     requestData: NomadRequestData = {},
-    freshLink = false,
-    identifyBeforeLoad = false,
+    options: {
+      freshLink?: boolean;
+      evaluateBookmarkPolicy?: boolean;
+      resetIdentification?: boolean;
+    } = {},
   ): Promise<boolean> {
     resetPageViewport();
     const requestPath = nomadRequestPath(path);
     // Values read back from Svelte state can be proxies, which cannot be sent
     // through Worker.postMessage. Keep the runtime boundary cloneable.
     const plainRequestData = { ...requestData };
+    const previousDestinationHash = currentPageTarget?.destinationHash;
+    if (options.resetIdentification || (previousDestinationHash
+      && previousDestinationHash !== destinationHash)) {
+      identificationIntent = undefined;
+    }
+    const intent = options.evaluateBookmarkPolicy === false
+      ? validIdentificationIntent(destinationHash)
+      : activateBookmarkPolicy(destinationHash, requestPath, plainRequestData);
+    const identifyThisLoad = Boolean(intent);
+    const freshLink = options.freshLink === true;
     setNomadAddress(formatNomadAddress(destinationHash, requestPath, plainRequestData));
-    const identifyThisLoad = identifyBeforeLoad
-      || isDestinationIdentified(destinationHash);
     const previousPage = loadedPage;
     const sequence = ++navigationSequence;
     const request: NomadPageRequest = {
       destinationHash,
       path: requestPath,
       requestData: plainRequestData,
-      identifyBeforeLoad,
       mode,
       freshLink,
+      evaluateBookmarkPolicy: options.evaluateBookmarkPolicy !== false,
     };
     pendingPageRequest = request;
     failedPageRequest = undefined;
@@ -715,10 +775,7 @@
         }].slice(-maximumNavigationHistoryEntries);
       }
       resetPageViewport();
-      if (identifyThisLoad && $activeIdentity) {
-        rememberIdentifiedDestination(nextPage.destinationHash);
-      }
-      loadedPage = { ...nextPage, requestData: nextRequestData, identifyBeforeLoad };
+      loadedPage = { ...nextPage, requestData: nextRequestData };
       setNomadAddress(formatNomadAddress(
         nextPage.destinationHash,
         nextPage.path,
@@ -747,15 +804,7 @@
     requestData: NomadRequestData = {},
   ): void {
     setDirectoryExpanded(false);
-    const bookmark = bookmarkForPage(destinationHash, path, requestData);
-    void openDestination(
-      destinationHash,
-      path,
-      'push',
-      requestData,
-      false,
-      bookmark?.identifyBeforeLoad === true,
-    );
+    void openDestination(destinationHash, path, 'push', requestData);
   }
 
   function submitAddress(event: SubmitEvent): void {
@@ -767,8 +816,6 @@
         parsedAddress.path,
         'push',
         parsedAddress.requestData,
-        false,
-        currentBookmark?.identifyBeforeLoad === true,
       );
     }
   }
@@ -785,7 +832,7 @@
     void openDestination(next.destinationHash, next.path, 'push', {
       ...next.requestData,
       ...submittedFields,
-    }, false, next.destinationHash === loadedPage.destinationHash && loadedPage.identifyBeforeLoad === true);
+    });
   }
 
   function retryPage(): void {
@@ -794,37 +841,27 @@
       failedPageRequest.path,
       failedPageRequest.mode,
       failedPageRequest.requestData,
-      failedPageRequest.freshLink,
-      failedPageRequest.identifyBeforeLoad,
+      {
+        freshLink: failedPageRequest.freshLink,
+        evaluateBookmarkPolicy: failedPageRequest.evaluateBookmarkPolicy,
+      },
     );
   }
 
   function reloadPage(): void {
     const activeRequest = pendingPageRequest ?? failedPageRequest;
-    const loadedPageBookmark = loadedPage
-      ? bookmarkForPage(
-          loadedPage.destinationHash,
-          loadedPage.path,
-          loadedPage.requestData ?? {},
-        )
-      : undefined;
     const target = activeRequest ?? (loadedPage ? {
       destinationHash: loadedPage.destinationHash,
       path: loadedPage.path,
       requestData: loadedPage.requestData,
-      identifyBeforeLoad: loadedPageBookmark
-        ? loadedPageBookmark.identifyBeforeLoad === true
-        : loadedPage.identifyBeforeLoad === true,
     } : undefined);
     if (!target) return;
-    forgetIdentifiedDestination(target.destinationHash);
     void openDestination(
       target.destinationHash,
       target.path,
       activeRequest?.mode ?? 'replace',
       target.requestData,
-      true,
-      target.identifyBeforeLoad === true,
+      { freshLink: true, resetIdentification: true },
     );
   }
 
@@ -848,15 +885,19 @@
         toast.error('nomadnet.page.identityShareError');
         return;
       }
-      rememberIdentifiedDestination(identifiedPage.destinationHash);
+      const identityId = $activeIdentity?.id;
+      if (!identityId) return;
+      identificationIntent = {
+        identityId,
+        destinationHash: identifiedPage.destinationHash,
+        source: 'manual',
+      };
       await new Promise<void>((resolve) => setTimeout(resolve, identityReloadDelayMs));
       const reloaded = await openDestination(
         identifiedPage.destinationHash,
         identifiedPage.path,
         'replace',
         { ...(identifiedPage.requestData ?? {}) },
-        false,
-        identifiedPage.identifyBeforeLoad === true,
       ).catch(() => false);
       if (!reloaded) toast.error(pageErrorCode === 'NOMAD_IDENTITY_SHARE_FAILED'
         ? 'nomadnet.page.identityShareError'
@@ -873,44 +914,15 @@
     void shareIdentity();
   }
 
-  function reconcileRestoredPageIdentification(
-    page: LoadedNomadPage,
-    expectedNavigationSequence: number,
-  ): void {
-    const bookmark = bookmarkForPage(
-      page.destinationHash,
-      page.path,
-      page.requestData ?? {},
-    );
-    if (bookmark?.identifyBeforeLoad === true) {
-      rememberIdentifiedDestination(page.destinationHash);
-      return;
-    }
-    void reticulumRuntime.queryNomadLinkStatus(page.destinationHash)
-      .then((status) => {
-        if (
-          navigationSequence !== expectedNavigationSequence
-          || parseNomadAddress(address)?.destinationHash !== page.destinationHash
-        ) return;
-        if (status?.active && status.identified) {
-          rememberIdentifiedDestination(page.destinationHash);
-        } else {
-          forgetIdentifiedDestination(page.destinationHash);
-        }
-      })
-      .catch(() => {
-        if (
-          navigationSequence === expectedNavigationSequence
-          && parseNomadAddress(address)?.destinationHash === page.destinationHash
-        ) {
-          forgetIdentifiedDestination(page.destinationHash);
-        }
-      });
+  function restoreIdentificationForPage(page: LoadedNomadPage): void {
+    identificationIntent = undefined;
+    activateBookmarkPolicy(page.destinationHash, page.path, page.requestData ?? {});
   }
 
   function goBack(): void {
     if (cancelPendingPageLoad()) return;
     if (pageError === 'load' && failedPageRequest && loadedPage) {
+      const destinationChanged = failedPageRequest.destinationHash !== loadedPage.destinationHash;
       resetPageViewport();
       failedPageRequest = undefined;
       pageError = undefined;
@@ -920,6 +932,7 @@
         loadedPage.path,
         loadedPage.requestData ?? {},
       ));
+      if (destinationChanged) restoreIdentificationForPage(loadedPage);
       return;
     }
     const previous = navigationHistory.at(-1);
@@ -943,12 +956,15 @@
       previous.requestData ?? {},
     ));
     if (previous.destinationHash !== currentDestinationHash) {
-      reconcileRestoredPageIdentification(previous, navigationSequence);
+      restoreIdentificationForPage(previous);
     }
   }
 
   function cancelPendingPageLoad(): boolean {
     if (!loadingPage || !pendingPageRequest) return false;
+    const destinationChanged = Boolean(
+      loadedPage && pendingPageRequest.destinationHash !== loadedPage.destinationHash,
+    );
     reticulumRuntime.cancelNomadPage(pendingPageRequest.destinationHash);
     navigationSequence += 1;
     pendingPageRequest = undefined;
@@ -962,6 +978,7 @@
         loadedPage.path,
         loadedPage.requestData ?? {},
       ));
+      if (destinationChanged) restoreIdentificationForPage(loadedPage);
     }
     return true;
   }
@@ -1042,8 +1059,7 @@
       NOMAD_DEFAULT_PAGE_PATH,
       'push',
       {},
-      false,
-      target.identifyBeforeLoad === true,
+      { evaluateBookmarkPolicy: false },
     );
   }
 
@@ -1083,7 +1099,7 @@
       bookmarkEditor = {
         address: addressToBookmark,
         currentName: suggestedName,
-        currentIdentifyBeforeLoad: false,
+        currentIdentificationPolicy: 'never',
       };
       return;
     }
@@ -1103,7 +1119,7 @@
     bookmarkEditor = {
       address: formatNomadAddress(bookmark.destinationHash, bookmark.path, bookmark.requestData ?? {}),
       currentName: bookmark.label ?? '',
-      currentIdentifyBeforeLoad: bookmark.identifyBeforeLoad === true,
+      currentIdentificationPolicy: bookmark.identificationPolicy,
       bookmarkId: bookmark.id,
     };
   }
@@ -1119,7 +1135,7 @@
   async function saveBookmark(
     address: string,
     name: string,
-    identifyBeforeLoad: boolean,
+    identificationPolicy: NomadIdentificationPolicy,
   ): Promise<boolean> {
     if (!bookmarkEditor) return false;
     const finishPreservingToolbar = preserveMobileToolbarForBookmarkChange();
@@ -1129,9 +1145,9 @@
           bookmarkEditor.bookmarkId,
           address,
           name,
-          identifyBeforeLoad,
+          identificationPolicy,
         )
-        : await reticulumRuntime.addNomadBookmark(address, name, identifyBeforeLoad);
+        : await reticulumRuntime.addNomadBookmark(address, name, identificationPolicy);
     } finally {
       finishPreservingToolbar?.();
     }
@@ -1496,7 +1512,15 @@
   <NomadBookmarkEditor
     address={bookmarkEditor.address}
     currentName={bookmarkEditor.currentName}
-    currentIdentifyBeforeLoad={bookmarkEditor.currentIdentifyBeforeLoad}
+    currentIdentificationPolicy={bookmarkEditor.currentIdentificationPolicy}
+    destinationPolicySourceName={bookmarkEditorDestinationPolicy
+      ? bookmarkEditorDestinationPolicy.label
+        ?? formatNomadAddress(
+          bookmarkEditorDestinationPolicy.destinationHash,
+          bookmarkEditorDestinationPolicy.path,
+          bookmarkEditorDestinationPolicy.requestData ?? {},
+        )
+      : undefined}
     mode={bookmarkEditor.bookmarkId ? 'edit' : 'add'}
     oncancel={closeBookmarkEditor}
     onsave={saveBookmark}

@@ -17,9 +17,10 @@
     nameHelp,
     saveErrorKey,
     currentName = '',
-    currentIdentifyBeforeLoad = false,
-    identifyLabel,
-    identifyHelp,
+    currentOption,
+    optionLabel,
+    optionNotice,
+    options = [],
     oncancel,
     onsave,
   }: {
@@ -33,20 +34,24 @@
     nameHelp: string;
     saveErrorKey: MessageKey;
     currentName?: string;
-    currentIdentifyBeforeLoad?: boolean;
-    identifyLabel?: string;
-    identifyHelp?: string;
+    currentOption?: string;
+    optionLabel?: string;
+    optionNotice?: string;
+    options?: Array<{ value: string; label: string; help: string }>;
     oncancel: () => void;
-    onsave: (address: string, name: string, identifyBeforeLoad: boolean) => Promise<boolean>;
+    onsave: (address: string, name: string, option?: string) => Promise<boolean>;
   } = $props();
 
   let name = $state('');
-  let identifyBeforeLoad = $state(false);
+  let selectedOption = $state<string>();
   let saving = $state(false);
+  const selectedOptionHelp = $derived(
+    options.find((option) => option.value === selectedOption)?.help,
+  );
 
   $effect.pre(() => {
     name = currentName;
-    identifyBeforeLoad = currentIdentifyBeforeLoad;
+    selectedOption = currentOption;
   });
 
   async function copyAddress(): Promise<void> {
@@ -59,7 +64,7 @@
     if (!name.trim()) return;
     saving = true;
     try {
-      if (await onsave(address.trim(), name.trim(), identifyBeforeLoad)) oncancel();
+      if (await onsave(address.trim(), name.trim(), selectedOption)) oncancel();
       else toast.error(saveErrorKey);
     } catch {
       toast.error(saveErrorKey);
@@ -102,13 +107,20 @@
         />
         <small>{nameHelp}</small>
       </label>
-      {#if identifyLabel && identifyHelp}
-        <label class="toggle-row bookmark-identify-option">
-          <span>
-            <strong>{identifyLabel}</strong>
-            <small>{identifyHelp}</small>
-          </span>
-          <input type="checkbox" role="switch" bind:checked={identifyBeforeLoad} />
+      {#if optionLabel && options.length}
+        <label class="field bookmark-option-field">
+          <span>{optionLabel}</span>
+          <select bind:value={selectedOption} aria-label={optionLabel}>
+            {#each options as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+          {#if selectedOptionHelp}
+            <small>{selectedOptionHelp}</small>
+          {/if}
+          {#if optionNotice}
+            <small class="field-warning">{optionNotice}</small>
+          {/if}
         </label>
       {/if}
       <footer>

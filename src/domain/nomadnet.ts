@@ -23,6 +23,9 @@ export function nomadPageLoadDeadlineMs(hops?: number): number {
 
 export type NomadRequestData = Record<string, string>;
 
+export const nomadIdentificationPolicies = ['never', 'bookmark', 'destination'] as const;
+export type NomadIdentificationPolicy = typeof nomadIdentificationPolicies[number];
+
 export type NomadPageLoadStage =
   | 'findingPath'
   | 'establishingLink'
@@ -52,10 +55,20 @@ export interface NomadBookmark {
   destinationHash: string;
   path: string;
   requestData?: NomadRequestData;
-  identifyBeforeLoad?: boolean;
+  identificationPolicy: NomadIdentificationPolicy;
   /** Optional only for compatibility with bookmarks persisted before names became required. */
   label?: string;
   createdAt: string;
+}
+
+export function normalizeNomadIdentificationPolicy(
+  value: unknown,
+  legacyIdentifyBeforeLoad?: unknown,
+): NomadIdentificationPolicy {
+  if (nomadIdentificationPolicies.includes(value as NomadIdentificationPolicy)) {
+    return value as NomadIdentificationPolicy;
+  }
+  return legacyIdentifyBeforeLoad === true ? 'bookmark' : 'never';
 }
 
 export function compareNomadBookmarks(left: NomadBookmark, right: NomadBookmark): number {

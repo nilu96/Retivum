@@ -8,6 +8,7 @@ import {
   knownDestinations,
   nomadBookmarks,
   nomadDirectoryReady,
+  nomadLinkStatuses,
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import NomadNetView from './NomadNetView.svelte';
@@ -48,6 +49,7 @@ describe('NomadNetView', () => {
     setNomadDestinations([]);
     nomadBookmarks.set([]);
     nomadDirectoryReady.set(true);
+    nomadLinkStatuses.set({});
     destinationPathStatuses.set({});
     interfaceStatuses.set({});
   });
@@ -576,6 +578,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash: '1'.repeat(32),
       path: '/page/index.mu',
+      identificationPolicy: 'never',
       label: 'Loaded bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -597,6 +600,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash: '1'.repeat(32),
       path: '/page/index.mu',
+      identificationPolicy: 'never',
       label: 'Loaded bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -625,6 +629,12 @@ describe('NomadNetView', () => {
 
   it('collapses the mobile directory immediately after choosing an announce or bookmark', async () => {
     useMobileViewport();
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
     const announcedHash = '1'.repeat(32);
     const bookmarkedHash = '2'.repeat(32);
     setNomadDestinations([{
@@ -639,7 +649,7 @@ describe('NomadNetView', () => {
       destinationHash: bookmarkedHash,
       path: '/page/stack.mu',
       requestData: { var_c: 'heap' },
-      identifyBeforeLoad: true,
+      identificationPolicy: 'bookmark',
       label: 'Saved node',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -714,7 +724,7 @@ describe('NomadNetView', () => {
       destinationHash,
       path: '/page/index.mu',
       requestData: {},
-      identifyBeforeLoad: true,
+      identificationPolicy: 'bookmark',
       label: 'Identified bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -747,7 +757,7 @@ describe('NomadNetView', () => {
       true,
     );
     const identifiedButton = screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     });
     expect(identifiedButton).toBeDisabled();
     expect(identifiedButton).toHaveClass('identified');
@@ -764,8 +774,180 @@ describe('NomadNetView', () => {
       true,
     );
     expect(screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).toBeDisabled();
+  });
+
+  it('clears manual identification intent on hard reload', async () => {
+    const destinationHash = 'd'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    setNomadDestinations([{
+      destinationHash,
+      displayName: 'Manual node',
+      heardAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Anonymous page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Manually identified page',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        destinationHash,
+        path: '/page/index.mu',
+        requestData: {},
+        content: '> Anonymous hard reload',
+        receivedAt: '2026-07-16T10:03:00.000Z',
+      });
+    vi.spyOn(reticulumRuntime, 'identifyNomadLink').mockResolvedValue(true);
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Manual node/ }));
+    expect(await screen.findByText('Anonymous page')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Share identity with this page' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Share identity' }));
+    expect(await screen.findByText('Manually identified page')).toBeInTheDocument();
+    expect(screen.getByRole('button', {
+      name: 'Identity sharing active for this destination',
+    })).toBeDisabled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
+    expect(await screen.findByText('Anonymous hard reload')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenNthCalledWith(
+      3,
+      destinationHash,
+      '/page/index.mu',
+      {},
+      expect.any(Function),
+      true,
+    );
+    expect(screen.getByRole('button', { name: 'Share identity with this page' })).toBeEnabled();
+  });
+
+  it('revokes a removed bookmark session but lets another exact bookmark identify the replacement link', async () => {
+    const destinationHash = 'e'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    const firstBookmark = {
+      id: 'identity:first',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/first.mu',
+      identificationPolicy: 'bookmark' as const,
+      label: 'First identified page',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    };
+    const secondBookmark = {
+      id: 'identity:second',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/second.mu',
+      identificationPolicy: 'bookmark' as const,
+      label: 'Second identified page',
+      createdAt: '2026-07-16T10:01:00.000Z',
+    };
+    nomadBookmarks.set([firstBookmark, secondBookmark]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockImplementation(async (_destinationHash, path) => ({
+        destinationHash,
+        path,
+        requestData: {},
+        content: path === firstBookmark.path ? '> First page' : '> Second page',
+        receivedAt: '2026-07-16T10:02:00.000Z',
+      }));
+    render(NomadNetView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /First identified page/ }));
+    expect(await screen.findByText('First page')).toBeInTheDocument();
+    nomadLinkStatuses.set({
+      [destinationHash]: { active: true, identified: true },
+    });
+
+    nomadBookmarks.set([secondBookmark]);
+    expect(screen.getByRole('button', {
+      name: 'Identity sharing active for this destination',
+    })).toBeDisabled();
+    nomadLinkStatuses.set({
+      [destinationHash]: { active: false, identified: false },
+    });
+    await waitFor(() => expect(screen.getByRole('button', {
+      name: 'Share identity with this page',
+    })).toBeEnabled());
+
+    await fireEvent.click(screen.getByRole('button', { name: /Second identified page/ }));
+    expect(await screen.findByText('Second page')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenLastCalledWith(
+      destinationHash,
+      '/page/second.mu',
+      {},
+      expect.any(Function),
+      false,
+      true,
+    );
+    expect(screen.getByRole('button', {
+      name: 'Identity sharing active for this destination',
+    })).toBeDisabled();
+  });
+
+  it('applies a destination-wide bookmark policy to an unbookmarked path', async () => {
+    const destinationHash = 'f'.repeat(32);
+    activeIdentity.set({
+      id: 'identity',
+      displayName: 'Anonymous',
+      identityHashHex: 'b'.repeat(32),
+      publicKeyHex: 'c'.repeat(128),
+    });
+    nomadBookmarks.set([{
+      id: 'identity:destination-policy',
+      identityId: 'identity',
+      destinationHash,
+      path: '/page/saved.mu',
+      identificationPolicy: 'destination',
+      label: 'Always identified node',
+      createdAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const requestPage = vi.spyOn(reticulumRuntime, 'requestNomadPage')
+      .mockResolvedValue({
+        destinationHash,
+        path: '/page/unbookmarked.mu',
+        requestData: {},
+        content: '> Destination policy page',
+        receivedAt: '2026-07-16T10:01:00.000Z',
+      });
+    render(NomadNetView);
+
+    await fireEvent.input(screen.getByRole('textbox', { name: 'Destination and path' }), {
+      target: { value: `${destinationHash}:/page/unbookmarked.mu` },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
+
+    expect(await screen.findByText('Destination policy page')).toBeInTheDocument();
+    expect(requestPage).toHaveBeenCalledWith(
+      destinationHash,
+      '/page/unbookmarked.mu',
+      {},
+      expect.any(Function),
+      false,
+      true,
+    );
   });
 
   it('keeps an announced destination active on its subpages while bookmarks remain path-specific', async () => {
@@ -781,6 +963,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash,
       path: '/page/index.mu',
+      identificationPolicy: 'never',
       label: 'Home bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }, {
@@ -788,6 +971,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash,
       path: '/page/details.mu',
+      identificationPolicy: 'never',
       label: 'Details bookmark',
       createdAt: '2026-07-16T10:01:00.000Z',
     }]);
@@ -833,6 +1017,7 @@ describe('NomadNetView', () => {
         destinationHash,
         path: '/start',
         requestData: { var_c: 'heap' },
+        identificationPolicy: 'never',
         label: 'Forest Node',
         createdAt: '2026-07-16T10:00:00.000Z',
       }]);
@@ -862,7 +1047,7 @@ describe('NomadNetView', () => {
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/start\`c=heap`,
       'Forest Node',
-      false,
+      'never',
     ));
     expect(screen.getByRole('tab', { name: 'Announces' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'Bookmarks' })).toHaveAttribute('aria-selected', 'false');
@@ -895,6 +1080,7 @@ describe('NomadNetView', () => {
         destinationHash,
         path: '/page/index.mu',
         requestData: {},
+        identificationPolicy: 'never',
         createdAt: '2026-07-16T10:00:00.000Z',
       }]);
       return true;
@@ -937,7 +1123,7 @@ describe('NomadNetView', () => {
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/page/index.mu`,
       'Mobile page',
-      false,
+      'never',
     ));
     expect(document.documentElement).toHaveClass('nomad-toolbar-preserving-viewport');
     expect(within(toolbar).getByRole('button', { name: 'Hide destination list' }))
@@ -987,7 +1173,7 @@ describe('NomadNetView', () => {
       await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
         `${destinationHash}:/page/index.mu`,
         'Fresh node',
-        false,
+        'never',
       ));
     } finally {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
@@ -1075,6 +1261,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash,
       path: '/page/community.mu',
+      identificationPolicy: 'never',
       label: 'Community page',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -1106,6 +1293,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash,
       path: '/',
+      identificationPolicy: 'never',
       label: 'Old name',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -1118,7 +1306,7 @@ describe('NomadNetView', () => {
     expect(input).toHaveValue('Old name');
     expect(screen.getByRole('button', { name: 'Copy bookmark address' })).toHaveTextContent(address);
     expect(screen.queryByRole('textbox', { name: 'NomadNet address' })).not.toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: /Identify before loading/ })).not.toBeChecked();
+    expect(screen.getByRole('combobox', { name: 'Identity sharing' })).toHaveValue('never');
     await fireEvent.input(input, { target: { value: 'New name' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -1126,7 +1314,7 @@ describe('NomadNetView', () => {
       'identity:bookmark',
       address,
       'New name',
-      false,
+      'never',
     ));
   });
 
@@ -1143,6 +1331,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash,
       path: '/start',
+      identificationPolicy: 'never',
       label: 'Existing bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -1176,7 +1365,7 @@ describe('NomadNetView', () => {
       destinationHash,
       path: '/start',
       label: 'Mobile bookmark',
-      identifyBeforeLoad: true,
+      identificationPolicy: 'bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
     const deleteBookmark = vi.spyOn(reticulumRuntime, 'deleteNomadBookmark').mockResolvedValue(undefined);
@@ -1205,6 +1394,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash: 'e'.repeat(32),
       path: '/start',
+      identificationPolicy: 'never',
       label: 'Editable bookmark',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -1578,14 +1768,14 @@ describe('NomadNetView', () => {
         receivedAt: '2026-07-16T10:02:00.000Z',
       });
     const addBookmark = vi.spyOn(reticulumRuntime, 'addNomadBookmark')
-      .mockImplementation(async (address, label, identifyBeforeLoad) => {
+      .mockImplementation(async (address, label, identificationPolicy) => {
         nomadBookmarks.set([{
           id: `identity:${address}`,
           identityId: 'identity',
           destinationHash,
           path: '/page/index.mu',
           requestData: {},
-          identifyBeforeLoad,
+          identificationPolicy: identificationPolicy ?? 'never',
           label,
           createdAt: '2026-07-16T10:01:30.000Z',
         }]);
@@ -1604,12 +1794,14 @@ describe('NomadNetView', () => {
     );
 
     await fireEvent.click(screen.getByRole('button', { name: 'Bookmark current address' }));
-    await fireEvent.click(screen.getByRole('switch', { name: /Identify before loading/ }));
+    await fireEvent.change(screen.getByRole('combobox', { name: 'Identity sharing' }), {
+      target: { value: 'bookmark' },
+    });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(addBookmark).toHaveBeenCalledWith(
       `${destinationHash}:/page/index.mu`,
       'Newly bookmarked node',
-      true,
+      'bookmark',
     ));
 
     await fireEvent.click(screen.getByRole('button', { name: 'Reload page' }));
@@ -1810,8 +2002,6 @@ describe('NomadNetView', () => {
         receivedAt: '2026-07-16T10:04:00.000Z',
       });
     const identify = vi.spyOn(reticulumRuntime, 'identifyNomadLink').mockResolvedValue(true);
-    const queryLinkStatus = vi.spyOn(reticulumRuntime, 'queryNomadLinkStatus')
-      .mockResolvedValue({ active: true, identified: true });
     const cancelPage = vi.spyOn(reticulumRuntime, 'cancelNomadPage');
     render(NomadNetView);
 
@@ -1836,10 +2026,13 @@ describe('NomadNetView', () => {
     expect(identify).toHaveBeenCalledWith(destinationHash);
     expect(await screen.findByText('Identified page')).toBeInTheDocument();
     const identifiedButton = screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     });
     expect(identifiedButton).toBeDisabled();
     expect(identifiedButton).toHaveClass('identified');
+    nomadLinkStatuses.set({
+      [destinationHash]: { active: true, identified: true },
+    });
     expect(requestPage).toHaveBeenNthCalledWith(
       2,
       destinationHash,
@@ -1851,11 +2044,18 @@ describe('NomadNetView', () => {
     );
     expect(cancelPage).not.toHaveBeenCalled();
 
+    nomadLinkStatuses.set({
+      [destinationHash]: { active: false, identified: false },
+    });
+    expect(screen.getByRole('button', {
+      name: 'Identity sharing active for this destination',
+    })).toBeDisabled();
+
     await fireEvent.input(screen.getByRole('textbox', { name: 'Destination and path' }), {
       target: { value: `${destinationHash}:/page/another.mu` },
     });
     expect(screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).toBeDisabled();
     await fireEvent.click(screen.getByRole('button', { name: 'Open page' }));
     expect(await screen.findByText('Identified subpage')).toBeInTheDocument();
@@ -1869,14 +2069,17 @@ describe('NomadNetView', () => {
       true,
     );
     expect(screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).toBeDisabled();
+
+    nomadLinkStatuses.set({
+      [destinationHash]: { active: true, identified: true },
+    });
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
     expect(screen.getByText('Identified page')).toBeInTheDocument();
-    expect(queryLinkStatus).not.toHaveBeenCalled();
     expect(screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).toBeDisabled();
 
     await fireEvent.click(screen.getByRole('button', { name: /Other node/ }));
@@ -1889,19 +2092,18 @@ describe('NomadNetView', () => {
       expect.any(Function),
     );
     expect(screen.queryByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Share identity with this page' })).toBeEnabled();
 
     await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
     expect(screen.getByText('Identified page')).toBeInTheDocument();
-    await waitFor(() => expect(queryLinkStatus).toHaveBeenCalledWith(destinationHash));
     await waitFor(() => expect(screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).toBeDisabled());
   });
 
-  it('uses the bookmark policy before link status when reconciling identification on Back', async () => {
+  it('restores bookmark identification on Back and revokes it when the bookmark is removed', async () => {
     const identifiedHash = '4'.repeat(32);
     const otherHash = '5'.repeat(32);
     activeIdentity.set({
@@ -1920,7 +2122,7 @@ describe('NomadNetView', () => {
       identityId: 'identity',
       destinationHash: identifiedHash,
       path: '/page/index.mu',
-      identifyBeforeLoad: true,
+      identificationPolicy: 'bookmark',
       label: 'Auto-identify history page',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -1935,8 +2137,6 @@ describe('NomadNetView', () => {
         receivedAt: '2026-07-16T10:01:00.000Z',
       }),
     );
-    const queryLinkStatus = vi.spyOn(reticulumRuntime, 'queryNomadLinkStatus')
-      .mockResolvedValue({ active: false, identified: false });
     render(NomadNetView);
 
     await fireEvent.click(screen.getByRole('button', { name: /Auto-identify history page/ }));
@@ -1948,16 +2148,14 @@ describe('NomadNetView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
     expect(screen.getByText('Auto-identified history page')).toBeInTheDocument();
     expect(screen.getByRole('button', {
-      name: 'Identity shared with this destination',
+      name: 'Identity sharing active for this destination',
     })).toBeDisabled();
-    expect(queryLinkStatus).not.toHaveBeenCalled();
 
     await fireEvent.click(screen.getByRole('button', { name: /Other history node/ }));
     expect(await screen.findByText('Other history page')).toBeInTheDocument();
     nomadBookmarks.set([]);
     await fireEvent.click(screen.getByRole('button', { name: 'Back one page' }));
 
-    await waitFor(() => expect(queryLinkStatus).toHaveBeenCalledWith(identifiedHash));
     await waitFor(() => expect(screen.getByRole('button', {
       name: 'Share identity with this page',
     })).toBeEnabled());

@@ -12,6 +12,7 @@ import {
   knownDestinations,
   localDestinationInventory,
   nomadBookmarks,
+  nomadLinkStatuses,
   pathTableEntries,
   propagationSyncActive,
   propagationSyncStatus,
@@ -62,6 +63,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     blockedChatDestinations.set([]);
     provisioningBookmarks.set([]);
     nomadBookmarks.set([]);
+    nomadLinkStatuses.set({});
     reticulumLogs.set([]);
     remoteDestinationInventory.set([]);
     localDestinationInventory.set([]);
@@ -169,6 +171,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
       identityId: 'identity-1',
       destinationHash: 'a'.repeat(32),
       path: '/start',
+      identificationPolicy: 'never',
       label: 'Old name',
       createdAt: '2026-07-16T10:00:00.000Z',
     }]);
@@ -178,7 +181,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
       previousId,
       editedAddress,
       '  New name  ',
-      true,
+      'bookmark',
     )).toBe(true);
 
     const updated = expect.objectContaining({
@@ -187,7 +190,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
       destinationHash: 'b'.repeat(32),
       path: '/page/edited.mu',
       requestData: { var_c: 'heap' },
-      identifyBeforeLoad: true,
+      identificationPolicy: 'bookmark',
       label: 'New name',
     });
     expect(replaceBookmark).toHaveBeenCalledWith(previousId, updated);
@@ -197,7 +200,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
       `identity-1:${editedAddress}`,
       editedAddress,
       '   ',
-      false,
+      'never',
     )).toBe(false);
     expect(replaceBookmark).toHaveBeenCalledOnce();
   });
@@ -667,28 +670,25 @@ describe('ReticulumRuntimeController chat deletion', () => {
     await expect(pending).resolves.toBe(true);
   });
 
-  it('queries whether a NomadNet link is active and identified', async () => {
+  it('tracks authoritative NomadNet link status changes from the worker', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
-    const postMessage = vi.fn();
-    internals.worker = { postMessage };
     const destinationHash = '4'.repeat(32);
 
-    const pending = reticulumRuntime.queryNomadLinkStatus(destinationHash);
-    const command = postMessage.mock.calls[0][0] as { requestId: string };
-
-    expect(postMessage).toHaveBeenCalledWith({
-      type: 'queryNomadLinkStatus',
-      requestId: command.requestId,
-      destinationHash,
-    });
-
     await internals.handleEvent({
-      type: 'nomadLinkStatus',
-      requestId: command.requestId,
+      type: 'nomadLinkStatusChanged',
+      destinationHash,
       active: true,
       identified: true,
     });
-    await expect(pending).resolves.toEqual({ active: true, identified: true });
+    expect(get(nomadLinkStatuses)[destinationHash]).toEqual({ active: true, identified: true });
+
+    await internals.handleEvent({
+      type: 'nomadLinkStatusChanged',
+      destinationHash,
+      active: false,
+      identified: false,
+    });
+    expect(get(nomadLinkStatuses)[destinationHash]).toEqual({ active: false, identified: false });
   });
 
   it('leaves NomadNet identity lookup to the worker after the active identity changes', async () => {
