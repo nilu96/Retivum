@@ -75,7 +75,7 @@ describe('OnboardingView', () => {
       defaultAppPreferences,
       [expect.objectContaining({ name: 'Home relay', enabled: false })],
     );
-    const configuredInterface = screen.getByRole('button', { name: 'Edit Home relay' });
+    const configuredInterface = screen.getByRole('button', { name: 'Edit Home relay (WebSocket)' });
     expect(configuredInterface).toHaveTextContent('Interface configuration saved');
     expect(screen.getByRole('button', { name: 'Next' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: 'Skip for now' })).not.toBeInTheDocument();
@@ -87,7 +87,7 @@ describe('OnboardingView', () => {
     await fireEvent.input(editedName, { target: { value: 'Updated relay' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Updated relay' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit Updated relay (WebSocket)' })).toBeInTheDocument());
     expect(saveInterface).toHaveBeenCalledTimes(2);
     expect(applyConfiguration).toHaveBeenLastCalledWith(
       defaultAppPreferences,
@@ -98,7 +98,7 @@ describe('OnboardingView', () => {
     await fireEvent.input(screen.getByLabelText('Name'), { target: { value: 'TCP relay' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit TCP relay' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Edit TCP relay (TCP)' })).toBeInTheDocument());
     const appliedInterfaces = applyConfiguration.mock.lastCall?.[1];
     expect(appliedInterfaces).toHaveLength(2);
     expect(appliedInterfaces).toEqual(expect.arrayContaining([

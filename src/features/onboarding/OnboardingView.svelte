@@ -184,12 +184,15 @@
                 <button
                   type="button"
                   class="onboarding-interface-type configured"
-                  aria-label={$t('onboarding.interface.edit', { name: configuredInterface.name })}
+                  aria-label={$t('onboarding.interface.edit', {
+                    name: configuredInterface.name,
+                    type: $t(descriptor.title),
+                  })}
                   onclick={() => { openInterfaceEditor(descriptor.type, configuredInterface); }}
                 >
                   <span class="interface-type-icon"><Icon name="check" size={19} /></span>
                   <span>
-                    <strong>{configuredInterface.name}</strong>
+                    <strong>{configuredInterface.name} ({$t(descriptor.title)})</strong>
                     <small>{$t('onboarding.interface.saved')}</small>
                   </span>
                   <Icon name="edit" size={17} />

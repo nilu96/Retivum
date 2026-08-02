@@ -921,7 +921,7 @@
   "onboarding.interface.title": "Connect to Reticulum",
   "onboarding.interface.description": "Choose the interface that matches how you want to reach the network.",
   "onboarding.interface.saved": "Interface configuration saved",
-  "onboarding.interface.edit": "Edit {name}",
+  "onboarding.interface.edit": "Edit {name} ({type})",
   "onboarding.interface.disabledCounts": "Saving an interface completes setup even if you leave it disabled. You can change it later in Settings.",
   "onboarding.ready.step": "Start using Reticulum",
   "onboarding.ready.stepDescription": "You're ready to go",
