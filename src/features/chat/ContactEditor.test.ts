@@ -14,6 +14,25 @@ describe('ContactEditor', () => {
   });
 
   for (const mode of ['add', 'edit'] as const) {
+    it(`disables Save without showing an empty-name error in the ${mode} contact dialog`, async () => {
+      render(ContactEditor, {
+        address: destinationHash,
+        currentName: '',
+        mode,
+        oncancel: vi.fn(),
+        onsave: vi.fn().mockResolvedValue(true),
+      });
+
+      const save = screen.getByRole('button', { name: 'Save' });
+      expect(save).toBeDisabled();
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+      await fireEvent.input(screen.getByRole('textbox', { name: /Contact name/ }), {
+        target: { value: 'Alice' },
+      });
+      expect(save).toBeEnabled();
+    });
+
     it(`copies the destination hash from the ${mode} contact dialog`, async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);
       clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');

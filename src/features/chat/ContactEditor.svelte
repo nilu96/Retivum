@@ -84,9 +84,6 @@
         <input bind:value={name} maxlength="128" autocomplete="nickname" />
         <small>{$t('chat.contact.name.help')}</small>
       </label>
-      {#if !name.trim()}
-        <div class="validation-summary" role="alert"><p>{$t('chat.contact.name.required')}</p></div>
-      {/if}
       <footer>
         <button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button>
         <button class="button primary" type="submit" disabled={saving || !name.trim()}>

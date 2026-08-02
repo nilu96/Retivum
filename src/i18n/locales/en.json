@@ -241,7 +241,6 @@
   "chat.contact.copyDisplayName": "Copy announced name",
   "chat.contact.name": "Contact name",
   "chat.contact.name.help": "This name is stored locally and is not shared over Reticulum.",
-  "chat.contact.name.required": "Enter a contact name.",
   "chat.contact.saveError": "The contact could not be saved.",
   "chat.contact.delete": "Delete contact {name}",
   "chat.contact.deleteError": "The contact could not be deleted.",
