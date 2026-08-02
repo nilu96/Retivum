@@ -11,7 +11,7 @@ import {
 } from '../../domain/interface-announce';
 
 describe('Leviculum interface-up announcement contract', () => {
-  it.skip('suppresses all implicit announces before Retivum creates an enriched announce', async () => {
+  it('reannounces only destinations that were explicitly announced before the interface came online', async () => {
     const wasm = await readFile(new URL('../../../leviculum_wasm/leviculum_wasm_bg.wasm', import.meta.url));
     await initWasm({ module_or_path: wasm });
     const generated = ReticulumNode.generateIdentity() as {
@@ -31,7 +31,7 @@ describe('Leviculum interface-up announcement contract', () => {
         propagationDestinationHash: Uint8Array;
       };
       const runtimeId = node.addInterface({ name: 'test', mode: 'full' });
-      const output = node.setInterfaceOnline(runtimeId, true) as {
+      const initialOutput = node.setInterfaceOnline(runtimeId, true) as {
         actions: Array<{
           packet: {
             packetType?: string;
@@ -41,7 +41,31 @@ describe('Leviculum interface-up announcement contract', () => {
       };
       const deliveryHash = Buffer.from(lxmf.deliveryDestinationHash).toString('hex');
       const propagationHash = Buffer.from(lxmf.propagationDestinationHash).toString('hex');
-      const actionsByHash = new Map(output.actions.map((action) => [
+      const initialActionsByHash = new Map(initialOutput.actions.map((action) => [
+        announcePacketDestinationHash(action.packet),
+        action,
+      ]));
+
+      expect(initialActionsByHash.has(deliveryHash)).toBe(false);
+      expect(initialActionsByHash.has(propagationHash)).toBe(false);
+
+      node.announceLxmf({
+        displayName: 'Retivum',
+        stampCost: 8,
+        compressionSupported: true,
+        interfaceIndex: runtimeId,
+      });
+      node.announce(lxmf.propagationDestinationHash);
+      node.setInterfaceOnline(runtimeId, false);
+      const reconnectOutput = node.setInterfaceOnline(runtimeId, true) as {
+        actions: Array<{
+          packet: {
+            packetType?: string;
+            destinationHash?: Uint8Array | number[];
+          };
+        }>;
+      };
+      const actionsByHash = new Map(reconnectOutput.actions.map((action) => [
         announcePacketDestinationHash(action.packet),
         action,
       ]));
