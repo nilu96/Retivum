@@ -136,7 +136,7 @@ describe('chatConversationSummaries', () => {
     expect(chatMessageProgressStatus('sent', 1, 'opportunisticPacket')).toBe('sending');
     expect(chatMessageProgressStatus('sending', 1, 'directResource')).toBe('sending');
     expect(chatMessageProgressStatus('outbound', 2, 'directPacket')).toBe('sending');
-    expect(chatMessageProgressStatus('outbound', 0, 'directPacket')).toBe('queued');
+    expect(chatMessageProgressStatus('outbound', 0, 'directPacket')).toBe('sending');
   });
 
   it('never presents a direct-link message as sent without proof', () => {

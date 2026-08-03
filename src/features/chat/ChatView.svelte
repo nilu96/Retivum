@@ -1597,8 +1597,31 @@
                 {/if}
                 {#if chatMessageDirection(message) === 'outgoing' && displayStatus}
                   <span class:failed={displayStatus === 'failed'}>
-                    {#if displayStatus === 'sending' && message.attempts !== undefined && message.maxAttempts !== undefined}
-                      {$t('chat.message.status.sendingAttempt', { attempt: message.attempts, max: message.maxAttempts })}
+                    {#if message.propagationFallback === true && displayStatus === 'queued'}
+                      {$t('chat.message.status.propagationFallbackQueued')}
+                    {:else if message.propagationFallback === true
+                      && displayStatus === 'sending'
+                      && message.attempts !== undefined
+                      && message.attempts > 0
+                      && message.maxAttempts !== undefined}
+                      {$t('chat.message.status.propagationFallbackSendingAttempt', {
+                        attempt: message.attempts,
+                        max: message.maxAttempts,
+                      })}
+                    {:else if message.propagationFallback === true && displayStatus === 'sending'}
+                      {$t('chat.message.status.propagationFallbackSending')}
+                    {:else if message.propagationFallback === true && displayStatus === 'sent'}
+                      {$t('chat.message.status.propagationFallbackSent')}
+                    {:else if message.propagationFallback === true && displayStatus === 'failed'}
+                      {$t('chat.message.status.propagationFallbackFailed')}
+                    {:else if displayStatus === 'sending'
+                      && message.attempts !== undefined
+                      && message.attempts > 0
+                      && message.maxAttempts !== undefined}
+                      {$t('chat.message.status.sendingAttempt', {
+                        attempt: message.attempts,
+                        max: message.maxAttempts,
+                      })}
                     {:else if displayStatus === 'sent' && message.method === 'propagated'}
                       {$t('chat.message.status.sentToPropagationNode')}
                     {:else}

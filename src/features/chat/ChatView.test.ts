@@ -970,10 +970,43 @@ describe('ChatView', () => {
     render(ChatView);
 
     await fireEvent.click(screen.getByRole('button', { name: /Status message/ }));
-    expect(screen.getByText('Sending — attempt 2/5')).toBeInTheDocument();
+    expect(screen.getByText('Sending (attempt 2/5)')).toBeInTheDocument();
+
+    chatMessages.set([{ ...outbound, attempts: 0 }]);
+    expect(await screen.findByText('Sending')).toBeInTheDocument();
+
+    chatMessages.set([{ ...outbound, status: 'queued', attempts: undefined, maxAttempts: undefined }]);
+    expect(await screen.findByText('Queued')).toBeInTheDocument();
+
+    chatMessages.set([{
+      ...outbound,
+      status: 'sending',
+      attempts: 0,
+      propagationFallback: true,
+      method: 'propagated',
+    }]);
+    expect(await screen.findByText('Propagation fallback — sending')).toBeInTheDocument();
+
+    chatMessages.set([{
+      ...outbound,
+      status: 'queued',
+      attempts: undefined,
+      maxAttempts: undefined,
+      propagationFallback: true,
+      method: 'propagated',
+    }]);
+    expect(await screen.findByText('Propagation fallback — queued')).toBeInTheDocument();
 
     chatMessages.set([{ ...outbound, status: 'sent', method: 'propagated' }]);
     expect(await screen.findByText('Sent to propagation node')).toBeInTheDocument();
+
+    chatMessages.set([{
+      ...outbound,
+      status: 'sent',
+      propagationFallback: true,
+      method: 'propagated',
+    }]);
+    expect(await screen.findByText('Propagation fallback — sent')).toBeInTheDocument();
   });
 
   it('shows attachment upload and inbound resource progress with sizes', async () => {

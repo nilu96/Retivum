@@ -119,6 +119,9 @@ const maxCachedNomadLinks = 32;
 const maxPendingInboundResourceAdvertisements = 64;
 const nomadLinkIdleTtlMs = 30 * 60 * 1_000;
 const automaticAnnounceRetryDelayMs = 30_000;
+// Match Leviculum's cooperative-stamper default. Smaller batches spend too
+// much of cost-16 stamp generation waiting on browser/WebView timers.
+const lxmfStampYieldEvery = 64;
 
 interface NomadPageJob {
   requestId: string;
@@ -1507,6 +1510,7 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
     verification: 'valid',
     ...(stamp ? { stamp } : {}),
     path: currentChatMessagePath(destinationHash),
+    propagationFallback: isPropagationFallback,
     propagationFallbackPending: !isPropagationFallback && attempt.method !== 'propagated' && deliveryPlan.tryPropagation,
     replacesMessageId: command.replacesMessageId,
     timestamp: attempt.timestamp,
@@ -3672,7 +3676,11 @@ async function generateDeliveryStamp(event: Record<string, unknown>): Promise<vo
   await stampWork.run(`delivery:${messageIdHex}:${targetCost}`, async () => {
     let stamp: Uint8Array;
     try {
-      stamp = await ReticulumNode.generateLxmfStamp(messageId, targetCost, 8);
+      stamp = await ReticulumNode.generateLxmfStamp(
+        messageId,
+        targetCost,
+        lxmfStampYieldEvery,
+      );
     } catch (error) {
       log('error', 'wasm', 'LXMF_STAMP_GENERATION_FAILED', {
         messageId: messageIdHex,
@@ -3701,7 +3709,12 @@ async function validateInboundStamp(event: Record<string, unknown>): Promise<voi
   await stampWork.run(key, async () => {
     let valid: boolean;
     try {
-      valid = await ReticulumNode.validateLxmfStamp(messageId, stamp, targetCost, 8);
+      valid = await ReticulumNode.validateLxmfStamp(
+        messageId,
+        stamp,
+        targetCost,
+        lxmfStampYieldEvery,
+      );
     } catch (error) {
       log('error', 'wasm', 'LXMF_INBOUND_STAMP_VALIDATION_FAILED', {
         messageId: messageIdHex,
@@ -3730,7 +3743,11 @@ async function generatePropagationStamp(event: Record<string, unknown>): Promise
   await stampWork.run(key, async () => {
     let stamp: Uint8Array;
     try {
-      stamp = await ReticulumNode.generateLxmfPropagationStamp(transientId, targetCost, 8);
+      stamp = await ReticulumNode.generateLxmfPropagationStamp(
+        transientId,
+        targetCost,
+        lxmfStampYieldEvery,
+      );
     } catch (error) {
       log('error', 'wasm', 'LXMF_PROPAGATION_STAMP_GENERATION_FAILED', {
         messageId: messageIdHex,

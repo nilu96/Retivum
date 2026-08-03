@@ -1547,6 +1547,7 @@ class ReticulumRuntimeController {
         stamp: event.stamp,
         direction: 'outgoing',
         status: 'queued',
+        propagationFallback: event.propagationFallback,
         propagationFallbackPending: event.propagationFallbackPending,
         timestamp: event.timestamp,
         receivedAt: event.queuedAt,

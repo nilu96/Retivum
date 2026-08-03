@@ -969,6 +969,98 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(persist).toHaveBeenCalledWith(expect.objectContaining({ path }));
   });
 
+  it('keeps live outbound progress sending while its attempt counter advances', async () => {
+    const destinationHash = 'c'.repeat(32);
+    chatMessages.set([{
+      id: 'identity-1:retry-progress',
+      identityId: 'identity-1',
+      messageId: 'retry-progress',
+      sourceHash: 'e'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Retry status',
+      direction: 'outgoing',
+      status: 'queued',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    vi.spyOn(internals.chatRepository, 'saveMessage').mockResolvedValue();
+    const progress = (state: string, attempts: number) => internals.handleEvent({
+      type: 'chatMessageProgress',
+      identityId: 'identity-1',
+      messageId: 'retry-progress',
+      state,
+      method: 'direct',
+      representation: 'directPacket',
+      attempts,
+      maxAttempts: 5,
+      progress: 0.01,
+    });
+
+    await progress('outbound', 0);
+    expect(get(chatMessages)[0]).toMatchObject({ status: 'sending', attempts: 0 });
+
+    await progress('sending', 0);
+    expect(get(chatMessages)[0]).toMatchObject({ status: 'sending', attempts: 0 });
+
+    await progress('outbound', 0);
+    expect(get(chatMessages)[0]).toMatchObject({ status: 'sending', attempts: 0 });
+
+    await progress('outbound', 1);
+    expect(get(chatMessages)[0]).toMatchObject({ status: 'sending', attempts: 1 });
+
+    await progress('sending', 1);
+    expect(get(chatMessages)[0]).toMatchObject({ status: 'sending', attempts: 1 });
+  });
+
+  it('marks the replacement delivery as an explicit propagation fallback', async () => {
+    const destinationHash = 'c'.repeat(32);
+    chatMessages.set([{
+      id: 'identity-1:failed-direct',
+      identityId: 'identity-1',
+      messageId: 'failed-direct',
+      sourceHash: 'e'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Fallback status',
+      direction: 'outgoing',
+      status: 'failed',
+      method: 'direct',
+      receivedAt: '2026-07-16T10:00:00.000Z',
+    }]);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const replace = vi.spyOn(internals.chatRepository, 'replaceMessage').mockResolvedValue();
+
+    await internals.handleEvent({
+      type: 'chatMessageQueued',
+      requestId: 'fallback-request',
+      identityId: 'identity-1',
+      messageId: 'propagated-replacement',
+      sourceHash: 'e'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Fallback status',
+      method: 'propagated',
+      propagationFallback: true,
+      propagationFallbackPending: false,
+      replacesMessageId: 'failed-direct',
+      timestamp: 1_752_660_000,
+      queuedAt: '2026-07-16T10:01:00.000Z',
+    });
+
+    expect(get(chatMessages)).toEqual([expect.objectContaining({
+      messageId: 'propagated-replacement',
+      method: 'propagated',
+      status: 'queued',
+      propagationFallback: true,
+      propagationFallbackPending: false,
+    })]);
+    expect(replace).toHaveBeenCalledWith(
+      'identity-1:failed-direct',
+      expect.objectContaining({ propagationFallback: true }),
+    );
+  });
+
   it('persists a block and cancels pending outbound deliveries for that destination', async () => {
     const destinationHash = 'c'.repeat(32);
     chatMessages.set([{
@@ -1125,6 +1217,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
           content: '',
           attachments: [attachment],
           method: 'direct',
+          propagationFallback: false,
           propagationFallbackPending: false,
           timestamp: 1_752_660_000,
           queuedAt: '2026-07-16T10:00:00.000Z',
@@ -1199,6 +1292,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
       content: '',
       attachments: [attachment],
       method: 'direct',
+      propagationFallback: false,
       propagationFallbackPending: false,
       replacesMessageId: 'failed-opportunistic',
       timestamp: 1_752_660_100,

@@ -92,6 +92,7 @@ export interface ChatMessage {
   progress?: number;
   representation?: ChatDeliveryRepresentation;
   sentUnconfirmed?: boolean;
+  propagationFallback?: boolean;
   propagationFallbackPending?: boolean;
   timestamp?: number;
   receivedAt: string;
@@ -168,7 +169,7 @@ export function chatMessageStatusForState(
 
 export function chatMessageProgressStatus(
   state: string,
-  attempts: number,
+  _attempts: number,
   representation: ChatDeliveryRepresentation,
 ): ChatMessageStatus {
   if (state === 'delivered') return 'delivered';
@@ -182,8 +183,10 @@ export function chatMessageProgressStatus(
     return 'sending';
   }
   if (state === 'sent') return 'sent';
-  if (state === 'sending' || attempts > 0) return 'sending';
-  return 'queued';
+  // A queued ChatMessage has not produced a live router snapshot yet. Once
+  // progress arrives, keep the presentation in Sending and let the attempt
+  // counter advance without bouncing through inferred intermediate states.
+  return 'sending';
 }
 
 export function chatDeliveryRepresentation(value: string): ChatDeliveryRepresentation | undefined {

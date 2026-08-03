@@ -315,6 +315,7 @@ export type RuntimeEvent =
       verification?: string;
       stamp?: ChatMessageStamp;
       path?: ChatMessagePathSnapshot;
+      propagationFallback: boolean;
       propagationFallbackPending: boolean;
       replacesMessageId?: string;
       timestamp: number;
