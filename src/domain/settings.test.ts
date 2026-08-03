@@ -216,7 +216,7 @@ describe('LXMF delivery preferences', () => {
     expect(normalizeDestinationHash('invalid')).toBeUndefined();
   });
 
-  it('retains propagated delivery and locks propagation on while normalizing preferences', () => {
+  it('retains propagated delivery without overriding the propagation fallback preference', () => {
     expect(normalizeAppPreferences({
       schemaVersion: 1,
       transportEnabled: true,
@@ -227,6 +227,9 @@ describe('LXMF delivery preferences', () => {
       schemaVersion: 9,
       lxmf: { defaultDeliveryMethod: 'propagated', propagationEnabled: true, propagationNodeHash: hash },
     });
+    expect(normalizeAppPreferences({
+      lxmf: { defaultDeliveryMethod: 'propagated', propagationEnabled: false },
+    }).lxmf.propagationEnabled).toBe(false);
   });
 
   it('normalizes chat notification, image handling, and message retention preferences', () => {

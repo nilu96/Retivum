@@ -234,8 +234,8 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
       defaultDeliveryMethod: legacyMethod === 'opportunistic' || legacyMethod === 'propagated' ? legacyMethod : 'direct',
       acceptMessagesFromContactsOnly: source.lxmf?.acceptMessagesFromContactsOnly === true,
       propagationEnabled: typeof source.lxmf?.propagationEnabled === 'boolean'
-        ? source.lxmf.propagationEnabled || legacyMethod === 'propagated'
-        : defaultAppPreferences.lxmf.propagationEnabled || legacyMethod === 'propagated',
+        ? source.lxmf.propagationEnabled
+        : defaultAppPreferences.lxmf.propagationEnabled,
       propagationNodeHash,
       inboundStampCost: normalizeInboundStampCost(source.lxmf?.inboundStampCost),
       propagationSyncIntervalMinutes: normalizePropagationSyncInterval(source.lxmf?.propagationSyncIntervalMinutes),

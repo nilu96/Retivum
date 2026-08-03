@@ -165,6 +165,40 @@ describe('SettingsView blocked destinations', () => {
     expect(screen.queryByText('4'.repeat(32))).not.toBeInTheDocument();
   });
 
+  it('disables propagation fallback when propagated delivery is the default', async () => {
+    render(SettingsView);
+
+    const deliveryMethod = screen.getByRole('combobox', { name: /Default sending method/ });
+    const propagationFallback = screen.getByRole('switch', { name: /Use propagation fallback/ });
+    const fallbackRow = propagationFallback.closest('.lxmf-propagation-toggle');
+    expect(propagationFallback).toBeEnabled();
+    expect(propagationFallback).toBeChecked();
+    expect(fallbackRow).not.toHaveClass('disabled');
+
+    await fireEvent.change(deliveryMethod, { target: { value: 'propagated' } });
+
+    expect(propagationFallback).toBeDisabled();
+    expect(propagationFallback).not.toBeChecked();
+    expect(fallbackRow).toHaveClass('disabled');
+    expect(fallbackRow).toHaveTextContent(
+      'Not applicable while Propagated is the default sending method.',
+    );
+
+    await fireEvent.change(deliveryMethod, { target: { value: 'direct' } });
+
+    expect(propagationFallback).toBeEnabled();
+    expect(propagationFallback).toBeChecked();
+    expect(fallbackRow).not.toHaveClass('disabled');
+
+    await fireEvent.click(propagationFallback);
+    expect(propagationFallback).not.toBeChecked();
+    await fireEvent.change(deliveryMethod, { target: { value: 'propagated' } });
+    await fireEvent.change(deliveryMethod, { target: { value: 'direct' } });
+
+    expect(propagationFallback).not.toBeChecked();
+    expect(fallbackRow).not.toHaveClass('disabled');
+  });
+
   it('adds one or more blocked destination hashes from the settings dialog', async () => {
     const blockDestination = vi.spyOn(reticulumRuntime, 'blockChatDestination').mockResolvedValue(true);
     render(SettingsView);

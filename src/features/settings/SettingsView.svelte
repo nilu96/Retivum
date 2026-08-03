@@ -16,7 +16,6 @@
     MIN_CHAT_IMAGE_LONG_EDGE,
     normalizeChatImageLongEdge,
     normalizeDestinationHash,
-    propagationIsActive,
     sortInterfaceConfigurations,
     type AppPreferences,
     type ImageDownscalingMode,
@@ -163,7 +162,6 @@
 
   function changeDeliveryMethod(method: LxmfDeliveryMethod): void {
     preferences.lxmf.defaultDeliveryMethod = method;
-    if (method === 'propagated') preferences.lxmf.propagationEnabled = true;
     void persistPreferences();
   }
 
@@ -687,17 +685,22 @@
               {$t(propagationNodeInvalid ? 'settings.lxmf.propagationNode.invalid' : 'settings.lxmf.propagationNode.help')}
             </small>
           </div>
-          <label class="toggle-row propagation-toggle delivery-toggle lxmf-propagation-toggle">
+          <label
+            class="toggle-row propagation-toggle delivery-toggle lxmf-propagation-toggle"
+            class:disabled={preferences.lxmf.defaultDeliveryMethod === 'propagated'}
+          >
             <span>
               <strong>{$t('settings.lxmf.propagationEnabled')}</strong>
-              <small>{$t(propagationIsActive(preferences.lxmf)
-                ? 'settings.lxmf.propagation.status.active'
-                : 'settings.lxmf.propagation.status.disabled')}</small>
+              <small>{$t(preferences.lxmf.defaultDeliveryMethod === 'propagated'
+                ? 'settings.lxmf.propagation.status.default'
+                : preferences.lxmf.propagationEnabled
+                  ? 'settings.lxmf.propagation.status.active'
+                  : 'settings.lxmf.propagation.status.disabled')}</small>
             </span>
             <input
               type="checkbox"
               role="switch"
-              checked={preferences.lxmf.propagationEnabled || preferences.lxmf.defaultDeliveryMethod === 'propagated'}
+              checked={preferences.lxmf.defaultDeliveryMethod !== 'propagated' && preferences.lxmf.propagationEnabled}
               disabled={preferences.lxmf.defaultDeliveryMethod === 'propagated'}
               onchange={(event) => {
                 preferences.lxmf.propagationEnabled = event.currentTarget.checked;

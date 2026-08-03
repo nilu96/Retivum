@@ -888,6 +888,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .field.full-span { grid-column: 1 / -1; }
 .propagation-toggle { min-height: 74px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-2); }
 .propagation-toggle small { max-width: 440px; }
+.propagation-toggle.disabled { opacity: .55; cursor: not-allowed; }
+.propagation-toggle.disabled input { cursor: not-allowed; }
 .lxmf-settings-grid { column-gap: 16px; row-gap: 16px; }
 .lxmf-settings-column { display: grid; min-width: 0; align-content: start; gap: 16px; }
 
