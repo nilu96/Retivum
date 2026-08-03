@@ -1482,14 +1482,14 @@
             </span>
           </span>
         </button>
-        <button
-          class="icon-button conversation-block-button"
-          class:blocked={selectedDestinationBlocked}
-          disabled={blockActionPending}
-          title={$t(selectedDestinationBlocked ? 'chat.unblock.action' : 'chat.block.action')}
-          aria-label={$t(selectedDestinationBlocked ? 'chat.unblock.action' : 'chat.block.action')}
-          onclick={() => setDestinationBlocked(selectedDestination!, !selectedDestinationBlocked)}
-        ><Icon name="block" size={17} /></button>
+        {#if selectedDestinationBlocked}
+          <span
+            class="conversation-block-indicator"
+            role="img"
+            title={$t('path.blocked')}
+            aria-label={$t('path.blocked')}
+          ><Icon name="block" size={20} /></span>
+        {/if}
         <button
           class="icon-button chat-sync-button mobile-conversation-sync-button"
           class:syncing={propagationSyncing}

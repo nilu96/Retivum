@@ -1716,14 +1716,21 @@ describe('ChatView', () => {
 
     await fireEvent.click(row);
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeDisabled();
-    const unblockButton = screen.getByRole('button', { name: 'Unblock destination' });
-    expect(unblockButton).toHaveClass('blocked');
+    const conversationHeader = document.querySelector('.conversation-header');
+    expect(conversationHeader).not.toBeNull();
+    expect(within(conversationHeader as HTMLElement).getByRole('img', { name: 'Blocked destination' }))
+      .toHaveClass('conversation-block-indicator');
+    expect(within(conversationHeader as HTMLElement).queryByRole('button', { name: 'Unblock destination' }))
+      .not.toBeInTheDocument();
 
-    await fireEvent.click(unblockButton);
+    const conversationPeer = within(conversationHeader as HTMLElement).getByRole('button', { name: /contact/ });
+    await fireEvent.contextMenu(conversationPeer, { clientX: 100, clientY: 100 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Unblock destination' }));
     expect(unblock).toHaveBeenCalledWith(destinationHash);
-    const blockButton = await screen.findByRole('button', { name: 'Block destination' });
-    expect(blockButton).not.toHaveClass('blocked');
-    expect(blockButton).not.toHaveClass('danger');
+    expect(within(conversationHeader as HTMLElement).queryByRole('img', { name: 'Blocked destination' }))
+      .not.toBeInTheDocument();
+    expect(within(conversationHeader as HTMLElement).queryByRole('button', { name: 'Block destination' }))
+      .not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Message' })).toBeEnabled();
   });
 

@@ -453,8 +453,7 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
   .conversation-peer { -webkit-tap-highlight-color: transparent; }
   .conversation-peer:active { background: var(--surface-hover); }
 }
-.conversation-block-button { flex: none; }
-.conversation-block-button.blocked { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.conversation-block-indicator { display: inline-flex; flex: none; align-items: center; justify-content: center; color: var(--danger); }
 .conversation-back { display: none; flex: none; transform: rotate(180deg); }
 .message-feed-region { position: relative; min-width: 0; min-height: 0; }
 .message-feed { width: 100%; height: 100%; min-height: 0; padding: 22px; overflow: auto; }
@@ -1642,22 +1641,6 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .icon-button.conversation-block-button,
-  .icon-button.conversation-block-button:hover:not(:disabled),
-  .icon-button.conversation-block-button:active:not(:disabled) {
-    border-color: var(--border);
-    color: inherit;
-    background: var(--surface-2);
-    transform: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .icon-button.conversation-block-button.blocked,
-  .icon-button.conversation-block-button.blocked:hover:not(:disabled),
-  .icon-button.conversation-block-button.blocked:active:not(:disabled) {
-    border-color: var(--danger);
-    color: var(--danger);
-    background: var(--danger-soft);
-  }
   .icon-button.chat-sync-button,
   .icon-button.chat-sync-button:hover:not(:active) {
     border-color: var(--border);
