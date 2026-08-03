@@ -923,27 +923,32 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .chat-settings-grid {
     grid-template-areas:
       'image-mode max-edge'
-      'notifications retention';
+      'notifications retention'
+      'contacts-only .';
   }
   .chat-image-downscaling-mode { grid-area: image-mode; }
   .chat-image-max-edge { grid-area: max-edge; }
   .chat-notification-mode { grid-area: notifications; }
   .chat-message-retention { grid-area: retention; }
+  .chat-contacts-only { grid-area: contacts-only; }
   .lxmf-settings-grid {
     grid-template-areas:
       'method interval'
-      'address sync-interval'
-      'propagation stamp-cost'
-      'contacts-only contacts-only';
+      'stamp-cost .';
   }
   .lxmf-settings-column { display: contents; }
   .lxmf-sending-method { grid-area: method; }
+  .lxmf-announcement-interval { grid-area: interval; }
+  .lxmf-stamp-cost { grid-area: stamp-cost; }
+  .lxmf-propagation-settings-grid {
+    grid-template-areas:
+      'address propagation'
+      'sync-interval sync-resume';
+  }
   .lxmf-propagation-toggle { grid-area: propagation; }
   .lxmf-propagation-address { grid-area: address; }
   .lxmf-propagation-sync-interval { grid-area: sync-interval; }
-  .lxmf-announcement-interval { grid-area: interval; }
-  .lxmf-stamp-cost { grid-area: stamp-cost; }
-  .lxmf-contacts-only { grid-area: contacts-only; }
+  .lxmf-propagation-sync-resume { grid-area: sync-resume; }
 }
 .about-card { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: start; gap: 13px; padding: 18px 20px; }
 .about-card-copy { display: grid; min-width: 0; gap: 7px; }

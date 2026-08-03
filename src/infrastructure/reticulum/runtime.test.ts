@@ -104,6 +104,22 @@ describe('ReticulumRuntimeController chat deletion', () => {
     expect(results).toEqual([{ received: 4, duplicates: 1, newMessages: 2 }]);
   });
 
+  it('queues resume synchronization as an automatic propagation request', () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+
+    expect(reticulumRuntime.requestAutomaticLxmfPropagationSync()).toBe(true);
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'syncLxmfPropagation',
+      requestId: expect.stringMatching(/^automatic:resume:/),
+    });
+
+    propagationSyncActive.set(true);
+    expect(reticulumRuntime.requestAutomaticLxmfPropagationSync()).toBe(false);
+    expect(postMessage).toHaveBeenCalledOnce();
+  });
+
   it('requires an explicit imported identity name without clearing the pending backup', async () => {
     const internals = reticulumRuntime as unknown as RuntimeInternals;
     const postMessage = vi.fn();

@@ -28,6 +28,7 @@ describe('BrowserSettingsRepository', () => {
     expect(initial.preferences.lxmf.defaultDeliveryMethod).toBe('direct');
     expect(initial.preferences.lxmf.propagationEnabled).toBe(true);
     expect(initial.preferences.lxmf.propagationSyncIntervalMinutes).toBe(0);
+    expect(initial.preferences.lxmf.propagationSyncOnResume).toBe(false);
     expect(initial.preferences.lxmf.autoAnnounceIntervalMinutes).toBe(360);
     expect(initial.preferences.chat).toEqual({
       inAppNotificationMode: 'all',

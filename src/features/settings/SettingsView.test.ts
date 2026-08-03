@@ -174,6 +174,16 @@ describe('SettingsView blocked destinations', () => {
     expect(propagationFallback).toBeEnabled();
     expect(propagationFallback).toBeChecked();
     expect(fallbackRow).not.toHaveClass('disabled');
+    expect(fallbackRow).toHaveTextContent(
+      'Send through a propagation node if direct or opportunistic delivery fails.',
+    );
+
+    await fireEvent.click(propagationFallback);
+    expect(propagationFallback).not.toBeChecked();
+    expect(fallbackRow).toHaveTextContent(
+      'Send through a propagation node if direct or opportunistic delivery fails.',
+    );
+    await fireEvent.click(propagationFallback);
 
     await fireEvent.change(deliveryMethod, { target: { value: 'propagated' } });
 
@@ -197,6 +207,34 @@ describe('SettingsView blocked destinations', () => {
 
     expect(propagationFallback).not.toBeChecked();
     expect(fallbackRow).not.toHaveClass('disabled');
+  });
+
+  it('groups propagation controls in their own section below LXMF settings', async () => {
+    render(SettingsView);
+
+    const syncOnResume = screen.getByRole('switch', { name: /Sync on app resume/ });
+    const propagationFallback = screen.getByRole('switch', { name: /Use propagation fallback/ });
+    const propagationNode = screen.getByRole('textbox', { name: /Preferred propagation node/ });
+    const syncInterval = screen.getByRole('combobox', { name: /Propagation sync interval/ });
+    const lxmfSection = screen.getByRole('heading', { name: 'LXMF settings' }).closest('.settings-card');
+    const propagationSection = screen.getByRole('heading', { name: 'LXMF Propagation' }).closest('.settings-card');
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+
+    expect(headings.indexOf('LXMF Propagation')).toBe(headings.indexOf('LXMF settings') + 1);
+    expect(propagationSection).toContainElement(syncOnResume);
+    expect(propagationSection).toContainElement(propagationFallback);
+    expect(propagationSection).toContainElement(propagationNode);
+    expect(propagationSection).toContainElement(syncInterval);
+    expect(lxmfSection).not.toContainElement(syncOnResume);
+    expect(syncOnResume).not.toBeChecked();
+    expect(syncOnResume.closest('label')).toHaveClass(
+      'propagation-toggle',
+      'lxmf-propagation-sync-resume',
+    );
+
+    await fireEvent.click(syncOnResume);
+
+    expect(syncOnResume).toBeChecked();
   });
 
   it('adds one or more blocked destination hashes from the settings dialog', async () => {
@@ -263,12 +301,15 @@ describe('SettingsView blocked destinations', () => {
     });
     const maximumEdge = screen.getByRole('spinbutton', { name: /Maximum image edge/ });
     const messageRetention = screen.getByRole('combobox', { name: /Delete old messages/ });
+    const contactsOnly = screen.getByRole('switch', { name: /Only accept messages from contacts/ });
     const chatSection = screen.getByRole('heading', { name: 'Chat' }).closest('.settings-card');
     expect(chatSection?.querySelector('.chat-settings-grid')).toHaveClass('two-column');
+    expect(chatSection).toContainElement(contactsOnly);
     expect(notifications.closest('.field')).toHaveClass('chat-notification-mode');
     expect(imageDownscaling.closest('.field')).toHaveClass('chat-image-downscaling-mode');
     expect(maximumEdge.closest('.field')).toHaveClass('chat-image-max-edge');
     expect(messageRetention.closest('.field')).toHaveClass('chat-message-retention');
+    expect(contactsOnly.closest('label')).toHaveClass('propagation-toggle', 'chat-contacts-only');
     expect(Array.from(chatSection?.querySelectorAll('.field') ?? []).map((field) => field.classList[1]))
       .toEqual([
         'chat-image-downscaling-mode',

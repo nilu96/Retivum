@@ -537,6 +537,15 @@ class ReticulumRuntimeController {
     });
   }
 
+  requestAutomaticLxmfPropagationSync(): boolean {
+    if (!this.worker || !get(activeIdentity) || get(propagationSyncActive)) return false;
+    this.post({
+      type: 'syncLxmfPropagation',
+      requestId: `automatic:resume:${crypto.randomUUID()}`,
+    });
+    return true;
+  }
+
   async sendChatMessage(
     destinationHash: string,
     content: string,

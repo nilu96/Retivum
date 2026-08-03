@@ -32,6 +32,7 @@ export interface LxmfPreferences {
   propagationNodeHash?: string;
   inboundStampCost: number;
   propagationSyncIntervalMinutes: PropagationSyncIntervalMinutes;
+  propagationSyncOnResume: boolean;
   autoAnnounceIntervalMinutes: AutoAnnounceIntervalMinutes;
 }
 
@@ -43,7 +44,7 @@ export interface ChatPreferences {
 }
 
 export interface AppPreferences {
-  schemaVersion: 9;
+  schemaVersion: 10;
   transportEnabled: boolean;
   theme: ThemePreference;
   locale: 'system' | 'en';
@@ -136,7 +137,7 @@ export const rnodeBandwidths = [
 const DEFAULT_INBOUND_STAMP_COST = 8;
 
 export const defaultAppPreferences: AppPreferences = {
-  schemaVersion: 9,
+  schemaVersion: 10,
   transportEnabled: false,
   theme: 'system',
   locale: 'system',
@@ -152,6 +153,7 @@ export const defaultAppPreferences: AppPreferences = {
     propagationEnabled: true,
     inboundStampCost: DEFAULT_INBOUND_STAMP_COST,
     propagationSyncIntervalMinutes: 0,
+    propagationSyncOnResume: false,
     autoAnnounceIntervalMinutes: 360,
   },
 };
@@ -207,6 +209,7 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
       propagationNodeHash?: unknown;
       inboundStampCost?: unknown;
       propagationSyncIntervalMinutes?: unknown;
+      propagationSyncOnResume?: unknown;
       autoAnnounceEnabled?: unknown;
       autoAnnounceIntervalMinutes?: unknown;
     };
@@ -217,7 +220,7 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
     : undefined;
   const legacyAutomaticImageDownscaling = source.automaticImageDownscaling === true;
   return {
-    schemaVersion: 9,
+    schemaVersion: 10,
     transportEnabled: source.transportEnabled === true,
     theme: source.theme === 'dark' || source.theme === 'light' ? source.theme : 'system',
     locale: source.locale === 'en' ? 'en' : 'system',
@@ -239,6 +242,7 @@ export function normalizeAppPreferences(value: unknown): AppPreferences {
       propagationNodeHash,
       inboundStampCost: normalizeInboundStampCost(source.lxmf?.inboundStampCost),
       propagationSyncIntervalMinutes: normalizePropagationSyncInterval(source.lxmf?.propagationSyncIntervalMinutes),
+      propagationSyncOnResume: source.lxmf?.propagationSyncOnResume === true,
       autoAnnounceIntervalMinutes: normalizeAutoAnnounceInterval(
         source.lxmf?.autoAnnounceIntervalMinutes,
         typeof source.lxmf?.autoAnnounceEnabled === 'boolean' ? source.lxmf.autoAnnounceEnabled : undefined,

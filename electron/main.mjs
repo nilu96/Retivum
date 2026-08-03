@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDeviceAccess } from './device-access.mjs';
 import { registerDesktopSockets } from './desktop-sockets.mjs';
 import { registerDesktopDatagrams } from './desktop-datagrams.mjs';
+import { installDesktopAppLifecycle } from './app-lifecycle.mjs';
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const rendererEntry = resolve(projectRoot, 'dist', 'index.html');
@@ -49,7 +50,9 @@ async function createWindow() {
   const disposeSockets = registerDesktopSockets(ipcMain, isTrustedRendererFrame);
   const disposeDatagrams = registerDesktopDatagrams(ipcMain, isTrustedRendererFrame);
   const disposeDevices = installDeviceAccess(window, ipcMain);
+  const disposeAppLifecycle = installDesktopAppLifecycle(window, powerMonitor);
   disposeDesktopIntegration = () => {
+    disposeAppLifecycle();
     disposeDevices();
     disposeDatagrams();
     disposeSockets();

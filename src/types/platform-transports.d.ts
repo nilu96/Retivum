@@ -107,9 +107,14 @@ interface RetivumDesktopDeviceBridge {
   onPairingRequest(listener: (request: DesktopBluetoothPairingRequest) => void): () => void;
 }
 
+interface RetivumDesktopLifecycleBridge {
+  onResume(listener: () => void): () => void;
+}
+
 interface Window {
   retivumDesktopSockets?: RetivumSocketBridge;
   retivumMobileSockets?: RetivumSocketBridge;
   retivumDesktopUdpSockets?: RetivumUdpSocketBridge;
   retivumDesktopDevices?: RetivumDesktopDeviceBridge;
+  retivumDesktopLifecycle?: RetivumDesktopLifecycleBridge;
 }

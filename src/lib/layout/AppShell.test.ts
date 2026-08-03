@@ -14,6 +14,7 @@ import {
   appPreferences,
   chatContacts,
   knownDestinations,
+  propagationSyncActive,
   reticulumRuntime,
   runtimeStatus,
 } from '../../infrastructure/reticulum/runtime';
@@ -29,11 +30,14 @@ describe('AppShell Chat unread indicator', () => {
   beforeEach(() => {
     markChatMessagesRead();
     runtimeStatus.set('offline');
+    propagationSyncActive.set(false);
     appPreferences.set(structuredClone(defaultAppPreferences));
     chatContacts.set([]);
     knownDestinations.set([]);
     navigationLayer.set(undefined);
     clearToasts();
+    delete document.documentElement.dataset.nativePlatform;
+    window.retivumDesktopLifecycle = undefined;
     vi.restoreAllMocks();
   });
 
@@ -410,6 +414,34 @@ describe('AppShell Chat unread indicator', () => {
       messageKey: 'chat.propagationSync.complete.many',
       parameters: { count: 3 },
     });
+  });
+
+  it('requests an automatic propagation sync when the app resumes and the preference is enabled', async () => {
+    let visibility: DocumentVisibilityState = 'visible';
+    vi.spyOn(document, 'visibilityState', 'get').mockImplementation(() => visibility);
+    const preferences = structuredClone(defaultAppPreferences);
+    preferences.lxmf.propagationSyncOnResume = true;
+    appPreferences.set(preferences);
+    const requestSync = vi.spyOn(reticulumRuntime, 'requestAutomaticLxmfPropagationSync')
+      .mockReturnValue(true);
+    render(AppShell, { current: 'tools', children: emptyChildren });
+
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+
+    expect(requestSync).not.toHaveBeenCalled();
+    runtimeStatus.set('online');
+    await waitFor(() => expect(requestSync).toHaveBeenCalledOnce());
+
+    preferences.lxmf.propagationSyncOnResume = false;
+    appPreferences.set(preferences);
+    visibility = 'hidden';
+    document.dispatchEvent(new Event('visibilitychange'));
+    visibility = 'visible';
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(requestSync).toHaveBeenCalledOnce();
   });
 
   it('limits foreground notifications to contacts when configured', () => {

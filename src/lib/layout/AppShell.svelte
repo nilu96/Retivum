@@ -16,6 +16,7 @@
     chatContacts,
     deliveryDestinationHash,
     knownDestinations,
+    propagationSyncActive,
     reticulumRuntime,
     runtimeStatus,
   } from '../../infrastructure/reticulum/runtime';
@@ -26,6 +27,7 @@
   } from '../../infrastructure/reticulum/chat-state';
   import IdentityAddressDialog from '../../features/identity/IdentityAddressDialog.svelte';
   import { dismissToastsByMessageKey, toast } from '../notifications/toasts';
+  import { listenForAppResume } from '../../infrastructure/platform/app-resume';
 
   let { current, children }: { current: AppRoute; children: Snippet } = $props();
 
@@ -72,6 +74,7 @@
   let appShellElement: HTMLDivElement | undefined;
   let mainContentElement: HTMLElement | undefined;
   let scrollResetRoute: AppRoute | undefined;
+  let resumePropagationSyncPending = $state(false);
   let mobileDragLatest: { x: number; y: number } | undefined;
   let mobileDragGrabOffset: { x: number; y: number } | undefined;
   let mobileDragOriginalSide: 'left' | 'right' = 'right';
@@ -123,6 +126,34 @@
       newMessages === 1 ? undefined : { count: newMessages },
     );
   }));
+
+  onMount(() => {
+    let disposed = false;
+    let disposeListener: (() => Promise<void>) | undefined;
+    void listenForAppResume(() => {
+      if ($appPreferences.lxmf.propagationSyncOnResume && !$propagationSyncActive) {
+        resumePropagationSyncPending = true;
+      }
+    }).then((dispose) => {
+      if (disposed) void dispose();
+      else disposeListener = dispose;
+    });
+    return () => {
+      disposed = true;
+      void disposeListener?.();
+    };
+  });
+
+  $effect(() => {
+    if (!$appPreferences.lxmf.propagationSyncOnResume) {
+      resumePropagationSyncPending = false;
+      return;
+    }
+    if (!resumePropagationSyncPending || $runtimeStatus !== 'online' || $propagationSyncActive) return;
+    if (reticulumRuntime.requestAutomaticLxmfPropagationSync()) {
+      resumePropagationSyncPending = false;
+    }
+  });
 
   $effect(() => {
     const routeToReset = current;

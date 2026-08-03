@@ -620,114 +620,6 @@
             </select>
             <small>{$t(`settings.lxmf.method.${preferences.lxmf.defaultDeliveryMethod}.help` as MessageKey)}</small>
           </label>
-          <div class="field lxmf-propagation-address">
-            <label for="preferred-propagation-node">{$t('settings.lxmf.propagationNode')}</label>
-            <div class="propagation-node-combobox" bind:this={propagationNodePicker}>
-              <input
-                id="preferred-propagation-node"
-                bind:value={propagationNodeDraft}
-                placeholder={$t('settings.lxmf.propagationNode.placeholder')}
-                autocapitalize="none"
-                autocomplete="off"
-                spellcheck="false"
-                aria-invalid={propagationNodeInvalid}
-                aria-autocomplete="list"
-                aria-controls="propagation-node-options"
-                aria-expanded={propagationNodeMenuOpen}
-                oninput={() => { propagationNodeInvalid = false; }}
-                onchange={persistPropagationNode}
-              />
-              <button
-                type="button"
-                class="propagation-node-menu-toggle"
-                aria-label={$t('settings.lxmf.propagationNode.openList')}
-                aria-haspopup="listbox"
-                aria-expanded={propagationNodeMenuOpen}
-                onclick={() => { propagationNodeMenuOpen = !propagationNodeMenuOpen; }}
-              ><Icon name="chevron-down" size={17} /></button>
-              {#if propagationNodeMenuOpen}
-                <div id="propagation-node-options" class="propagation-node-menu" role="listbox" aria-label={$t('settings.lxmf.propagationNode.list')}>
-                  {#if propagationDestinations.length === 0}
-                    <p>{$t('settings.lxmf.propagationNode.empty')}</p>
-                  {:else}
-                    {#each propagationDestinations as announced (announced.destinationHash)}
-                      {@const metadata = announced.metadata!}
-                      {@const hops = $destinationPathStatuses[announced.destinationHash]?.hops}
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={propagationNodeDraft === announced.destinationHash}
-                        disabled={!metadata.enabled}
-                        onclick={() => selectPropagationNode(announced.destinationHash)}
-                      >
-                        <code>{announced.destinationHash}</code>
-                        <small>
-                          {#if hops === undefined}
-                            {$t('settings.lxmf.propagationNode.hopsUnknown')}
-                          {:else}
-                            {$t(hops === 1 ? 'announce.hops.one' : 'announce.hops.other', { count: hops })}
-                          {/if}
-                          · {$t('settings.lxmf.propagationNode.stampCost', { cost: metadata.stampCost })}
-                          {#if !metadata.enabled} · {$t('settings.lxmf.propagationNode.unavailable')}{/if}
-                        </small>
-                        {#if announced.lastAnnouncedAt}
-                          <small>{$t('settings.lxmf.propagationNode.lastHeard', {
-                            date: propagationHeardAtFormatter.format(new Date(announced.lastAnnouncedAt)),
-                          })}</small>
-                        {/if}
-                      </button>
-                    {/each}
-                  {/if}
-                </div>
-              {/if}
-            </div>
-            <small class:field-error={propagationNodeInvalid}>
-              {$t(propagationNodeInvalid ? 'settings.lxmf.propagationNode.invalid' : 'settings.lxmf.propagationNode.help')}
-            </small>
-          </div>
-          <label
-            class="toggle-row propagation-toggle delivery-toggle lxmf-propagation-toggle"
-            class:disabled={preferences.lxmf.defaultDeliveryMethod === 'propagated'}
-          >
-            <span>
-              <strong>{$t('settings.lxmf.propagationEnabled')}</strong>
-              <small>{$t(preferences.lxmf.defaultDeliveryMethod === 'propagated'
-                ? 'settings.lxmf.propagation.status.default'
-                : preferences.lxmf.propagationEnabled
-                  ? 'settings.lxmf.propagation.status.active'
-                  : 'settings.lxmf.propagation.status.disabled')}</small>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              checked={preferences.lxmf.defaultDeliveryMethod !== 'propagated' && preferences.lxmf.propagationEnabled}
-              disabled={preferences.lxmf.defaultDeliveryMethod === 'propagated'}
-              onchange={(event) => {
-                preferences.lxmf.propagationEnabled = event.currentTarget.checked;
-                void persistPreferences();
-              }}
-            />
-          </label>
-          <label class="field lxmf-propagation-sync-interval">
-            <span>{$t('settings.lxmf.propagationSync.interval')}</span>
-            <select
-              value={preferences.lxmf.propagationSyncIntervalMinutes}
-              onchange={(event) => {
-                preferences.lxmf.propagationSyncIntervalMinutes = Number(event.currentTarget.value) as PropagationSyncIntervalMinutes;
-                void persistPreferences();
-              }}
-            >
-              <option value={0}>{$t('settings.lxmf.propagationSync.interval.never')}</option>
-              <option value={15}>{$t('settings.lxmf.propagationSync.interval.15')}</option>
-              <option value={30}>{$t('settings.lxmf.propagationSync.interval.30')}</option>
-              <option value={60}>{$t('settings.lxmf.propagationSync.interval.60')}</option>
-              <option value={180}>{$t('settings.lxmf.propagationSync.interval.180')}</option>
-              <option value={360}>{$t('settings.lxmf.propagationSync.interval.360')}</option>
-              <option value={720}>{$t('settings.lxmf.propagationSync.interval.720')}</option>
-              <option value={1440}>{$t('settings.lxmf.propagationSync.interval.1440')}</option>
-            </select>
-            <small>{$t('settings.lxmf.propagationSync.interval.help')}</small>
-          </label>
         </div>
         <div class="lxmf-settings-column">
           <label class="field lxmf-announcement-interval">
@@ -759,19 +651,137 @@
             />
             <small>{$t('settings.lxmf.inboundStampCost.help')}</small>
           </label>
-          <label class="toggle-row propagation-toggle lxmf-contacts-only">
-            <span>
-              <strong>{$t('settings.lxmf.contactsOnly')}</strong>
-              <small>{$t('settings.lxmf.contactsOnly.help')}</small>
-            </span>
-            <input
-              type="checkbox"
-              role="switch"
-              bind:checked={preferences.lxmf.acceptMessagesFromContactsOnly}
-              onchange={persistPreferences}
-            />
-          </label>
         </div>
+      </div>
+    </section>
+
+    <section class="settings-card">
+      <header class="settings-card-header">
+        <div class="section-icon"><Icon name="sync" size={21} /></div>
+        <div>
+          <h2>{$t('settings.lxmf.propagation.title')}</h2>
+          <p>{$t('settings.lxmf.propagation.description')}</p>
+        </div>
+      </header>
+      <div class="field-grid two-column lxmf-propagation-settings-grid">
+        <div class="field lxmf-propagation-address">
+          <label for="preferred-propagation-node">{$t('settings.lxmf.propagationNode')}</label>
+          <div class="propagation-node-combobox" bind:this={propagationNodePicker}>
+            <input
+              id="preferred-propagation-node"
+              bind:value={propagationNodeDraft}
+              placeholder={$t('settings.lxmf.propagationNode.placeholder')}
+              autocapitalize="none"
+              autocomplete="off"
+              spellcheck="false"
+              aria-invalid={propagationNodeInvalid}
+              aria-autocomplete="list"
+              aria-controls="propagation-node-options"
+              aria-expanded={propagationNodeMenuOpen}
+              oninput={() => { propagationNodeInvalid = false; }}
+              onchange={persistPropagationNode}
+            />
+            <button
+              type="button"
+              class="propagation-node-menu-toggle"
+              aria-label={$t('settings.lxmf.propagationNode.openList')}
+              aria-haspopup="listbox"
+              aria-expanded={propagationNodeMenuOpen}
+              onclick={() => { propagationNodeMenuOpen = !propagationNodeMenuOpen; }}
+            ><Icon name="chevron-down" size={17} /></button>
+            {#if propagationNodeMenuOpen}
+              <div id="propagation-node-options" class="propagation-node-menu" role="listbox" aria-label={$t('settings.lxmf.propagationNode.list')}>
+                {#if propagationDestinations.length === 0}
+                  <p>{$t('settings.lxmf.propagationNode.empty')}</p>
+                {:else}
+                  {#each propagationDestinations as announced (announced.destinationHash)}
+                    {@const metadata = announced.metadata!}
+                    {@const hops = $destinationPathStatuses[announced.destinationHash]?.hops}
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={propagationNodeDraft === announced.destinationHash}
+                      disabled={!metadata.enabled}
+                      onclick={() => selectPropagationNode(announced.destinationHash)}
+                    >
+                      <code>{announced.destinationHash}</code>
+                      <small>
+                        {#if hops === undefined}
+                          {$t('settings.lxmf.propagationNode.hopsUnknown')}
+                        {:else}
+                          {$t(hops === 1 ? 'announce.hops.one' : 'announce.hops.other', { count: hops })}
+                        {/if}
+                        · {$t('settings.lxmf.propagationNode.stampCost', { cost: metadata.stampCost })}
+                        {#if !metadata.enabled} · {$t('settings.lxmf.propagationNode.unavailable')}{/if}
+                      </small>
+                      {#if announced.lastAnnouncedAt}
+                        <small>{$t('settings.lxmf.propagationNode.lastHeard', {
+                          date: propagationHeardAtFormatter.format(new Date(announced.lastAnnouncedAt)),
+                        })}</small>
+                      {/if}
+                    </button>
+                  {/each}
+                {/if}
+              </div>
+            {/if}
+          </div>
+          <small class:field-error={propagationNodeInvalid}>
+            {$t(propagationNodeInvalid ? 'settings.lxmf.propagationNode.invalid' : 'settings.lxmf.propagationNode.help')}
+          </small>
+        </div>
+        <label
+          class="toggle-row propagation-toggle delivery-toggle lxmf-propagation-toggle"
+          class:disabled={preferences.lxmf.defaultDeliveryMethod === 'propagated'}
+        >
+          <span>
+            <strong>{$t('settings.lxmf.propagationEnabled')}</strong>
+            <small>{$t(preferences.lxmf.defaultDeliveryMethod === 'propagated'
+              ? 'settings.lxmf.propagation.status.default'
+              : 'settings.lxmf.propagation.help')}</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            checked={preferences.lxmf.defaultDeliveryMethod !== 'propagated' && preferences.lxmf.propagationEnabled}
+            disabled={preferences.lxmf.defaultDeliveryMethod === 'propagated'}
+            onchange={(event) => {
+              preferences.lxmf.propagationEnabled = event.currentTarget.checked;
+              void persistPreferences();
+            }}
+          />
+        </label>
+        <label class="field lxmf-propagation-sync-interval">
+          <span>{$t('settings.lxmf.propagationSync.interval')}</span>
+          <select
+            value={preferences.lxmf.propagationSyncIntervalMinutes}
+            onchange={(event) => {
+              preferences.lxmf.propagationSyncIntervalMinutes = Number(event.currentTarget.value) as PropagationSyncIntervalMinutes;
+              void persistPreferences();
+            }}
+          >
+            <option value={0}>{$t('settings.lxmf.propagationSync.interval.never')}</option>
+            <option value={15}>{$t('settings.lxmf.propagationSync.interval.15')}</option>
+            <option value={30}>{$t('settings.lxmf.propagationSync.interval.30')}</option>
+            <option value={60}>{$t('settings.lxmf.propagationSync.interval.60')}</option>
+            <option value={180}>{$t('settings.lxmf.propagationSync.interval.180')}</option>
+            <option value={360}>{$t('settings.lxmf.propagationSync.interval.360')}</option>
+            <option value={720}>{$t('settings.lxmf.propagationSync.interval.720')}</option>
+            <option value={1440}>{$t('settings.lxmf.propagationSync.interval.1440')}</option>
+          </select>
+          <small>{$t('settings.lxmf.propagationSync.interval.help')}</small>
+        </label>
+        <label class="toggle-row propagation-toggle lxmf-propagation-sync-resume">
+          <span>
+            <strong>{$t('settings.lxmf.propagationSync.onResume')}</strong>
+            <small>{$t('settings.lxmf.propagationSync.onResume.help')}</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            bind:checked={preferences.lxmf.propagationSyncOnResume}
+            onchange={persistPreferences}
+          />
+        </label>
       </div>
     </section>
 
@@ -849,6 +859,18 @@
             <option value={90}>{$t('settings.chat.messageRetention.90')}</option>
           </select>
           <small>{$t('settings.chat.messageRetention.help')}</small>
+        </label>
+        <label class="toggle-row propagation-toggle chat-contacts-only">
+          <span>
+            <strong>{$t('settings.lxmf.contactsOnly')}</strong>
+            <small>{$t('settings.lxmf.contactsOnly.help')}</small>
+          </span>
+          <input
+            type="checkbox"
+            role="switch"
+            bind:checked={preferences.lxmf.acceptMessagesFromContactsOnly}
+            onchange={persistPreferences}
+          />
         </label>
       </div>
     </section>

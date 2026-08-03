@@ -4,6 +4,7 @@ const EVENT_CHANNEL = 'retivum:tcp:event';
 const UDP_EVENT_CHANNEL = 'retivum:udp:event';
 const DEVICE_REQUEST_CHANNEL = 'retivum:device:selection-request';
 const PAIRING_REQUEST_CHANNEL = 'retivum:device:pairing-request';
+const APP_RESUME_CHANNEL = 'retivum:app:resume';
 
 contextBridge.exposeInMainWorld('retivumDesktopSockets', Object.freeze({
   open: (options) => ipcRenderer.invoke('retivum:tcp:open', options),
@@ -39,5 +40,13 @@ contextBridge.exposeInMainWorld('retivumDesktopDevices', Object.freeze({
     const handler = (_event, value) => listener(value);
     ipcRenderer.on(PAIRING_REQUEST_CHANNEL, handler);
     return () => ipcRenderer.removeListener(PAIRING_REQUEST_CHANNEL, handler);
+  },
+}));
+
+contextBridge.exposeInMainWorld('retivumDesktopLifecycle', Object.freeze({
+  onResume: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on(APP_RESUME_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(APP_RESUME_CHANNEL, handler);
   },
 }));

@@ -224,7 +224,7 @@ describe('LXMF delivery preferences', () => {
       locale: 'en',
       lxmf: { defaultDeliveryMethod: 'propagated', propagationNodeHash: hash },
     })).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: 10,
       lxmf: { defaultDeliveryMethod: 'propagated', propagationEnabled: true, propagationNodeHash: hash },
     });
     expect(normalizeAppPreferences({
@@ -312,6 +312,17 @@ describe('LXMF delivery preferences', () => {
     expect(normalizeAppPreferences({
       lxmf: { propagationSyncIntervalMinutes: 5 },
     }).lxmf.propagationSyncIntervalMinutes).toBe(0);
+  });
+
+  it('defaults propagation sync on resume off and restores an enabled preference', () => {
+    expect(normalizeAppPreferences({ lxmf: {} }).lxmf.propagationSyncOnResume).toBe(false);
+    expect(normalizeAppPreferences({
+      schemaVersion: 9,
+      lxmf: { propagationSyncOnResume: true },
+    })).toMatchObject({
+      schemaVersion: 10,
+      lxmf: { propagationSyncOnResume: true },
+    });
   });
 
   it('defaults automatic announcements to every six hours and validates their interval', () => {
