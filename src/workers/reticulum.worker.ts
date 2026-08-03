@@ -73,6 +73,7 @@ import {
 } from '../infrastructure/reticulum/path-interface-transition';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
 import { requiresReticulumRuntimeRebuild } from '../infrastructure/reticulum/runtime-configuration';
+import { StampWorkRegistry } from '../infrastructure/reticulum/stamp-work';
 import { computeRNodeBitrate, InterfaceTelemetryTracker } from '../infrastructure/reticulum/interface-telemetry';
 import { pathRequestTimeoutMs } from '../infrastructure/reticulum/timeouts';
 
@@ -217,6 +218,7 @@ let automaticPropagationSyncPending = false;
 let propagationSyncRequestId: string | undefined;
 let propagationSyncStatusSignature = '';
 let persistenceQueue = Promise.resolve();
+const stampWork = new StampWorkRegistry();
 const persistenceWaiters = new Map<string, (ok: boolean) => void>();
 const networkPersistenceWaiters = new Map<string, (ok: boolean) => void>();
 const activationStorageWaiters = new Map<string, (ok: boolean) => void>();
@@ -1096,6 +1098,7 @@ function emitPropagationNodeSnapshot(): void {
 }
 
 function cleanupRuntime(alreadyDownRuntimeIndexes: ReadonlySet<number> = new Set()): void {
+  stampWork.clear();
   if (tickTimer !== undefined) clearTimeout(tickTimer);
   tickTimer = undefined;
   if (autoAnnounceTimer !== undefined) clearTimeout(autoAnnounceTimer);
@@ -3665,13 +3668,26 @@ async function generateDeliveryStamp(event: Record<string, unknown>): Promise<vo
   const targetCost = eventNumber(event, 'targetCost');
   const currentNode = node;
   if (!messageId || targetCost === undefined || !currentNode) return;
-  try {
-    const stamp = await ReticulumNode.generateLxmfStamp(messageId, targetCost, 8);
+  const messageIdHex = bytesToHex(messageId);
+  await stampWork.run(`delivery:${messageIdHex}:${targetCost}`, async () => {
+    let stamp: Uint8Array;
+    try {
+      stamp = await ReticulumNode.generateLxmfStamp(messageId, targetCost, 8);
+    } catch (error) {
+      log('error', 'wasm', 'LXMF_STAMP_GENERATION_FAILED', {
+        messageId: messageIdHex,
+        targetCost,
+        message: diagnosticErrorMessage(error),
+      });
+      return;
+    }
     if (node !== currentNode) return;
-    processOutput(currentNode.setLxmfOutboundStampResult(messageId, targetCost, stamp) as WasmOutput);
-  } catch {
-    log('error', 'wasm', 'LXMF_STAMP_GENERATION_FAILED', { messageId: bytesToHex(messageId), targetCost });
-  }
+    try {
+      processOutput(currentNode.setLxmfOutboundStampResult(messageId, targetCost, stamp) as WasmOutput);
+    } catch (error) {
+      logStampResultError('LXMF_STAMP', error, { messageId: messageIdHex, targetCost });
+    }
+  });
 }
 
 async function validateInboundStamp(event: Record<string, unknown>): Promise<void> {
@@ -3680,16 +3696,27 @@ async function validateInboundStamp(event: Record<string, unknown>): Promise<voi
   const targetCost = eventNumber(event, 'targetCost');
   const currentNode = node;
   if (!messageId || !stamp || targetCost === undefined || !currentNode) return;
-  try {
-    const valid = await ReticulumNode.validateLxmfStamp(messageId, stamp, targetCost, 8);
+  const messageIdHex = bytesToHex(messageId);
+  const key = `inbound:${messageIdHex}:${bytesToHex(stamp)}:${targetCost}`;
+  await stampWork.run(key, async () => {
+    let valid: boolean;
+    try {
+      valid = await ReticulumNode.validateLxmfStamp(messageId, stamp, targetCost, 8);
+    } catch (error) {
+      log('error', 'wasm', 'LXMF_INBOUND_STAMP_VALIDATION_FAILED', {
+        messageId: messageIdHex,
+        targetCost,
+        message: diagnosticErrorMessage(error),
+      });
+      return;
+    }
     if (node !== currentNode) return;
-    processOutput(currentNode.setLxmfInboundStampResult(messageId, stamp, targetCost, valid) as WasmOutput);
-  } catch {
-    log('error', 'wasm', 'LXMF_INBOUND_STAMP_VALIDATION_FAILED', {
-      messageId: bytesToHex(messageId),
-      targetCost,
-    });
-  }
+    try {
+      processOutput(currentNode.setLxmfInboundStampResult(messageId, stamp, targetCost, valid) as WasmOutput);
+    } catch (error) {
+      logStampResultError('LXMF_INBOUND_STAMP', error, { messageId: messageIdHex, targetCost });
+    }
+  });
 }
 
 async function generatePropagationStamp(event: Record<string, unknown>): Promise<void> {
@@ -3698,21 +3725,45 @@ async function generatePropagationStamp(event: Record<string, unknown>): Promise
   const targetCost = eventNumber(event, 'targetCost');
   const currentNode = node;
   if (!messageId || !transientId || targetCost === undefined || !currentNode) return;
-  try {
-    const stamp = await ReticulumNode.generateLxmfPropagationStamp(transientId, targetCost, 8);
+  const messageIdHex = bytesToHex(messageId);
+  const key = `propagation:${messageIdHex}:${bytesToHex(transientId)}:${targetCost}`;
+  await stampWork.run(key, async () => {
+    let stamp: Uint8Array;
+    try {
+      stamp = await ReticulumNode.generateLxmfPropagationStamp(transientId, targetCost, 8);
+    } catch (error) {
+      log('error', 'wasm', 'LXMF_PROPAGATION_STAMP_GENERATION_FAILED', {
+        messageId: messageIdHex,
+        targetCost,
+        message: diagnosticErrorMessage(error),
+      });
+      return;
+    }
     if (node !== currentNode) return;
-    processOutput(currentNode.setLxmfOutboundPropagationStampResult(
-      messageId,
-      transientId,
-      targetCost,
-      stamp,
-    ) as WasmOutput);
-  } catch {
-    log('error', 'wasm', 'LXMF_PROPAGATION_STAMP_GENERATION_FAILED', {
-      messageId: bytesToHex(messageId),
-      targetCost,
-    });
+    try {
+      processOutput(currentNode.setLxmfOutboundPropagationStampResult(
+        messageId,
+        transientId,
+        targetCost,
+        stamp,
+      ) as WasmOutput);
+    } catch (error) {
+      logStampResultError('LXMF_PROPAGATION_STAMP', error, { messageId: messageIdHex, targetCost });
+    }
+  });
+}
+
+function logStampResultError(
+  prefix: 'LXMF_STAMP' | 'LXMF_INBOUND_STAMP' | 'LXMF_PROPAGATION_STAMP',
+  error: unknown,
+  details: { messageId: string; targetCost: number },
+): void {
+  const message = diagnosticErrorMessage(error);
+  if (message === 'StaleStampRequest') {
+    log('debug', 'wasm', `${prefix}_RESULT_STALE`, details);
+    return;
   }
+  log('error', 'wasm', `${prefix}_RESULT_FAILED`, { ...details, message });
 }
 
 function handleReceivedAnnounce(event: Record<string, unknown>): void {
