@@ -858,9 +858,7 @@
     propagationSyncRequested = true;
     try {
       const result = await reticulumRuntime.syncLxmfPropagation();
-      const newMessages = result
-        ? Math.max(0, result.received - result.duplicates)
-        : 0;
+      const newMessages = result?.newMessages ?? 0;
       if (!result) {
         toast.error('chat.propagationSync.failed');
       } else if (newMessages === 0) {

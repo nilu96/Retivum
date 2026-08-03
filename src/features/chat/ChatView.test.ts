@@ -349,7 +349,11 @@ describe('ChatView', () => {
   });
 
   it('syncs from the preferred or best discovered propagation node independently of sending preferences', async () => {
-    const sync = vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 2, duplicates: 1 });
+    const sync = vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({
+      received: 2,
+      duplicates: 1,
+      newMessages: 1,
+    });
     render(ChatView);
     render(ToastViewport);
 
@@ -365,6 +369,7 @@ describe('ChatView', () => {
     vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({
       received: 0,
       duplicates: 0,
+      newMessages: 0,
     });
     render(ChatView);
     render(ToastViewport);
@@ -385,7 +390,27 @@ describe('ChatView', () => {
   });
 
   it('reports no new propagation messages when every received message is a duplicate', async () => {
-    vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 3, duplicates: 3 });
+    vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({
+      received: 3,
+      duplicates: 3,
+      newMessages: 0,
+    });
+    render(ChatView);
+    render(ToastViewport);
+
+    await fireEvent.click(await screen.findByRole('button', {
+      name: 'Sync messages from the preferred or best available propagation node',
+    }));
+
+    expect(await screen.findByText('Sync complete. No new messages.')).toBeInTheDocument();
+  });
+
+  it('reports no new propagation messages when downloaded messages were filtered out', async () => {
+    vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({
+      received: 2,
+      duplicates: 0,
+      newMessages: 0,
+    });
     render(ChatView);
     render(ToastViewport);
 
@@ -443,7 +468,11 @@ describe('ChatView', () => {
       displayName: 'Mobile peer',
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
-    const sync = vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({ received: 0, duplicates: 0 });
+    const sync = vi.spyOn(reticulumRuntime, 'syncLxmfPropagation').mockResolvedValue({
+      received: 0,
+      duplicates: 0,
+      newMessages: 0,
+    });
     render(ChatView);
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Announces' }));

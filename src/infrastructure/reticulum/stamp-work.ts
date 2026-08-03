@@ -17,3 +17,28 @@ export class StampWorkRegistry {
     this.active.clear();
   }
 }
+
+export class PendingWorkBarrier {
+  private readonly pending = new Set<Promise<unknown>>();
+
+  track<T>(work: Promise<T>): Promise<T> {
+    this.pending.add(work);
+    void work.then(
+      () => this.pending.delete(work),
+      () => this.pending.delete(work),
+    );
+    return work;
+  }
+
+  async wait(): Promise<void> {
+    await Promise.allSettled([...this.pending]);
+  }
+
+  clear(): void {
+    this.pending.clear();
+  }
+
+  get size(): number {
+    return this.pending.size;
+  }
+}

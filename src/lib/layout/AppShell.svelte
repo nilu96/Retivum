@@ -114,7 +114,7 @@
   onMount(() => onAutomaticPropagationSyncComplete((result) => {
     const notificationMode = $appPreferences.chat.inAppNotificationMode;
     if (notificationMode === 'never' || document.visibilityState !== 'visible') return;
-    const newMessages = Math.max(0, result.received - result.duplicates);
+    const newMessages = result.newMessages;
     if (newMessages === 0) return;
     toast.success(
       newMessages === 1

@@ -73,7 +73,7 @@ import {
 } from '../infrastructure/reticulum/path-interface-transition';
 import { classifyInboundResourceEvent } from '../infrastructure/reticulum/resource-transfer-events';
 import { requiresReticulumRuntimeRebuild } from '../infrastructure/reticulum/runtime-configuration';
-import { StampWorkRegistry } from '../infrastructure/reticulum/stamp-work';
+import { PendingWorkBarrier, StampWorkRegistry } from '../infrastructure/reticulum/stamp-work';
 import { computeRNodeBitrate, InterfaceTelemetryTracker } from '../infrastructure/reticulum/interface-telemetry';
 import { pathRequestTimeoutMs } from '../infrastructure/reticulum/timeouts';
 
@@ -222,6 +222,8 @@ let propagationSyncRequestId: string | undefined;
 let propagationSyncStatusSignature = '';
 let persistenceQueue = Promise.resolve();
 const stampWork = new StampWorkRegistry();
+const propagationSyncInboundStampWork = new PendingWorkBarrier();
+const propagationSyncProjectedMessageIds = new Set<string>();
 const persistenceWaiters = new Map<string, (ok: boolean) => void>();
 const networkPersistenceWaiters = new Map<string, (ok: boolean) => void>();
 const activationStorageWaiters = new Map<string, (ok: boolean) => void>();
@@ -1102,6 +1104,8 @@ function emitPropagationNodeSnapshot(): void {
 
 function cleanupRuntime(alreadyDownRuntimeIndexes: ReadonlySet<number> = new Set()): void {
   stampWork.clear();
+  propagationSyncInboundStampWork.clear();
+  propagationSyncProjectedMessageIds.clear();
   if (tickTimer !== undefined) clearTimeout(tickTimer);
   tickTimer = undefined;
   if (autoAnnounceTimer !== undefined) clearTimeout(autoAnnounceTimer);
@@ -1339,6 +1343,8 @@ function syncLxmfPropagation(requestId: string): void {
     return;
   }
 
+  propagationSyncInboundStampWork.clear();
+  propagationSyncProjectedMessageIds.clear();
   propagationSyncRequestId = requestId;
   emitPropagationSyncStatus({ syncing: true });
   try {
@@ -1375,15 +1381,19 @@ function finishPropagationSync(
   code?: string,
   received?: number,
   duplicates?: number,
+  newMessages?: number,
 ): void {
   const requestId = propagationSyncRequestId;
   if (!requestId) return;
   propagationSyncRequestId = undefined;
+  propagationSyncInboundStampWork.clear();
+  propagationSyncProjectedMessageIds.clear();
   emitPropagationSyncStatus({ syncing: false });
-  emit({ type: 'lxmfPropagationSyncResult', requestId, ok, code, received, duplicates });
+  emit({ type: 'lxmfPropagationSyncResult', requestId, ok, code, received, duplicates, newMessages });
   log(ok ? 'info' : 'warning', 'wasm', ok ? 'LXMF_PROPAGATION_SYNC_COMPLETE' : (code ?? 'LXMF_PROPAGATION_SYNC_FAILED'), {
     received: received ?? 0,
     duplicates: duplicates ?? 0,
+    newMessages: newMessages ?? 0,
   });
 }
 
@@ -3065,7 +3075,7 @@ function handleWasmEvent(event: Record<string, unknown>): void {
   if (event.type === 'lxmfMessageReceived') handleReceivedLxmfMessage(event);
   if (event.type === 'lxmfMessageState') handleLxmfMessageState(event);
   if (event.type === 'lxmfStampPending') void generateDeliveryStamp(event);
-  if (event.type === 'lxmfInboundStampPending') void validateInboundStamp(event);
+  if (event.type === 'lxmfInboundStampPending') queueInboundStampValidation(event);
   if (event.type === 'lxmfPropagationStampPending') void generatePropagationStamp(event);
   if (event.type === 'lxmfPropagationSyncState') handlePropagationSyncState(event);
   if (event.type === 'lxmfPropagationSyncComplete') handlePropagationSyncComplete(event);
@@ -3319,12 +3329,26 @@ function handlePropagationSyncState(event: Record<string, unknown>): void {
 }
 
 function handlePropagationSyncComplete(event: Record<string, unknown>): void {
-  finishPropagationSync(
-    true,
-    undefined,
-    eventNumber(event, 'received') ?? 0,
-    eventNumber(event, 'duplicates') ?? 0,
-  );
+  const requestId = propagationSyncRequestId;
+  if (!requestId) return;
+  const received = eventNumber(event, 'received') ?? 0;
+  const duplicates = eventNumber(event, 'duplicates') ?? 0;
+  const pendingStampValidations = propagationSyncInboundStampWork.size;
+  if (pendingStampValidations > 0) {
+    log('debug', 'wasm', 'LXMF_PROPAGATION_SYNC_WAITING_FOR_INBOUND_STAMPS', {
+      pendingStampValidations,
+    });
+  }
+  void propagationSyncInboundStampWork.wait().then(() => {
+    if (propagationSyncRequestId !== requestId) return;
+    finishPropagationSync(
+      true,
+      undefined,
+      received,
+      duplicates,
+      propagationSyncProjectedMessageIds.size,
+    );
+  });
 }
 
 function handleNomadPathFound(event: Record<string, unknown>): void {
@@ -3732,6 +3756,16 @@ async function validateInboundStamp(event: Record<string, unknown>): Promise<voi
   });
 }
 
+function queueInboundStampValidation(event: Record<string, unknown>): void {
+  const validation = validateInboundStamp(event);
+  if (propagationSyncRequestId) propagationSyncInboundStampWork.track(validation);
+  void validation.catch((error) => {
+    log('error', 'wasm', 'LXMF_INBOUND_STAMP_VALIDATION_UNEXPECTED_FAILURE', {
+      message: diagnosticErrorMessage(error),
+    });
+  });
+}
+
 async function generatePropagationStamp(event: Record<string, unknown>): Promise<void> {
   const messageId = eventBytes(event, 'messageId');
   const transientId = eventBytes(event, 'transientId');
@@ -4018,21 +4052,32 @@ function handleReceivedLxmfMessage(event: Record<string, unknown>): void {
     return;
   }
   const sourceHashHex = bytesToHex(sourceHash);
+  const messageIdHex = bytesToHex(messageId);
+  if (blockedDestinationHashes.includes(sourceHashHex)) {
+    log('info', 'runtime', 'LXMF_MESSAGE_IGNORED_BLOCKED', {
+      messageId: messageIdHex,
+      sourceHash: sourceHashHex,
+    });
+    return;
+  }
   if (configuration && !lxmfInboundSourceAllowed(
     configuration.preferences.lxmf,
     sourceHashHex,
     contactDestinationHashes,
   )) {
     log('info', 'runtime', 'LXMF_MESSAGE_IGNORED_NOT_CONTACT', {
-      messageId: bytesToHex(messageId),
+      messageId: messageIdHex,
       sourceHash: sourceHashHex,
     });
     return;
   }
+  if (propagationSyncRequestId && eventString(event, 'method') === 'propagated') {
+    propagationSyncProjectedMessageIds.add(messageIdHex);
+  }
   emit({
     type: 'chatMessageReceived',
     identityId: identity.id,
-    messageId: bytesToHex(messageId),
+    messageId: messageIdHex,
     sourceHash: sourceHashHex,
     destinationHash: bytesToHex(destinationHash),
     title: new TextDecoder().decode(title),
@@ -4049,7 +4094,7 @@ function handleReceivedLxmfMessage(event: Record<string, unknown>): void {
     timestamp: eventNumber(event, 'timestamp'),
     receivedAt: new Date().toISOString(),
   });
-  log('debug', 'wasm', 'LXMF_MESSAGE_PROJECTED', { messageId: bytesToHex(messageId) });
+  log('debug', 'wasm', 'LXMF_MESSAGE_PROJECTED', { messageId: messageIdHex });
 }
 
 function eventChatAttachments(event: Record<string, unknown>): ChatAttachment[] {

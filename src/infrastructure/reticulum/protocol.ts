@@ -91,6 +91,7 @@ export interface NewIdentityMetadata {
 export interface LxmfPropagationSyncResult {
   received: number;
   duplicates: number;
+  newMessages: number;
 }
 
 export type LxmfPropagationSyncState =
@@ -299,6 +300,7 @@ export type RuntimeEvent =
       ok: boolean;
       received?: number;
       duplicates?: number;
+      newMessages?: number;
       code?: string;
     }
   | {

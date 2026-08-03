@@ -195,6 +195,7 @@ class ReticulumRuntimeController {
   private readonly lxmaPeerWaiters = new Map<string, (destinationHash: string | undefined) => void>();
   private readonly deletingChatMessageIds = new Set<string>();
   private readonly propagationSyncWaiters = new Map<string, (result: LxmfPropagationSyncResult | undefined) => void>();
+  private readonly pendingPropagationMessagePersistence = new Set<Promise<void>>();
   private readonly nomadPageWaiters = new Map<string, {
     resolve: (page: NomadPage | undefined) => void;
     onUpdate?: (update: NomadPageLoadUpdate) => void;
@@ -1513,8 +1514,13 @@ class ReticulumRuntimeController {
         noteUnreadChatMessage(orderedMessage.sourceHash, orderedMessage.id);
         emitIncomingChatMessage(orderedMessage);
       }
+      let persistence: Promise<void> | undefined;
       try {
-        await this.chatRepository.saveMessage(orderedMessage);
+        persistence = this.chatRepository.saveMessage(orderedMessage);
+        if (orderedMessage.method === 'propagated') {
+          this.pendingPropagationMessagePersistence.add(persistence);
+        }
+        await persistence;
         appendLocalLog('debug', 'persistence', 'CHAT_MESSAGE_PERSISTED', {
           messageId: orderedMessage.messageId,
         });
@@ -1523,6 +1529,8 @@ class ReticulumRuntimeController {
         appendLocalLog('error', 'persistence', 'CHAT_MESSAGE_PERSIST_FAILED', {
           messageId: orderedMessage.messageId,
         });
+      } finally {
+        if (persistence) this.pendingPropagationMessagePersistence.delete(persistence);
       }
       return;
     }
@@ -1684,8 +1692,21 @@ class ReticulumRuntimeController {
     }
     if (event.type === 'lxmfPropagationSyncResult') {
       const result = event.ok
-        ? { received: event.received ?? 0, duplicates: event.duplicates ?? 0 }
+        ? {
+          received: event.received ?? 0,
+          duplicates: event.duplicates ?? 0,
+          newMessages: event.newMessages
+            ?? Math.max(0, (event.received ?? 0) - (event.duplicates ?? 0)),
+        }
         : undefined;
+      // Message events precede the completion event in a propagation response,
+      // but worker messages are handled concurrently while their IndexedDB
+      // writes are pending. Do not publish completion until those messages have
+      // finished the UI-first ingestion path, so completion notifications cannot
+      // overtake the conversation update.
+      if (result && this.pendingPropagationMessagePersistence.size > 0) {
+        await Promise.allSettled([...this.pendingPropagationMessagePersistence]);
+      }
       if (event.requestId.startsWith('automatic:')) {
         if (result) emitAutomaticPropagationSyncComplete(result);
         return;

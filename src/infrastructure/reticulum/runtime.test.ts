@@ -89,6 +89,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
         ok: true,
         received: 4,
         duplicates: 1,
+        newMessages: 2,
       });
       await internals.handleEvent({
         type: 'lxmfPropagationSyncResult',
@@ -100,7 +101,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
       unsubscribe();
     }
 
-    expect(results).toEqual([{ received: 4, duplicates: 1 }]);
+    expect(results).toEqual([{ received: 4, duplicates: 1, newMessages: 2 }]);
   });
 
   it('requires an explicit imported identity name without clearing the pending backup', async () => {
@@ -159,6 +160,55 @@ describe('ReticulumRuntimeController chat deletion', () => {
       syncing: false,
     });
     expect(get(propagationSyncStatus)).toEqual({ syncing: false });
+  });
+
+  it('does not resolve propagation sync before received messages finish ingestion', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    let finishPersistence: (() => void) | undefined;
+    vi.spyOn(internals.chatRepository, 'saveMessage').mockImplementation(() => (
+      new Promise<void>((resolve) => { finishPersistence = resolve; })
+    ));
+
+    const sync = reticulumRuntime.syncLxmfPropagation();
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+    const received = internals.handleEvent({
+      type: 'chatMessageReceived',
+      identityId: 'identity-1',
+      messageId: 'propagated-message',
+      sourceHash: 'c'.repeat(32),
+      destinationHash: 'a'.repeat(32),
+      title: '',
+      content: 'Arrived through propagation',
+      method: 'propagated',
+      receivedAt: '2026-08-03T10:00:00.000Z',
+    });
+    const completion = internals.handleEvent({
+      type: 'lxmfPropagationSyncResult',
+      requestId: command.requestId,
+      ok: true,
+      received: 1,
+      duplicates: 0,
+      newMessages: 1,
+    });
+    let resolved = false;
+    void sync.then(() => { resolved = true; });
+
+    await Promise.resolve();
+    expect(get(chatMessages)).toEqual([
+      expect.objectContaining({
+        messageId: 'propagated-message',
+        content: 'Arrived through propagation',
+      }),
+    ]);
+    expect(resolved).toBe(false);
+
+    finishPersistence?.();
+    await received;
+    await completion;
+    await expect(sync).resolves.toEqual({ received: 1, duplicates: 0, newMessages: 1 });
+    expect(resolved).toBe(true);
   });
 
   it('replaces a Nomad bookmark identity when its address changes', async () => {

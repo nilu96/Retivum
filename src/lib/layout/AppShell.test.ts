@@ -400,10 +400,10 @@ describe('AppShell Chat unread indicator', () => {
   it('shows one aggregate toast only when an automatic propagation sync adds messages', () => {
     render(AppShell, { current: 'tools', children: emptyChildren });
 
-    emitAutomaticPropagationSyncComplete({ received: 2, duplicates: 2 });
+    emitAutomaticPropagationSyncComplete({ received: 2, duplicates: 0, newMessages: 0 });
     expect(get(toasts)).toEqual([]);
 
-    emitAutomaticPropagationSyncComplete({ received: 5, duplicates: 2 });
+    emitAutomaticPropagationSyncComplete({ received: 5, duplicates: 2, newMessages: 3 });
     expect(get(toasts)).toHaveLength(1);
     expect(get(toasts)[0]).toMatchObject({
       kind: 'success',

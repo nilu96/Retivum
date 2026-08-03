@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { StampWorkRegistry } from './stamp-work';
+import { PendingWorkBarrier, StampWorkRegistry } from './stamp-work';
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve = () => {};
@@ -51,5 +51,41 @@ describe('StampWorkRegistry', () => {
 
     replacementWork.resolve();
     await expect(replacementRun).resolves.toBe(true);
+  });
+});
+
+describe('PendingWorkBarrier', () => {
+  it('waits for every tracked job that was active at the barrier', async () => {
+    const barrier = new PendingWorkBarrier();
+    const first = deferred();
+    const second = deferred();
+    barrier.track(first.promise);
+    barrier.track(second.promise);
+    let settled = false;
+    const waiting = barrier.wait().then(() => { settled = true; });
+
+    first.resolve();
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(barrier.size).toBe(1);
+
+    second.resolve();
+    await waiting;
+    expect(settled).toBe(true);
+    expect(barrier.size).toBe(0);
+  });
+
+  it('settles after failed work and can discard work from a previous lifecycle', async () => {
+    const barrier = new PendingWorkBarrier();
+    const previous = deferred();
+    barrier.track(previous.promise);
+    barrier.clear();
+    expect(barrier.size).toBe(0);
+
+    const failure = Promise.reject(new Error('invalid stamp'));
+    barrier.track(failure);
+    await barrier.wait();
+    expect(barrier.size).toBe(0);
+    previous.resolve();
   });
 });
