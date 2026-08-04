@@ -563,7 +563,7 @@ interface LxmfPreferences {
 - **Direct** and **opportunistic** do not require a configured propagation node. A route may still be unavailable, which is reported through the normal queued/failed state flow.
 - The primary attempt persists whether propagation fallback remains pending. When fallback is used, the propagated queue result replaces that attempt in one transaction so the chat continues to show one logical message. The retry preserves the original timestamp and payload, which keeps the LXMF message ID stable under normal ticket reuse and allows recipient-side deduplication if primary delivery succeeded but its proof was lost.
 - The engine's paper-message capability is outside the online sending choices for v1 and may be designed separately later.
-- Required inbound stamp cost defaults to **0**. Positive costs are advertised in delivery announces and validated cooperatively in the worker before an inbound message is accepted; tickets retain the Python-reference bypass behavior.
+- Required inbound stamp cost defaults to **8**. Setting it to **0** disables inbound stamp enforcement. Positive costs are advertised in delivery announces and validated cooperatively in the worker before an inbound message is accepted; tickets retain the Python-reference bypass behavior.
 
 ### 8.3.1 LXMF destination announcements and address sharing
 
