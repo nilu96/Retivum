@@ -467,6 +467,8 @@
     {@render children()}
   </main>
 
+  <div class="status-bar-safe-area-fade" aria-hidden="true"></div>
+
   {#snippet mobileAnnounceButton()}
     <button
       class="icon-button"

@@ -339,6 +339,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; }
 .mobile-identity-actions { display: none; }
 
 main { min-width: 0; min-height: 0; overflow: auto; }
+.status-bar-safe-area-fade { display: none; }
 .bottom-navigation { display: none; }
 
 .page { width: min(1120px, 100%); min-height: 100%; margin-inline: auto; padding: 40px clamp(24px, 4vw, 58px) 70px; }
@@ -1364,6 +1365,27 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   }
   .sidebar { display: none; }
   main { min-height: calc(100dvh - env(safe-area-inset-top, 0px) - var(--bottom-nav-height) - env(safe-area-inset-bottom, 0px)); overflow: visible; }
+  :root[data-native-platform='ios'] .status-bar-safe-area-fade,
+  :root[data-native-platform='android'] .status-bar-safe-area-fade {
+    --status-bar-safe-area-top: env(safe-area-inset-top, 0px);
+    position: fixed;
+    z-index: 40;
+    display: block;
+    height: calc(var(--status-bar-safe-area-top) + 28px);
+    inset: 0 0 auto;
+    pointer-events: none;
+    background: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--bg) 68%, transparent) 0,
+      color-mix(in srgb, var(--bg) 60%, transparent) max(0px, calc(var(--status-bar-safe-area-top) - 8px)),
+      color-mix(in srgb, var(--bg) 38%, transparent) var(--status-bar-safe-area-top),
+      color-mix(in srgb, var(--bg) 14%, transparent) calc(var(--status-bar-safe-area-top) + 15px),
+      transparent 100%
+    );
+  }
+  :root[data-native-platform='android'] .status-bar-safe-area-fade {
+    --status-bar-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  }
   .bottom-navigation { position: fixed; z-index: 20; display: grid; grid-template-columns: repeat(4, 1fr); inset: auto 0 0; height: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px)); padding-block: 6px env(safe-area-inset-bottom, 0px); padding-inline: calc(10px + env(safe-area-inset-left, 0px)) calc(10px + env(safe-area-inset-right, 0px)); border-block-start: 1px solid var(--border); background: color-mix(in srgb, var(--surface-1) 90%, transparent); backdrop-filter: blur(16px); }
   .bottom-navigation button { display: flex; min-width: 0; flex-direction: column; align-items: center; justify-content: center; gap: 3px; border-radius: 9px; font-size: .65rem; }
   .bottom-navigation .navigation-copy { gap: 4px; }
