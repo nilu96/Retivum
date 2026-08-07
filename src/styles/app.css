@@ -395,8 +395,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .mobile-conversation-sync-button { display: none; flex: none; }
 @keyframes chat-sync-spin { to { transform: rotate(360deg); } }
 .scope-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-inline: 18px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
-.scope-tabs button { min-height: 35px; padding-inline: 5px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font-size: .78rem; font-weight: 650; }
-.scope-tabs button.active { background: var(--surface-3); color: var(--text); box-shadow: 0 1px 5px rgba(0,0,0,.12); }
+.scope-tabs button { min-height: 35px; padding-inline: 5px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font-size: .78rem; font-weight: 650; transition: color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.scope-tabs button.active { color: var(--text); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-3)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent), 0 1px 5px rgba(0,0,0,.12); }
 .search-field { display: flex; align-items: center; gap: 9px; margin: 13px 18px 0; padding-inline: 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-subtle); background: var(--surface-2); }
 .search-field:focus-within { border-color: var(--accent); }
 .search-field > svg { flex: none; }
@@ -1039,6 +1039,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .scope-tabs.path-management-tabs { width: min(470px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .path-management-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; }
 .path-management-tabs button span { display: inline-grid; min-width: 20px; height: 20px; place-items: center; padding-inline: 5px; border-radius: 999px; color: var(--text-subtle); background: var(--surface-1); font-size: .62rem; font-variant-numeric: tabular-nums; }
+.path-management-tabs button.active span { color: var(--accent-strong); background: var(--accent-soft); }
 .path-management-filters { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(155px, .42fr) minmax(105px, .24fr) auto; gap: 9px; margin-block-end: 12px; }
 .path-management-filters.destination-only { grid-template-columns: minmax(220px, 1fr) minmax(170px, .42fr) auto auto; }
 .path-management-filters .path-management-search { min-width: 0; margin: 0; }
