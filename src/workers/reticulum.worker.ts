@@ -1415,7 +1415,7 @@ function announceLxmf(
     const announceFingerprint = lxmfDeliveryAnnounceFingerprint(identity.displayName, stampCost);
     const result = processOutput(node.announceLxmf({
       displayName: identity.displayName,
-      stampCost: stampCost > 0 ? stampCost : undefined,
+      stampCost,
       compressionSupported: true,
       ...(requestedInterfaceIndex !== undefined ? { interfaceIndex: requestedInterfaceIndex } : {}),
     }) as WasmOutput, {
@@ -1479,7 +1479,10 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
   }
 
   const title = command.title.trim().slice(0, 1_024);
-  const timestamp = command.timestamp ?? Date.now() / 1_000;
+  // New messages take their wire timestamp from the node clock. An explicit
+  // timestamp is reserved for retrying or changing transport for the same
+  // logical message.
+  const timestamp = command.timestamp;
   const isPropagationFallback = command.propagationFallback === true;
   const deliveryPlan = resolveLxmfDeliveryPlan(configuration.preferences.lxmf);
   let attempt: ReturnType<typeof prepareLxmfAttempt>;
@@ -1600,7 +1603,7 @@ function prepareLxmfAttempt(
   content: string,
   attachments: Extract<RuntimeCommand, { type: 'sendLxmfMessage' }>['attachments'],
   method: 'direct' | 'opportunistic' | 'propagated',
-  timestamp: number,
+  timestamp: number | undefined,
 ): { messageId: string; sourceHash: string; method: string; timestamp: number; output: WasmOutput } {
   if (!node) throw new Error('RUNTIME_NOT_READY');
   if (method === 'propagated') {
@@ -1616,7 +1619,7 @@ function prepareLxmfAttempt(
       fields: [],
       attachments: lxmfAttachmentInput(attachments),
       method,
-      timestamp,
+      ...(timestamp === undefined ? {} : { timestamp }),
       includeTicket: true,
     });
     return {
@@ -4248,7 +4251,7 @@ function scheduleNextTick(): void {
   const deadline = node.nextDeadlineMs();
   const deadlineNumber = deadline === undefined ? Number.NaN : Number(deadline);
   const delay = Number.isFinite(deadlineNumber)
-    ? Math.min(Math.max(0, deadlineNumber - Date.now()), maxTimerDelayMs)
+    ? Math.min(Math.max(0, deadlineNumber - performance.now()), maxTimerDelayMs)
     : idleDeadlineCheckMs;
   tickTimer = setTimeout(() => {
     tickTimer = undefined;

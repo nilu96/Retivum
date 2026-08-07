@@ -284,9 +284,10 @@ After every command, inbound packet, socket-state change, or scheduled deadline:
 2. Process each returned `WasmOutput` exactly once and drain its actions/events in order. `addInterface()` is the exception: it returns only a runtime index.
 3. Route `send` actions to the matching live interface driver.
 4. Normalize and publish events to application services.
-5. Treat `nextDeadlineMs` as the current artifact's absolute Unix-epoch millisecond deadline. Schedule `max(0, deadline - Date.now())`, clamp it to the platform timer limit, and re-read/re-check the deadline when the timer fires; retain a contract test so an upstream semantic change is caught.
-6. If state is dirty, request a debounced durable snapshot. Critical state transitions additionally request an immediate snapshot.
-7. Clear the WASM dirty flag only after durable storage acknowledges success.
+5. Treat `nextDeadlineMs` as an absolute deadline in the node's monotonic clock domain. The WASM browser clock and worker scheduler both use the dedicated worker's `performance.now()` value, so schedule `max(0, deadline - performance.now())`, clamp it to the platform timer limit, and re-read/re-check the deadline when the timer fires.
+6. The WASM browser clock is the single platform time adapter. It exposes monotonic milliseconds from `performance.now()` for timers and Unix wall seconds from `Date.now()` for wire-visible fields. The node owns that clock; ordinary Reticulum and LXMF operations obtain time from the node instead of accepting JavaScript time arguments. Retrying or changing transport for the same logical LXMF message may explicitly preserve its original timestamp.
+7. If state is dirty, request a debounced durable snapshot. Critical state transitions additionally request an immediate snapshot.
+8. Clear the WASM dirty flag only after durable storage acknowledges success.
 
 Apply backpressure limits to worker commands, UI events, logs, and outbound socket buffers. The browser WebSocket API does not provide true stream backpressure; inspect `bufferedAmount`, pause runtime sends above a high-water mark, and fail/reconnect on a bounded timeout.
 

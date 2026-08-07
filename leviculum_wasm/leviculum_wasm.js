@@ -1549,6 +1549,10 @@ function __wbg_get_imports() {
             const ret = arg0.node;
             return ret;
         },
+        __wbg_now_0c7da3adb7a1c172: function() {
+            const ret = performance.now();
+            return ret;
+        },
         __wbg_now_86c0d4ba3fa605b8: function() {
             const ret = Date.now();
             return ret;
@@ -1643,7 +1647,7 @@ function __wbg_get_imports() {
             return ret;
         },
         __wbindgen_cast_0000000000000001: function(arg0, arg1) {
-            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 143, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
+            // Cast intrinsic for `Closure(Closure { owned: true, function: Function { arguments: [Externref], shim_idx: 146, ret: Result(Unit), inner_ret: Some(Result(Unit)) }, mutable: true }) -> Externref`.
             const ret = makeMutClosure(arg0, arg1, wasm_bindgen__convert__closures_____invoke__h708329bea8352ec0);
             return ret;
         },

@@ -97,9 +97,9 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.8.0`, origin `https://codeberg.org/nilu96/leviculum.git`, upstream `https://codeberg.org/Lew_Palm/leviculum.git`, and Git commit `5780befe93d4f87c5010e3a5dd79663ba2ef0db2`. The generated WASM below corresponds to this `feat/wasm` source. It keeps recovery-friendly repeated `PropagationStampPending` events while avoiding persistence requests when only their derived retry cursor advances, projects the request destination hash through WASM, makes request-handler deregistration destination-scoped, normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, Python-compatible direct-delivery attempt accounting and Resource-failure handling, optional `interfaceIndex` targeting for `announceLxmf()`, and current core path-response behavior that regenerates announces while retaining the last explicitly announced application data.
+The local Leviculum checkout currently reports version `0.8.0`, origin `https://codeberg.org/nilu96/leviculum.git`, and upstream `https://codeberg.org/Lew_Palm/leviculum.git`. The current generated WASM corresponds to merge commit `2b00a05e354de081b42f294ef69057fe15dc296e` and Git tree `248d5fdafbb6d68f153bd7ebe4300b59802e2101`. That commit merges `feat/wasm` base `5780befe93d4f87c5010e3a5dd79663ba2ef0db2` with upstream `bb7c4f64db3f6d6d2c27cc7d5e6e9fd0617ab801` and includes the WASM adapter changes. Those changes use one browser clock seam (`performance.now()` for monotonic deadlines and `Date.now()` for Unix wall time), source ordinary LXMF wire timestamps from the node, preserve explicit timestamps only for the same logical message across retries or propagation fallback, apply checked delivery-announcement stamp costs, and implement the upstream storage table enumeration requirements. The source also keeps recovery-friendly repeated `PropagationStampPending` events while avoiding persistence requests when only their derived retry cursor advances, projects the request destination hash through WASM, makes request-handler deregistration destination-scoped, normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, Python-compatible direct-delivery attempt accounting and Resource-failure handling, optional `interfaceIndex` targeting for `announceLxmf()`, and current core path-response behavior that regenerates announces while retaining the last explicitly announced application data.
 
-Use the immutable Leviculum commit above together with the recorded toolchain, build command, and artifact hashes when publishing or reproducing this generated build.
+Use the immutable Leviculum commit and tree above together with the recorded toolchain, build command, and artifact hashes when publishing or reproducing this generated build.
 
 ## Generated Leviculum WASM
 
@@ -114,8 +114,8 @@ Current fingerprints:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `leviculum_wasm.js` | `dfda4c5fee11ddee4c2b61e8ef08294c01b720058f4c20ab7db62138c9a55ad3` |
-| `leviculum_wasm_bg.wasm` | `c6c7444758476eb3a3a7e7f7bc31c030ec25c1a0f6e744703803bd2cc24982b4` |
+| `leviculum_wasm.js` | `0f7fa57fbd0e10084578bc35eab93de918be17f250b7eb7d91808d28bbbed30b` |
+| `leviculum_wasm_bg.wasm` | `9dcd157265fa50b38d5d641b1a865c2a5e534922d9c0da0e85d749ecc4365a88` |
 | `leviculum_wasm.d.ts` | `d10885f80977b246ac6de7eac9967556011e936d6f36002ecd79c3dbf9701039` |
 | `leviculum_wasm_bg.wasm.d.ts` | `f8f304cd4be42fc7fa6c088976906fcdc1cf62a136e881293271e3fd843913a7` |
 
