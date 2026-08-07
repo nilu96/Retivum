@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history';
 import type {
   KnownDestinationEntry,
@@ -182,6 +182,10 @@ describe('PathManagementView', () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('filters paths by partial destination hash, interface, and hop count', async () => {
     const otherDestination = 'a'.repeat(32);
     pathTableEntries.set([
@@ -204,11 +208,11 @@ describe('PathManagementView', () => {
     ]);
     render(PathManagementView);
 
-    const filterToggle = screen.getByRole('button', { name: 'Show filters' });
+    const filterToggle = screen.getByRole('button', { name: 'Show filters & actions' });
     expect(filterToggle).toHaveAttribute('aria-expanded', 'false');
     await fireEvent.click(filterToggle);
     expect(filterToggle).toHaveAttribute('aria-expanded', 'true');
-    expect(filterToggle).toHaveAccessibleName('Hide filters');
+    expect(filterToggle).toHaveAccessibleName('Hide filters & actions');
     expect(document.getElementById('path-management-filters')).toHaveClass('expanded');
 
     const destinationSearch = screen.getByLabelText(
@@ -219,7 +223,7 @@ describe('PathManagementView', () => {
     expect(screen.queryByText(pathDestination)).not.toBeInTheDocument();
     expect(screen.getByText(otherDestination)).toBeInTheDocument();
     await fireEvent.click(filterToggle);
-    expect(filterToggle).toHaveAccessibleName('Show filters (1)');
+    expect(filterToggle).toHaveAccessibleName('Show filters & actions (1)');
     await fireEvent.click(filterToggle);
 
     await fireEvent.input(destinationSearch, { target: { value: '' } });
@@ -591,7 +595,9 @@ describe('PathManagementView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Drop path' }));
     expect(drop).toHaveBeenCalledWith(pathDestination);
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Clear all' }));
+    const clearPaths = screen.getByRole('button', { name: 'Clear all' });
+    expect(document.getElementById('path-management-filters')).toContainElement(clearPaths);
+    await fireEvent.click(clearPaths);
     const dialog = screen.getByRole('alertdialog');
     expect(within(dialog).getByRole('heading', { name: 'Clear all cached paths?' })).toBeInTheDocument();
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Clear paths' }));
@@ -605,6 +611,9 @@ describe('PathManagementView', () => {
     await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
     expect(screen.getByText(knownDestination)).toBeInTheDocument();
     expect(screen.getByText('4'.repeat(128))).toBeInTheDocument();
+    expect(document.getElementById('path-management-filters')).toContainElement(
+      screen.getByRole('button', { name: 'Clear all' }),
+    );
 
     await fireEvent.click(screen.getByRole('button', { name: 'Forget destination' }));
     const dialog = screen.getByRole('alertdialog');
@@ -612,6 +621,22 @@ describe('PathManagementView', () => {
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Forget destination' }));
 
     expect(forget).toHaveBeenCalledWith(knownDestination);
+  });
+
+  it('uses contextual bulk-clear labels when the action is full width', async () => {
+    const matchMedia = vi.fn((query: string) => ({
+      matches: query === '(max-width: 820px)',
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    vi.stubGlobal('matchMedia', matchMedia);
+
+    render(PathManagementView);
+
+    expect(matchMedia).toHaveBeenCalledWith('(max-width: 820px)');
+    expect(screen.getByRole('button', { name: 'Clear cached paths' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
+    expect(screen.getByRole('button', { name: 'Clear known destinations' })).toBeInTheDocument();
   });
 
   it('shows application metadata, names, capabilities, and reachability for known destinations', async () => {

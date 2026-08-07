@@ -80,6 +80,10 @@
   let filtersExpanded = $state(false);
   let destinationTypeFilter = $state<KnownDestinationApplication | ''>('');
   let groupDestinationsByIdentity = $state(false);
+  let bulkClearFullWidth = $state(
+    typeof window !== 'undefined'
+      && window.matchMedia?.('(max-width: 820px)').matches === true,
+  );
   let validationVisible = $state(false);
   let busyOperations = $state<string[]>([]);
   let pathRequestCooldownHashes = $state<string[]>([]);
@@ -181,6 +185,10 @@
   );
 
   onMount(() => {
+    const bulkClearLayoutQuery = window.matchMedia?.('(max-width: 820px)');
+    const updateBulkClearLayout = (): void => {
+      bulkClearFullWidth = bulkClearLayoutQuery?.matches === true;
+    };
     scrollContainer = page.closest<HTMLElement>('main') ?? undefined;
     scrollContainer?.scrollTo({ top: 0, left: 0 });
     const updateScrollState = () => {
@@ -188,6 +196,8 @@
     };
     scrollContainer?.addEventListener('scroll', updateScrollState, { passive: true });
     window.addEventListener('scroll', updateScrollState, { passive: true });
+    bulkClearLayoutQuery?.addEventListener('change', updateBulkClearLayout);
+    updateBulkClearLayout();
     updateScrollState();
     return () => {
       if (highlightTimer !== undefined) clearTimeout(highlightTimer);
@@ -195,6 +205,7 @@
       pathRequestCooldownTimers.clear();
       scrollContainer?.removeEventListener('scroll', updateScrollState);
       window.removeEventListener('scroll', updateScrollState);
+      bulkClearLayoutQuery?.removeEventListener('change', updateBulkClearLayout);
       scrollContainer = undefined;
     };
   });
@@ -514,17 +525,6 @@
           <span>{forgettableDestinationCount}</span>
         </button>
       </div>
-      <button
-        class="button secondary compact danger-text"
-        type="button"
-        disabled={activeTab === 'paths' ? $pathTableEntries.length === 0 : forgettableDestinationCount === 0}
-        onclick={() => {
-          confirmation = { kind: activeTab === 'paths' ? 'clearPaths' : 'clearDestinations' };
-        }}
-      >
-        <Icon name="trash" size={16} />
-        {$t('pathManagement.clear.all')}
-      </button>
     </div>
 
     <button
@@ -618,6 +618,21 @@
           <span>{$t('pathManagement.filter.groupByIdentity')}</span>
         </label>
       {/if}
+      <button
+        class="button secondary compact danger-text path-management-clear-all"
+        type="button"
+        disabled={activeTab === 'paths' ? $pathTableEntries.length === 0 : forgettableDestinationCount === 0}
+        onclick={() => {
+          confirmation = { kind: activeTab === 'paths' ? 'clearPaths' : 'clearDestinations' };
+        }}
+      >
+        <Icon name="trash" size={16} />
+        {$t(bulkClearFullWidth
+          ? activeTab === 'paths'
+            ? 'pathManagement.clear.paths'
+            : 'pathManagement.clear.destinations'
+          : 'pathManagement.clear.all')}
+      </button>
     </div>
 
     {#if activeTab === 'paths'}
