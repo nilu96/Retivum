@@ -120,6 +120,7 @@ describe('Electron native Bluetooth bridge', () => {
 
 describe('native Noble RNode backend', () => {
   function fakeTransport() {
+    let paired = false;
     const notify = Object.assign(new EventEmitter(), {
       uuid: '6e400003b5a3f393e0a9e50e24dcca9e',
       subscribeAsync: vi.fn().mockResolvedValue(undefined),
@@ -140,7 +141,11 @@ describe('native Noble RNode backend', () => {
       },
       connectAsync: vi.fn(async () => { peripheral.state = 'connected'; }),
       disconnectAsync: vi.fn(async () => { peripheral.state = 'disconnected'; }),
-      pairAsync: vi.fn(async () => { peripheral.state = 'disconnected'; }),
+      isPaired: vi.fn(() => paired),
+      pairAsync: vi.fn(async () => {
+        paired = true;
+        peripheral.state = 'disconnected';
+      }),
       discoverSomeServicesAndCharacteristicsAsync: vi.fn().mockResolvedValue({
         services: [],
         characteristics: [write, notify],
@@ -157,7 +162,13 @@ describe('native Noble RNode backend', () => {
       }),
       stop: vi.fn(),
     });
-    return { noble, notify, peripheral, write };
+    return {
+      noble,
+      notify,
+      peripheral,
+      setPaired(value) { paired = value; },
+      write,
+    };
   }
 
   it('supplies the entered Windows PIN and reconnects after the bonding disconnect', async () => {
@@ -177,6 +188,7 @@ describe('native Noble RNode backend', () => {
   it('uses the BlueZ agent for Linux PIN pairing', async () => {
     const transport = fakeTransport();
     const pairLinux = vi.fn().mockResolvedValue(undefined);
+    const requestPin = vi.fn().mockResolvedValue('654321');
     const backend = await createNobleBackend('linux', {
       noble: transport.noble,
       pairLinuxBluetoothDevice: pairLinux,
@@ -184,9 +196,47 @@ describe('native Noble RNode backend', () => {
     await backend.startScan(() => undefined);
     transport.noble.emit('discover', transport.peripheral);
 
-    await backend.pair(transport.peripheral.id, async () => '654321');
+    await backend.pair(transport.peripheral.id, requestPin);
 
-    expect(pairLinux).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF', '654321');
+    expect(pairLinux).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF', requestPin);
+    expect(requestPin).not.toHaveBeenCalled();
+    await backend.dispose();
+  });
+
+  it('does not request the Windows PIN again when WinRT reports a durable bond', async () => {
+    const transport = fakeTransport();
+    transport.setPaired(true);
+    const requestPin = vi.fn().mockResolvedValue('123456');
+    const backend = await createNobleBackend('win32', { noble: transport.noble });
+    await backend.startScan(() => undefined);
+    transport.noble.emit('discover', transport.peripheral);
+
+    await backend.pair(transport.peripheral.id, requestPin);
+
+    expect(requestPin).not.toHaveBeenCalled();
+    expect(transport.peripheral.pairAsync).not.toHaveBeenCalled();
+    expect(transport.notify.subscribeAsync).toHaveBeenCalled();
+    await backend.dispose();
+  });
+
+  it('rediscovers the saved Windows address before a cold-start connection', async () => {
+    const transport = fakeTransport();
+    transport.noble.startScanningAsync.mockImplementation(async () => {
+      queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+    });
+    const backend = await createNobleBackend('win32', { noble: transport.noble });
+
+    await backend.open('rnode-one', transport.peripheral.id, {
+      onData: vi.fn(),
+      onClosed: vi.fn(),
+    });
+
+    expect(transport.noble.startScanningAsync).toHaveBeenCalledWith(
+      ['6e400001b5a3f393e0a9e50e24dcca9e'],
+      true,
+    );
+    expect(transport.peripheral.connectAsync).toHaveBeenCalled();
+    expect(transport.noble.connectAsync).not.toHaveBeenCalled();
     await backend.dispose();
   });
 

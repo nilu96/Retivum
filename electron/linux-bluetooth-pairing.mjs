@@ -10,11 +10,12 @@ const PROPERTIES_INTERFACE = 'org.freedesktop.DBus.Properties';
 const OBJECT_MANAGER = 'org.freedesktop.DBus.ObjectManager';
 const RNODE_NUS_SERVICE = '6e400001b5a3f393e0a9e50e24dcca9e';
 
-export async function pairLinuxBluetoothDevice(deviceAddress, pin) {
-  const dbus = require('dbus-next');
+export async function pairLinuxBluetoothDevice(deviceAddress, requestPin, dependencies = {}) {
+  const dbus = dependencies.dbus ?? require('dbus-next');
   const { Interface } = dbus.interface;
   const bus = dbus.systemBus();
   let registered = false;
+  let pin;
 
   class RNodePairingAgent extends Interface {
     constructor() {
@@ -92,6 +93,7 @@ export async function pairLinuxBluetoothDevice(deviceAddress, pin) {
     const properties = device.getInterface(PROPERTIES_INTERFACE);
     const paired = unwrapVariant(await properties.Get(DEVICE_INTERFACE, 'Paired')) === true;
     if (paired) return;
+    pin = await requestPin();
 
     const managerObject = await bus.getProxyObject(BLUEZ_SERVICE, '/org/bluez');
     const manager = managerObject.getInterface(AGENT_MANAGER);

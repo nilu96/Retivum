@@ -16,6 +16,7 @@ const BLE_WRITE_CHUNK_SIZE = 20;
 const MAX_WRITE_BYTES = 4 * 1024;
 const STAGE_TIMEOUT_MS = 20_000;
 const PAIRING_TIMEOUT_MS = 60_000;
+const WINDOWS_REDISCOVERY_TIMEOUT_MS = 8_000;
 const POST_CONNECT_SETTLE_MS = 750;
 const PAIRING_RECONNECT_ATTEMPTS = 5;
 const PAIRING_RECONNECT_DELAY_MS = 3_500;
@@ -177,10 +178,34 @@ export async function createNobleBackend(platform = process.platform, dependenci
     if (noble.state === 'poweredOn') await noble.stopScanningAsync();
   }
 
+  async function rediscoverWindowsPeripheral(deviceId) {
+    if (platform !== 'win32') return undefined;
+    let resolveMatch;
+    const match = new Promise((resolve) => { resolveMatch = resolve; });
+    const listener = (peripheral) => {
+      const services = peripheral.advertisement?.serviceUuids?.map(normalizeUuid) ?? [];
+      if (services.length > 0 && !services.includes(RNODE_NUS_SERVICE)) return;
+      discovered.set(peripheral.id, peripheral);
+      if (normalizeDeviceId(peripheral.id) === normalizeDeviceId(deviceId)) resolveMatch(peripheral);
+    };
+    noble.on('discover', listener);
+    try {
+      await stage('Bluetooth scan', () => noble.startScanningAsync([RNODE_NUS_SERVICE], true));
+      return await stage(
+        'rediscover paired RNode',
+        () => match,
+        WINDOWS_REDISCOVERY_TIMEOUT_MS,
+      ).catch(() => undefined);
+    } finally {
+      noble.removeListener('discover', listener);
+      if (noble.state === 'poweredOn') await noble.stopScanningAsync().catch(() => undefined);
+    }
+  }
+
   async function resolveAndConnect(deviceId) {
     await ready();
     await stopScan();
-    const known = discovered.get(deviceId);
+    const known = discovered.get(deviceId) ?? await rediscoverWindowsPeripheral(deviceId);
     if (known) {
       if (known.state !== 'connected') await stage('connect', () => known.connectAsync());
       return known;
@@ -218,14 +243,13 @@ export async function createNobleBackend(platform = process.platform, dependenci
   async function pair(deviceId, requestPin) {
     const peripheral = discovered.get(deviceId);
     if (!peripheral) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
-    let pin;
     try {
-      if (platform === 'win32' || platform === 'linux') pin = await requestPin();
       if (platform === 'linux') {
-        await stage('pair', () => linuxPair(peripheral.address, pin), PAIRING_TIMEOUT_MS);
+        await stage('pair', () => linuxPair(peripheral.address, requestPin), PAIRING_TIMEOUT_MS);
       }
       const connected = await resolveAndConnect(deviceId);
-      if (platform === 'win32') {
+      if (platform === 'win32' && connected.isPaired?.() !== true) {
+        const pin = await requestPin();
         await stage('pair', () => connected.pairAsync({ pin }), PAIRING_TIMEOUT_MS);
       }
       let lastError;
@@ -332,6 +356,10 @@ function validBytes(value) {
 
 function normalizeUuid(value) {
   return String(value ?? '').replace(/-/g, '').toLowerCase();
+}
+
+function normalizeDeviceId(value) {
+  return String(value ?? '').replace(/:/g, '').toLowerCase();
 }
 
 async function stage(name, operation, timeoutMs = STAGE_TIMEOUT_MS) {
