@@ -972,7 +972,41 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .device-picker-list .button { display: flex; min-height: 48px; flex-direction: column; align-items: flex-start; justify-content: center; }
 .device-picker-list small { color: var(--text-subtle); font: .65rem "SFMono-Regular", Consolas, monospace; }
 .device-scan-status { align-self: center; margin: auto; padding: 18px; color: var(--text-muted); font-size: .78rem; text-align: center; }
-.bluetooth-pairing-pin { margin: 5px 22px 12px; padding: 16px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--surface-2); font: 700 1.45rem "SFMono-Regular", Consolas, monospace; letter-spacing: .12em; text-align: center; }
+.bluetooth-pairing-layer { z-index: 70; }
+.bluetooth-pairing-dialog { width: min(440px, 100%); overflow: hidden; border-color: color-mix(in srgb, var(--accent) 28%, var(--border-strong)); box-shadow: 0 28px 90px rgba(0, 0, 0, .48); }
+.bluetooth-pairing-dialog::before { content: ''; position: absolute; z-index: 2; height: 2px; inset: 0 0 auto; background: linear-gradient(90deg, transparent, var(--accent), transparent); opacity: .8; }
+.bluetooth-pairing-dialog > header { grid-template-columns: 48px minmax(0, 1fr); align-items: start; gap: 15px; padding: 26px 26px 18px; }
+.bluetooth-pairing-dialog > header > div:last-child { min-width: 0; }
+.bluetooth-pairing-dialog header h2 { margin-block-start: 3px; font-size: 1.2rem; letter-spacing: -.015em; }
+.bluetooth-pairing-dialog header p { max-width: 330px; margin-block-start: 6px; color: var(--text-muted); font-size: .78rem; line-height: 1.5; }
+.bluetooth-pairing-icon { width: 48px; height: 48px; border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 14px; box-shadow: inset 0 0 20px color-mix(in srgb, var(--accent) 7%, transparent); }
+.bluetooth-pairing-eyebrow { display: block; color: var(--accent-strong); font-size: .63rem; font-weight: 750; letter-spacing: .09em; line-height: 1; text-transform: uppercase; }
+.identity-name-editor .bluetooth-pairing-form { gap: 18px; padding: 4px 26px 0; }
+.bluetooth-pairing-code-panel { display: grid; gap: 11px; padding: 17px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface-2) 82%, transparent); box-shadow: inset 0 1px rgba(255, 255, 255, .018); }
+.bluetooth-pairing-code-label { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--text-muted); font-size: .72rem; font-weight: 700; }
+.bluetooth-pairing-code-label small { color: var(--text-subtle); font-size: .64rem; font-weight: 600; }
+.bluetooth-pairing-code-panel input { width: 100%; min-height: 62px; padding: 10px 14px; border: 1px solid var(--border-strong); border-radius: 11px; outline: 0; color: var(--text); background: var(--surface-1); caret-color: var(--accent); font: 750 1.55rem "SFMono-Regular", Consolas, monospace; letter-spacing: .16em; text-align: center; transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease; }
+.bluetooth-pairing-code-panel input:focus { border-color: var(--accent); background: color-mix(in srgb, var(--surface-1) 90%, var(--accent-soft)); box-shadow: 0 0 0 4px var(--accent-soft); }
+.bluetooth-pairing-privacy { display: flex; align-items: flex-start; gap: 7px; margin: 0; color: var(--text-subtle); font-size: .66rem; line-height: 1.45; }
+.bluetooth-pairing-privacy svg { flex: none; margin-block-start: 1px; color: var(--accent); }
+.bluetooth-pairing-confirmation { display: grid; gap: 10px; margin: 4px 26px 20px; padding: 17px; border: 1px solid var(--border); border-radius: 14px; background: color-mix(in srgb, var(--surface-2) 82%, transparent); }
+.bluetooth-pairing-confirmation > span { color: var(--text-muted); font-size: .72rem; font-weight: 700; }
+.bluetooth-pairing-pin { display: block; padding: 14px; border: 1px solid var(--border-strong); border-radius: 11px; color: var(--text); background: var(--surface-1); font: 750 1.55rem "SFMono-Regular", Consolas, monospace; letter-spacing: .16em; text-align: center; }
+.identity-name-editor .bluetooth-pairing-actions { display: flex; justify-content: flex-end; gap: 9px; margin-inline: -26px; padding: 16px 26px 20px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 44%, transparent); }
+.bluetooth-pairing-confirmation + .bluetooth-pairing-actions { margin-inline: 0; }
+.bluetooth-pairing-actions .button { min-width: 98px; }
+@media (max-width: 480px) {
+  .bluetooth-pairing-dialog > header { grid-template-columns: 42px minmax(0, 1fr); gap: 12px; padding: 23px 20px 17px; }
+  .bluetooth-pairing-icon { width: 42px; height: 42px; border-radius: 12px; }
+  .bluetooth-pairing-dialog header h2 { font-size: 1.08rem; }
+  .identity-name-editor .bluetooth-pairing-form { padding-inline: 20px; }
+  .bluetooth-pairing-code-panel { padding: 15px; }
+  .bluetooth-pairing-code-panel input, .bluetooth-pairing-pin { font-size: 1.35rem; }
+  .identity-name-editor .bluetooth-pairing-actions { margin-inline: -20px; padding: 15px 20px 18px; }
+  .bluetooth-pairing-confirmation { margin-inline: 20px; }
+  .bluetooth-pairing-confirmation + .bluetooth-pairing-actions { margin-inline: 0; }
+  .bluetooth-pairing-actions .button { min-width: 0; flex: 1; }
+}
 .section-icon.danger { color: var(--danger); background: var(--danger-soft); }
 .button.danger { border-color: var(--danger); color: var(--danger-ink); background: var(--danger); }
 .bookmark-editor-address { display: flex; min-width: 0; flex-direction: column; gap: 6px; color: var(--text-muted); font-size: .74rem; font-weight: 650; }
