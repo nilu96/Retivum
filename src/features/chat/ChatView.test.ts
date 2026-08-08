@@ -1601,7 +1601,7 @@ describe('ChatView', () => {
       roundTripTimeMs: 31.25,
       hops: 1,
     });
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(`Probe to Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}> succeeded in 0.0 s.`));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(`Probe to Remote Alice <${destinationHash.slice(0, 8)}…${destinationHash.slice(-6)}> succeeded in 31.25 ms.`));
     expect(get(probeHistory)[0]).toEqual(expect.objectContaining({ destinationHash, ok: true }));
 
     probe.mockResolvedValueOnce({

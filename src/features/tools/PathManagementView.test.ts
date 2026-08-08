@@ -925,7 +925,7 @@ describe('PathManagementView', () => {
       hops: 3,
     });
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent(
-      `Probe to Remote Alice <${pathDestination.slice(0, 8)}…${pathDestination.slice(-6)}> succeeded in 0.0 s.`,
+      `Probe to Remote Alice <${pathDestination.slice(0, 8)}…${pathDestination.slice(-6)}> succeeded in 31.25 ms.`,
     ));
   });
 

@@ -42,7 +42,9 @@ export function showDestinationProbeActivity(options: DestinationProbeActivityOp
       const translate = get(t);
       const duration = result.roundTripTimeMs === undefined
         ? translate('probe.activity.durationUnknown')
-        : translate('probe.history.rtt.seconds', { value: (result.roundTripTimeMs / 1_000).toFixed(1) });
+        : result.roundTripTimeMs < 1_000
+          ? translate('probe.history.rtt.milliseconds', { value: result.roundTripTimeMs.toFixed(2) })
+          : translate('probe.history.rtt.seconds', { value: (result.roundTripTimeMs / 1_000).toFixed(1) });
       activity.success(
         hasName ? 'probe.activity.successNamed' : 'probe.activity.success',
         { destination, duration, ...(hasName ? { name: displayName! } : {}) },
