@@ -138,7 +138,7 @@ index 525320b..59c1ffb 100644
    }
  
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
-index 2a5f3fa..2556dd0 100644
+index 2a5f3fa..449f072 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 +++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 @@ -323,9 +323,8 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
@@ -242,6 +242,30 @@ index 2a5f3fa..2556dd0 100644
          if (mDeviceMap.find(uuid) == mDeviceMap.end())
          {
              LOGE("device with id %s not found", uuid.c_str());
+@@ -624,13 +645,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
+ bool BLEManager::DiscoverServices(const std::string& uuid,
+                                   const std::vector<winrt::guid>& serviceUUIDs)
+ {
+-    CHECK_DEVICE();
+-    IFDEVICE(device, uuid)
++    auto it = mDeviceMap.find(uuid);
++    if (it == mDeviceMap.end() || !it->second.device.has_value())
+     {
+-        auto completed = bind2(this, &BLEManager::OnServicesDiscovered, uuid, serviceUUIDs);
+-        device.GetGattServicesAsync(BluetoothCacheMode::Uncached).Completed(completed);
+-        return true;
++        std::vector<std::string> serviceUuids;
++        mEmit.ServicesDiscovered(uuid, serviceUuids,
++                                 "device not connected while discovering services");
++        return false;
+     }
++    BluetoothLEDevice& device = *it->second.device;
++    auto completed = bind2(this, &BLEManager::OnServicesDiscovered, uuid, serviceUUIDs);
++    device.GetGattServicesAsync(BluetoothCacheMode::Uncached).Completed(completed);
++    return true;
+ }
+ 
+ void BLEManager::OnServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> asyncOp,
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
 index 14a3175..eb2855c 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h

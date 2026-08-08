@@ -144,7 +144,6 @@ describe('native Noble RNode backend', () => {
       isPaired: vi.fn(() => paired),
       pairAsync: vi.fn(async () => {
         paired = true;
-        peripheral.state = 'disconnected';
       }),
       discoverSomeServicesAndCharacteristicsAsync: vi.fn().mockResolvedValue({
         services: [],
@@ -171,7 +170,7 @@ describe('native Noble RNode backend', () => {
     };
   }
 
-  it('supplies the entered Windows PIN and reconnects after the bonding disconnect', async () => {
+  it('supplies the Windows PIN and forces a fresh connection after bonding', async () => {
     const transport = fakeTransport();
     const backend = await createNobleBackend('win32', { noble: transport.noble });
     await backend.startScan(() => undefined);
@@ -181,6 +180,7 @@ describe('native Noble RNode backend', () => {
 
     expect(transport.peripheral.pairAsync).toHaveBeenCalledWith({ pin: '123456' });
     expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
+    expect(transport.peripheral.disconnectAsync).toHaveBeenCalledTimes(2);
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
     await backend.dispose();
   });
