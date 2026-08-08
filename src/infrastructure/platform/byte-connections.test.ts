@@ -78,6 +78,7 @@ describe('native BLE byte connection', () => {
     vi.useFakeTimers();
     capacitorPlatform.native = true;
     capacitorPlatform.name = 'android';
+    window.retivumDesktopBluetooth = undefined;
     for (const mock of Object.values(mocks)) mock.mockReset();
     mocks.initialize.mockResolvedValue(undefined);
     mocks.getDevices.mockResolvedValue([{ deviceId: 'AA:BB:CC:DD:EE:FF', name: 'RNode' }]);
@@ -256,6 +257,49 @@ describe('native BLE byte connection', () => {
     expect(writeCharacteristic.writeValueWithoutResponse).toHaveBeenCalled();
     expect(disconnect).toHaveBeenCalledTimes(1);
   });
+
+  it('prefers the Electron bridge, streams bytes, and preserves graceful shutdown', async () => {
+    let eventListener: ((event: DesktopBluetoothEvent) => void) | undefined;
+    const bridge: RetivumDesktopBluetoothBridge = {
+      startScan: vi.fn(),
+      stopScan: vi.fn(),
+      pair: vi.fn(),
+      open: vi.fn().mockResolvedValue(undefined),
+      write: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      onEvent: vi.fn((listener) => {
+        eventListener = listener;
+        return () => { eventListener = undefined; };
+      }),
+    };
+    window.retivumDesktopBluetooth = bridge;
+    const onData = vi.fn();
+    const onClosed = vi.fn();
+    const connection = createRNodeByteConnection({
+      ...config,
+      id: 'electron-rnode',
+      connection: {
+        type: 'ble',
+        deviceId: 'native-device-id',
+      },
+    });
+
+    await connection.open(onData, onClosed);
+    expect(bridge.open).toHaveBeenCalledWith({ id: 'electron-rnode', deviceId: 'native-device-id' });
+    eventListener?.({ id: 'electron-rnode', type: 'data', data: [4, 5, 6] });
+    expect(onData).toHaveBeenCalledWith(Uint8Array.of(4, 5, 6));
+
+    await connection.write(Uint8Array.of(7, 8));
+    expect(bridge.write).toHaveBeenCalledWith({ id: 'electron-rnode', data: [7, 8] });
+    eventListener?.({ id: 'electron-rnode', type: 'closed' });
+    expect(onClosed).toHaveBeenCalledTimes(1);
+
+    const closing = connection.close(Uint8Array.of(0xc0, 0x06, 0, 0xc0));
+    await vi.advanceTimersByTimeAsync(150);
+    await closing;
+    expect(bridge.close).toHaveBeenCalledWith({ id: 'electron-rnode' });
+  });
+
 });
 
 function dataViewBytes(value: DataView): number[] {

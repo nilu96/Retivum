@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { installDeviceAccess } from './device-access.mjs';
 import { registerDesktopSockets } from './desktop-sockets.mjs';
 import { registerDesktopDatagrams } from './desktop-datagrams.mjs';
+import { registerDesktopBluetooth } from './desktop-bluetooth.mjs';
 import { installDesktopAppLifecycle } from './app-lifecycle.mjs';
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -49,10 +50,12 @@ async function createWindow() {
 
   const disposeSockets = registerDesktopSockets(ipcMain, isTrustedRendererFrame);
   const disposeDatagrams = registerDesktopDatagrams(ipcMain, isTrustedRendererFrame);
-  const disposeDevices = installDeviceAccess(window, ipcMain);
+  const { dispose: disposeDevices, requestBluetoothPairing } = installDeviceAccess(window, ipcMain);
+  const disposeBluetooth = registerDesktopBluetooth(ipcMain, isTrustedRendererFrame, requestBluetoothPairing);
   const disposeAppLifecycle = installDesktopAppLifecycle(window, powerMonitor);
   disposeDesktopIntegration = () => {
     disposeAppLifecycle();
+    void disposeBluetooth();
     disposeDevices();
     disposeDatagrams();
     disposeSockets();

@@ -8,6 +8,7 @@ import {
 import { authorizeNativeRNodeDevice } from './byte-connections';
 import { rememberBluetoothDevice } from './bluetooth-devices';
 import { selectNativeRNodeDevice } from './native-bluetooth-selection';
+import { selectDesktopBluetoothDevice } from './desktop-bluetooth-selection';
 
 export interface InterfaceCapabilities {
   websocket: boolean;
@@ -21,6 +22,7 @@ export function detectInterfaceCapabilities(
     platform?: string;
     native: boolean;
     bluetooth: boolean;
+    bluetoothBridge?: boolean;
     serial: boolean;
     socketBridge: boolean;
     datagramBridge: boolean;
@@ -28,6 +30,7 @@ export function detectInterfaceCapabilities(
     platform: Capacitor.getPlatform(),
     native: Capacitor.isNativePlatform(),
     bluetooth: typeof navigator !== 'undefined' && navigator.bluetooth !== undefined,
+    bluetoothBridge: typeof window !== 'undefined' && window.retivumDesktopBluetooth !== undefined,
     serial: typeof navigator !== 'undefined' && navigator.serial !== undefined,
     socketBridge: typeof window !== 'undefined'
       && (window.retivumDesktopSockets !== undefined || window.retivumMobileSockets !== undefined),
@@ -35,7 +38,7 @@ export function detectInterfaceCapabilities(
   },
 ): InterfaceCapabilities {
   const rnodeConnections: RNodeConnectionType[] = [];
-  if (environment.native || environment.bluetooth) rnodeConnections.push('ble');
+  if (environment.native || environment.bluetooth || environment.bluetoothBridge) rnodeConnections.push('ble');
   if (!environment.native && environment.serial) rnodeConnections.push('serial');
   return {
     websocket: environment.platform !== 'android' && environment.platform !== 'ios',
@@ -75,6 +78,7 @@ export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
   usbProductId?: number;
 }> {
   if (type === 'ble') {
+    if (window.retivumDesktopBluetooth) return selectDesktopBluetoothDevice();
     if (Capacitor.isNativePlatform()) {
       const device = await selectNativeRNodeDevice();
       return { deviceId: device.deviceId, deviceName: device.name ?? 'RNode' };
@@ -103,6 +107,10 @@ export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
 }
 
 export async function authorizeRNodeDevice(type: RNodeConnectionType, deviceId?: string): Promise<void> {
+  if (type === 'ble' && deviceId && window.retivumDesktopBluetooth) {
+    await window.retivumDesktopBluetooth.pair({ deviceId });
+    return;
+  }
   if (type === 'ble' && deviceId && Capacitor.isNativePlatform()) {
     await authorizeNativeRNodeDevice(deviceId);
   }

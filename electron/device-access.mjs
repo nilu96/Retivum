@@ -46,6 +46,20 @@ export function installDeviceAccess(window, ipcMain) {
     window.webContents.send(REQUEST_CHANNEL, { requestId, type, devices });
   }
 
+  function requestBluetoothPairing(details) {
+    if (!PAIRING_KINDS.has(details?.pairingKind)) return Promise.resolve({ confirmed: false });
+    const requestId = randomUUID();
+    return new Promise((resolve) => {
+      pendingPairing.set(requestId, { resolve, pairingKind: details.pairingKind });
+      window.webContents.send(PAIRING_REQUEST_CHANNEL, {
+        requestId,
+        deviceId: typeof details.deviceId === 'string' ? details.deviceId : '',
+        pairingKind: details.pairingKind,
+        ...(typeof details.pin === 'string' ? { pin: details.pin } : {}),
+      });
+    });
+  }
+
   const selectBluetooth = (event, devices, callback) => {
     event.preventDefault();
     if (bluetoothSelectionPending) return;
@@ -107,10 +121,10 @@ export function installDeviceAccess(window, ipcMain) {
     const confirmed = response.confirmed === true;
     const pin = typeof response.pin === 'string' ? response.pin.trim().slice(0, 32) : undefined;
     if (pairing.pairingKind === 'providePin' && (!confirmed || !pin)) {
-      pairing.callback({ confirmed: false });
+      pairing.resolve({ confirmed: false });
       return;
     }
-    pairing.callback(pin ? { confirmed, pin } : { confirmed });
+    pairing.resolve(pin ? { confirmed, pin } : { confirmed });
   });
 
   if (process.platform !== 'darwin' && typeof session.setBluetoothPairingHandler === 'function') {
@@ -120,14 +134,7 @@ export function installDeviceAccess(window, ipcMain) {
         callback({ confirmed: false });
         return;
       }
-      const requestId = randomUUID();
-      pendingPairing.set(requestId, { callback, pairingKind: details.pairingKind });
-      window.webContents.send(PAIRING_REQUEST_CHANNEL, {
-        requestId,
-        deviceId: details.deviceId,
-        pairingKind: details.pairingKind,
-        ...(typeof details.pin === 'string' ? { pin: details.pin } : {}),
-      });
+      void requestBluetoothPairing(details).then(callback, () => callback({ confirmed: false }));
     });
   }
 
@@ -163,13 +170,13 @@ export function installDeviceAccess(window, ipcMain) {
     void requestNativeMediaAccess(mediaTypes).then(callback, () => callback(false));
   });
 
-  return () => {
+  const dispose = () => {
     if (bluetoothTimeout) clearTimeout(bluetoothTimeout);
     bluetoothCallback?.('');
     bluetoothSelectionPending = false;
     for (const selection of pending.values()) selection.callback('');
     pending.clear();
-    for (const pairing of pendingPairing.values()) pairing.callback({ confirmed: false });
+    for (const pairing of pendingPairing.values()) pairing.resolve({ confirmed: false });
     pendingPairing.clear();
     window.webContents.removeListener('select-bluetooth-device', selectBluetooth);
     session.removeListener('select-serial-port', selectSerial);
@@ -182,4 +189,5 @@ export function installDeviceAccess(window, ipcMain) {
     ipcMain.removeHandler(RESPONSE_CHANNEL);
     ipcMain.removeHandler(PAIRING_RESPONSE_CHANNEL);
   };
+  return { dispose, requestBluetoothPairing };
 }

@@ -1,0 +1,232 @@
+diff --git a/node_modules/@stoprocent/noble/index.d.ts b/node_modules/@stoprocent/noble/index.d.ts
+index d4a435d..43ec149 100644
+--- a/node_modules/@stoprocent/noble/index.d.ts
++++ b/node_modules/@stoprocent/noble/index.d.ts
+@@ -47,20 +47,20 @@ declare module '@stoprocent/noble' {
+         connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
+         /**
+          * Pair with a peripheral. Windows only; requires an already-connected
+-         * peripheral and supports only the ConfirmOnly ("Just Works") ceremony.
++         * peripheral and supports ConfirmOnly plus caller-supplied PIN/password ceremonies.
+          * Rejects with 'Pairing is not supported on this platform' elsewhere.
+          */
+-        pairAsync(idOrAddress: PeripheralIdOrAddress): Promise<void>;
++        pairAsync(idOrAddress: PeripheralIdOrAddress, options?: { pin?: string }): Promise<void>;
+ 
+         startScanning(serviceUUIDs?: string[], allowDuplicates?: boolean, callback?: (error?: Error) => void): void;
+         stopScanning(callback?: () => void): void;
+         connect(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions, callback?: (error: Error | undefined, peripheral: Peripheral) => void): void;
+         /**
+          * Pair with a peripheral. Windows only; requires an already-connected
+-         * peripheral and supports only the ConfirmOnly ("Just Works") ceremony.
++         * peripheral and supports ConfirmOnly plus caller-supplied PIN/password ceremonies.
+          * Calls back with 'Pairing is not supported on this platform' elsewhere.
+          */
+-        pair(idOrAddress: PeripheralIdOrAddress, callback?: (error: Error | null) => void): void;
++        pair(idOrAddress: PeripheralIdOrAddress, options?: { pin?: string }, callback?: (error: Error | null) => void): void;
+         cancelConnect(idOrAddress: PeripheralIdOrAddress, options?: object): void;
+         reset(): void;
+         stop(): void;
+@@ -119,8 +119,8 @@ declare module '@stoprocent/noble' {
+         readonly uuid: string;
+     
+         connectAsync(): Promise<void>;
+-        /** Windows only; ConfirmOnly ("Just Works") ceremony only. */
+-        pairAsync(): Promise<void>;
++        /** Windows only; supports ConfirmOnly and caller-supplied PIN/password ceremonies. */
++        pairAsync(options?: { pin?: string }): Promise<void>;
+         disconnectAsync(): Promise<void>;
+         updateRssiAsync(): Promise<number>;
+         discoverServicesAsync(): Promise<Service[]>;
+@@ -131,8 +131,8 @@ declare module '@stoprocent/noble' {
+         writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
+ 
+         connect(callback?: (error: Error | undefined) => void): void;
+-        /** Windows only; ConfirmOnly ("Just Works") ceremony only. */
+-        pair(callback?: (error: Error | null) => void): void;
++        /** Windows only; supports ConfirmOnly and caller-supplied PIN/password ceremonies. */
++        pair(options?: { pin?: string }, callback?: (error: Error | null) => void): void;
+         disconnect(callback?: () => void): void;
+         updateRssi(callback?: (error: Error | undefined, rssi: number) => void): void;
+         discoverServices(): void;
+diff --git a/node_modules/@stoprocent/noble/lib/noble.js b/node_modules/@stoprocent/noble/lib/noble.js
+index 716fa18..08725c5 100644
+--- a/node_modules/@stoprocent/noble/lib/noble.js
++++ b/node_modules/@stoprocent/noble/lib/noble.js
+@@ -433,7 +433,11 @@ class Noble extends NobleEventEmitter {
+     }
+   }
+ 
+-  pair (idOrAddress, callback) {
++  pair (idOrAddress, options, callback) {
++    if (typeof options === 'function') {
++      callback = options;
++      options = undefined;
++    }
+     const identifier = this._getPeripheralId(idOrAddress);
+     if (typeof callback === 'function') {
+       this.onceExclusive(`pair:${identifier}`, error => callback(error));
+@@ -455,12 +459,13 @@ class Noble extends NobleEventEmitter {
+       this.emit(`pair:${identifier}`, err);
+       return;
+     }
+-    this._bindings.pair(identifier);
++    const pin = typeof options?.pin === 'string' ? options.pin : '';
++    this._bindings.pair(identifier, pin);
+   }
+ 
+-  async pairAsync (idOrAddress) {
++  async pairAsync (idOrAddress, options) {
+     return new Promise((resolve, reject) => {
+-      this.pair(idOrAddress, error => error ? reject(error) : resolve());
++      this.pair(idOrAddress, options, error => error ? reject(error) : resolve());
+     });
+   }
+ 
+diff --git a/node_modules/@stoprocent/noble/lib/peripheral.js b/node_modules/@stoprocent/noble/lib/peripheral.js
+index 525320b..03145f7 100644
+--- a/node_modules/@stoprocent/noble/lib/peripheral.js
++++ b/node_modules/@stoprocent/noble/lib/peripheral.js
+@@ -57,19 +57,23 @@ class Peripheral extends NobleEventEmitter {
+     });
+   }
+ 
+-  pair (callback) {
++  pair (options, callback) {
++    if (typeof options === 'function') {
++      callback = options;
++      options = undefined;
++    }
+     // Delegate the callback to Noble#pair so it is released via the internal
+     // pair:${id} event. Noble#_onPair always emits pair:${id} (even when this
+     // peripheral has been removed from Noble's map during cleanup), whereas it
+     // only emits this peripheral's 'pair' event while still tracked. Registering
+     // on the peripheral event would therefore leave the callback hanging if
+     // pairing completes after the peripheral is gone.
+-    this._noble.pair(this.id, callback);
++    this._noble.pair(this.id, options, callback);
+   }
+ 
+-  async pairAsync () {
++  async pairAsync (options) {
+     return new Promise((resolve, reject) => {
+-      this.pair(error => error ? reject(error) : resolve());
++      this.pair(options, error => error ? reject(error) : resolve());
+     });
+   }
+ 
+diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
+index 2a5f3fa..8b307ee 100644
+--- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
++++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
+@@ -388,7 +388,7 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
+     mEmit.MTU(uuid, mtu);
+ }
+ 
+-bool BLEManager::Pair(const std::string& uuid)
++bool BLEManager::Pair(const std::string& uuid, const std::string& pin)
+ {
+     using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
+ 
+@@ -435,19 +435,15 @@ bool BLEManager::Pair(const std::string& uuid)
+             return true;
+         }
+ 
+-        // Use custom pairing so we can auto-accept the ConfirmOnly (Just Works)
+-        // ceremony without a UI prompt. The actual kind the device requests is
+-        // logged so we can diagnose failures.
++        // Use custom pairing so callers can supply the PIN collected by their
++        // own trusted UI. ConfirmOnly remains supported for devices that do not
++        // require a PIN.
+         //
+         // The PairingRequested handler must Accept() the args exactly once for
+-        // ConfirmOnly; for any other kind (DisplayPin / ProvidePassword /
+-        // ConfirmPinMatch etc.) we simply return without Accept(), which Windows
+-        // treats as a rejection and the PairAsync completes with the appropriate
+-        // failure status (RejectedByHandler / AuthenticationNotAllowed). We have
+-        // no UI to surface a PIN or password prompt from this library.
++        // ConfirmOnly or a caller-provided PIN. Other ceremonies are rejected.
+         custom = pairing.Custom();
+         token = custom.PairingRequested(
+-            [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
++            [pin](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
+             winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
+                 auto kind = args.PairingKind();
+                 LOGE("pairing requested, kind=%d", static_cast<int>(kind));
+@@ -455,12 +451,24 @@ bool BLEManager::Pair(const std::string& uuid)
+                 {
+                     args.Accept();
+                 }
+-                // Any other kind: do not call Accept() — Windows treats the
+-                // handler returning as a rejection.
++                else if (!pin.empty() &&
++                    (kind == DevicePairingKinds::ProvidePin ||
++                     kind == DevicePairingKinds::ProvidePassword))
++                {
++                    args.Accept(winrt::to_hstring(pin));
++                }
+             });
+         handlerRegistered = true;
+         auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
+-        custom.PairAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Encryption)
++        auto requestedKinds = DevicePairingKinds::ConfirmOnly;
++        if (!pin.empty())
++        {
++            requestedKinds = static_cast<DevicePairingKinds>(
++                static_cast<uint32_t>(DevicePairingKinds::ConfirmOnly) |
++                static_cast<uint32_t>(DevicePairingKinds::ProvidePin) |
++                static_cast<uint32_t>(DevicePairingKinds::ProvidePassword));
++        }
++        custom.PairAsync(requestedKinds, DevicePairingProtectionLevel::Encryption)
+             .Completed(completed);
+     }
+     catch (const winrt::hresult_error& e)
+diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
+index 14a3175..bc77e44 100644
+--- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
++++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
+@@ -22,7 +22,7 @@ public:
+     void Scan(const std::vector<winrt::guid>& serviceUUIDs, bool allowDuplicates);
+     void StopScan();
+     bool Connect(const std::string& uuid);
+-    bool Pair(const std::string& uuid);
++    bool Pair(const std::string& uuid, const std::string& pin);
+     bool Disconnect(const std::string& uuid);
+     bool CancelConnect(const std::string& uuid);
+     bool UpdateRSSI(const std::string& uuid);
+diff --git a/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc b/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc
+index e7f8e1c..08d8db2 100644
+--- a/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc
++++ b/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc
+@@ -101,13 +101,16 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
+     return info.Env().Undefined();
+ }
+ 
+-// pair(deviceUuid)
++// pair(deviceUuid, optionalPin)
+ Napi::Value NobleWinrt::Pair(const Napi::CallbackInfo& info)
+ {
+     CHECK_MANAGER()
+     ARG1(String)
+     auto uuid = info[0].As<Napi::String>().Utf8Value();
+-    manager->Pair(uuid);
++    auto pin = info.Length() > 1 && info[1].IsString()
++        ? info[1].As<Napi::String>().Utf8Value()
++        : std::string();
++    manager->Pair(uuid, pin);
+     return info.Env().Undefined();
+ }
+ 
+diff --git a/node_modules/@stoprocent/noble/package.json b/node_modules/@stoprocent/noble/package.json
+index 8671373..476c759 100644
+--- a/node_modules/@stoprocent/noble/package.json
++++ b/node_modules/@stoprocent/noble/package.json
+@@ -37,7 +37,7 @@
+     "@stoprocent/bluetooth-hci-socket": "^2.3.0"
+   },
+   "peerDependencies": {
+-    "dbus-next": "^0.10.0"
++    "dbus-next": "^0.10.0 || ^0.11.0"
+   },
+   "peerDependenciesMeta": {
+     "dbus-next": {

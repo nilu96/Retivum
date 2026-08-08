@@ -70,7 +70,8 @@
     pairing = true;
     try {
       await authorizeRNodeDevice(draft.connection.type, draft.connection.deviceId);
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('RNODE_BLE_PAIRING_CANCELLED')) return;
       toast.error('interface.editor.rnode.device.pairingError');
     } finally {
       pairing = false;

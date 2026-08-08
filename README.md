@@ -17,7 +17,7 @@ The initial application foundation includes:
 - IndexedDB-backed application preferences, NomadNet directories, and persistent heterogeneous interface definitions;
 - a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations;
 - one shared RNode KISS implementation with firmware/radio negotiation, flow control, MTU enforcement, heartbeat, and platform byte-stream adapters;
-- Capacitor BLE, TCP, and UDP adapters for iOS/Android plus a minimal sandboxed Electron shell with Web Bluetooth/Web Serial device selection and narrow `node:net`/`node:dgram` main/preload bridges;
+- Capacitor BLE, TCP, and UDP adapters for iOS/Android plus a minimal sandboxed Electron shell with native BLE, Web Serial, `node:net`, and `node:dgram` main/preload bridges;
 - the bundled Leviculum/LXMF WASM running in a dedicated module worker;
 - first-run Reticulum identity generation plus AES-GCM-encrypted private-key and runtime-snapshot persistence;
 - persistent multi-identity management with add, edit, activate, delete, standard 64-byte Reticulum identity import/export, and legacy Retivum JSON import compatibility;
@@ -69,7 +69,7 @@ Build and run the local Electron desktop shell:
 npm run desktop:run
 ```
 
-The Electron shell loads the same bundled `dist/` assets without an application web server. TCP and UDP are available through validated `node:net` and `node:dgram` bridges; RNode device selection uses Electron's Web Bluetooth and Web Serial permission events.
+The Electron shell loads the same bundled `dist/` assets without an application web server. TCP and UDP are available through validated `node:net` and `node:dgram` bridges. RNode BLE uses a fixed-service native bridge so bonded devices can be rediscovered after restart; RNode serial selection continues to use Electron's Web Serial permission events.
 
 Synchronize the production web assets into both mobile projects:
 

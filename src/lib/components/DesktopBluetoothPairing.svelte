@@ -10,8 +10,12 @@
 
   let pin = $state('');
 
+  function validPin(): boolean {
+    return /^[0-9]{1,16}$/.test(pin.trim());
+  }
+
   function confirm(): void {
-    if (request.pairingKind === 'providePin' && !pin.trim()) return;
+    if (request.pairingKind === 'providePin' && !validPin()) return;
     onrespond(true, request.pairingKind === 'providePin' ? pin.trim() : undefined);
   }
 </script>
@@ -31,11 +35,11 @@
       <form onsubmit={(event) => { event.preventDefault(); confirm(); }}>
         <label>
           <span>{$t('desktop.bluetooth.pairing.pin')}</span>
-          <input bind:value={pin} inputmode="numeric" autocomplete="one-time-code" />
+          <input bind:value={pin} inputmode="numeric" pattern="[0-9]*" maxlength="16" autocomplete="one-time-code" required />
         </label>
         <footer>
           <button class="button secondary" type="button" onclick={() => onrespond(false)}>{$t('common.cancel')}</button>
-          <button class="button primary" type="submit" disabled={!pin.trim()}>{$t('desktop.bluetooth.pairing.pair')}</button>
+          <button class="button primary" type="submit" disabled={!validPin()}>{$t('desktop.bluetooth.pairing.pair')}</button>
         </footer>
       </form>
     {:else}

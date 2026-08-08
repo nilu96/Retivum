@@ -28,6 +28,10 @@
   } from './infrastructure/platform/desktop-device-selection';
   import { answerNativeBluetoothSelection, nativeBluetoothSelection } from './infrastructure/platform/native-bluetooth-selection';
   import {
+    answerDesktopBluetoothSelection,
+    desktopBluetoothSelection,
+  } from './infrastructure/platform/desktop-bluetooth-selection';
+  import {
     identities,
     interfaceConfigurations,
     reticulumRuntime,
@@ -129,6 +133,18 @@
       ? 'native.bluetooth.device.scanning'
       : 'native.bluetooth.device.empty'}
     onselect={(deviceId) => void answerNativeBluetoothSelection($nativeBluetoothSelection!.requestId, deviceId)}
+  />
+{/if}
+
+{#if $desktopBluetoothSelection}
+  <DevicePicker
+    request={$desktopBluetoothSelection}
+    titleKey="desktop.device.ble.title"
+    descriptionKey="desktop.bluetooth.device.description"
+    statusKey={$desktopBluetoothSelection.scanning
+      ? 'native.bluetooth.device.scanning'
+      : 'native.bluetooth.device.empty'}
+    onselect={(deviceId) => void answerDesktopBluetoothSelection(deviceId)}
   />
 {/if}
 
