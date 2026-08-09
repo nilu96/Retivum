@@ -42,7 +42,7 @@
     "android:open": "npm run native:sync && cap open android",
     "ios:open": "npm run native:sync && cap open ios",
     "desktop:run": "npm run desktop:rebuild && npm run build && electron electron/main.mjs",
-    "desktop:rebuild": "electron-rebuild -f -w @stoprocent/noble",
+    "desktop:rebuild": "electron-rebuild -f --build-from-source -w @stoprocent/noble",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
