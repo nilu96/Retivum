@@ -138,7 +138,7 @@ index 525320b..59c1ffb 100644
    }
  
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
-index 2a5f3fa..793b921 100644
+index 2a5f3fa..a787bfc 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 +++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 @@ -323,9 +323,8 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
@@ -175,7 +175,7 @@ index 2a5f3fa..793b921 100644
  {
      using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
  
-@@ -435,19 +448,15 @@ bool BLEManager::Pair(const std::string& uuid)
+@@ -435,32 +448,53 @@ bool BLEManager::Pair(const std::string& uuid)
              return true;
          }
  
@@ -183,8 +183,9 @@ index 2a5f3fa..793b921 100644
 -        // ceremony without a UI prompt. The actual kind the device requests is
 -        // logged so we can diagnose failures.
 +        // Use custom pairing so callers can supply the PIN collected by their
-+        // own trusted UI. ConfirmOnly remains supported for devices that do not
-+        // require a PIN.
++        // own trusted UI. When a PIN is supplied, never permit ConfirmOnly: that
++        // ceremony creates an unauthenticated bond which secure RNode firmware
++        // immediately rejects and removes.
          //
          // The PairingRequested handler must Accept() the args exactly once for
 -        // ConfirmOnly; for any other kind (DisplayPin / ProvidePassword /
@@ -192,7 +193,8 @@ index 2a5f3fa..793b921 100644
 -        // treats as a rejection and the PairAsync completes with the appropriate
 -        // failure status (RejectedByHandler / AuthenticationNotAllowed). We have
 -        // no UI to surface a PIN or password prompt from this library.
-+        // ConfirmOnly or a caller-provided PIN. Other ceremonies are rejected.
++        // ConfirmOnly (only without a PIN), a caller-provided PIN, or a matching
++        // displayed PIN. Other ceremonies are rejected.
          custom = pairing.Custom();
          token = custom.PairingRequested(
 -            [](winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing const&,
@@ -200,35 +202,58 @@ index 2a5f3fa..793b921 100644
              winrt::Windows::Devices::Enumeration::DevicePairingRequestedEventArgs const& args) {
                  auto kind = args.PairingKind();
                  LOGE("pairing requested, kind=%d", static_cast<int>(kind));
-@@ -455,12 +464,24 @@ bool BLEManager::Pair(const std::string& uuid)
-                 {
-                     args.Accept();
-                 }
--                // Any other kind: do not call Accept() — Windows treats the
--                // handler returning as a rejection.
+-                if (kind == DevicePairingKinds::ConfirmOnly)
++                if (pin.empty() && kind == DevicePairingKinds::ConfirmOnly)
++                {
++                    args.Accept();
++                }
 +                else if (!pin.empty() &&
 +                    (kind == DevicePairingKinds::ProvidePin ||
 +                     kind == DevicePairingKinds::ProvidePassword))
 +                {
 +                    args.Accept(winrt::to_hstring(pin));
 +                }
++                else if (!pin.empty() && kind == DevicePairingKinds::ConfirmPinMatch &&
++                         winrt::to_string(args.Pin()) == pin)
+                 {
+                     args.Accept();
+                 }
+-                // Any other kind: do not call Accept() — Windows treats the
+-                // handler returning as a rejection.
++                else
++                {
++                    LOGE("pairing request rejected, kind=%d", static_cast<int>(kind));
++                }
              });
          handlerRegistered = true;
          auto completed = bind2(this, &BLEManager::OnPaired, uuid, token, custom);
 -        custom.PairAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Encryption)
 +        auto requestedKinds = DevicePairingKinds::ConfirmOnly;
++        auto protectionLevel = DevicePairingProtectionLevel::Encryption;
 +        if (!pin.empty())
 +        {
 +            requestedKinds = static_cast<DevicePairingKinds>(
-+                static_cast<uint32_t>(DevicePairingKinds::ConfirmOnly) |
 +                static_cast<uint32_t>(DevicePairingKinds::ProvidePin) |
++                static_cast<uint32_t>(DevicePairingKinds::ConfirmPinMatch) |
 +                static_cast<uint32_t>(DevicePairingKinds::ProvidePassword));
++            protectionLevel = DevicePairingProtectionLevel::EncryptionAndAuthentication;
 +        }
-+        custom.PairAsync(requestedKinds, DevicePairingProtectionLevel::Encryption)
++        custom.PairAsync(requestedKinds, protectionLevel)
              .Completed(completed);
      }
      catch (const winrt::hresult_error& e)
-@@ -591,11 +612,11 @@ bool BLEManager::CancelConnect(const std::string& uuid)
+@@ -547,7 +581,9 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
+ 
+         auto result = asyncOp.GetResults();
+         auto resultStatus = result.Status();
+-        LOGE("pairing result status=%s", pairingResultStatusToString(resultStatus).c_str());
++        LOGE("pairing result status=%s, protection=%d",
++             pairingResultStatusToString(resultStatus).c_str(),
++             static_cast<int>(result.ProtectionLevelUsed()));
+         if (resultStatus == DevicePairingResultStatus::Paired ||
+             resultStatus == DevicePairingResultStatus::AlreadyPaired)
+         {
+@@ -591,11 +627,11 @@ bool BLEManager::CancelConnect(const std::string& uuid)
  }
  
  void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
@@ -242,7 +267,7 @@ index 2a5f3fa..793b921 100644
          if (mDeviceMap.find(uuid) == mDeviceMap.end())
          {
              LOGE("device with id %s not found", uuid.c_str());
-@@ -624,13 +645,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
+@@ -624,13 +660,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
  bool BLEManager::DiscoverServices(const std::string& uuid,
                                    const std::vector<winrt::guid>& serviceUUIDs)
  {
