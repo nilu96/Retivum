@@ -153,7 +153,7 @@ index 525320b..ce33f80 100644
    }
  
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
-index 2a5f3fa..35d0bc3 100644
+index 2a5f3fa..50b9451 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 +++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 @@ -24,6 +24,36 @@ using winrt::Windows::Security::Cryptography::CryptographicBuffer;
@@ -264,7 +264,7 @@ index 2a5f3fa..35d0bc3 100644
          }
      }
  
-@@ -304,8 +341,15 @@ bool BLEManager::Connect(const std::string& uuid)
+@@ -304,12 +341,35 @@ bool BLEManager::Connect(const std::string& uuid)
      if (!peripheral.device.has_value())
      {
          auto completed = bind2(this, &BLEManager::OnConnected, uuid);
@@ -282,7 +282,40 @@ index 2a5f3fa..35d0bc3 100644
      }
      else
      {
-@@ -323,13 +367,11 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
+-        mEmit.Connected(uuid);
++        // A BluetoothLEDevice wrapper can outlive a failed GATT-session setup.
++        // Never report that stale wrapper as a usable connection.
++        if (!peripheral.gattSession.has_value())
++        {
++            peripheral.Disconnect();
++            return Connect(uuid);
++        }
++        try
++        {
++            peripheral.gattSession->MaintainConnection(true);
++            mEmit.Connected(uuid);
++        }
++        catch (...)
++        {
++            peripheral.Disconnect();
++            return Connect(uuid);
++        }
+     }
+     return true;
+ }
+@@ -317,19 +377,22 @@ bool BLEManager::Connect(const std::string& uuid)
+ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncStatus status,
+                              const std::string uuid)
+ {
+-    if (status == AsyncStatus::Completed)
++    if (status != AsyncStatus::Completed)
++    {
++        mEmit.Connected(uuid, "could not resolve Bluetooth device");
++        return;
++    }
++    try
+     {
+         BluetoothLEDevice device = asyncOp.GetResults();
          // device can be null if the connection failed
          if (device)
          {
@@ -297,26 +330,96 @@ index 2a5f3fa..35d0bc3 100644
  
              // Get GATT session to access the MTU
              auto completed = bind2(this, &BLEManager::OnGattSessionCreated, uuid);
-@@ -368,15 +410,18 @@ void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, Asyn
-             peripheral.maxPduSizeChangedToken = token;
- 
-             session.MaintainConnection(true);
-+            mEmit.Connected(uuid);
-         }
-         else
-         {
-             LOGE("Failed to get GattSession for device %s", uuid.c_str());
-+            mEmit.Connected(uuid, "could not create GATT session");
+@@ -340,43 +403,65 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
+             mEmit.Connected(uuid, "could not connect to device: result is null");
          }
      }
-     else
+-    else
++    catch (const winrt::hresult_error& error)
++    {
++        auto it = mDeviceMap.find(uuid);
++        if (it != mDeviceMap.end()) it->second.Disconnect();
++        mEmit.Connected(uuid, "could not resolve Bluetooth device: " + winrt::to_string(error.message()));
++    }
++    catch (const std::exception& error)
      {
-         LOGE("Failed to create GattSession: %s", asyncStatusToString(status).c_str());
-+        mEmit.Connected(uuid, "could not create GATT session");
+-        mEmit.Connected(uuid, "could not connect to device");
++        auto it = mDeviceMap.find(uuid);
++        if (it != mDeviceMap.end()) it->second.Disconnect();
++        mEmit.Connected(uuid, std::string("could not resolve Bluetooth device: ") + error.what());
      }
  }
  
-@@ -388,7 +433,35 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
+ void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, AsyncStatus status, const std::string uuid)
+ {
+-    if (status == AsyncStatus::Completed)
++    auto fail = [this, uuid](const std::string& message) {
++        auto it = mDeviceMap.find(uuid);
++        if (it != mDeviceMap.end()) it->second.Disconnect();
++        LOGE("%s", message.c_str());
++        mEmit.Connected(uuid, message);
++    };
++    if (status != AsyncStatus::Completed)
++    {
++        fail("could not create GATT session: " + asyncStatusToString(status));
++        return;
++    }
++    try
+     {
+         auto session = asyncOp.GetResults();
+-        if (session)
++        if (!session)
+         {
+-            // MaxPduSize is equivalent to the MTU-3 (MTU minus ATT header)
+-            // MTU = MaxPduSize + 3
+-            int mtu = session.MaxPduSize();
+-            mEmit.MTU(uuid, mtu);
+-            
+-            // Subscribe to MTU changes
+-            auto onPduSizeChanged = bind2(this, &BLEManager::OnMaxPduSizeChanged, uuid);
+-            
+-            // Store both the session and the event token in the peripheral
+-            PeripheralWinrt& peripheral = mDeviceMap[uuid];
+-            peripheral.gattSession = session;
+-            auto token = session.MaxPduSizeChanged(onPduSizeChanged);
+-            peripheral.maxPduSizeChangedToken = token;
+-
+-            session.MaintainConnection(true);
++            fail("could not create GATT session: result is null");
++            return;
+         }
+-        else
++        auto it = mDeviceMap.find(uuid);
++        if (it == mDeviceMap.end() || !it->second.device.has_value())
+         {
+-            LOGE("Failed to get GattSession for device %s", uuid.c_str());
++            session.Close();
++            fail("device disconnected while creating GATT session");
++            return;
+         }
++        session.MaintainConnection(true);
++        int mtu = session.MaxPduSize();
++        mEmit.MTU(uuid, mtu);
++        auto onPduSizeChanged = bind2(this, &BLEManager::OnMaxPduSizeChanged, uuid);
++        PeripheralWinrt& peripheral = it->second;
++        peripheral.gattSession = session;
++        auto token = session.MaxPduSizeChanged(onPduSizeChanged);
++        peripheral.maxPduSizeChangedToken = token;
++        mEmit.Connected(uuid);
+     }
+-    else
++    catch (const winrt::hresult_error& error)
+     {
+-        LOGE("Failed to create GattSession: %s", asyncStatusToString(status).c_str());
++        fail("could not create GATT session: " + winrt::to_string(error.message()));
++    }
++    catch (const std::exception& error)
++    {
++        fail(std::string("could not create GATT session: ") + error.what());
+     }
+ }
+ 
+@@ -388,7 +473,35 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
      mEmit.MTU(uuid, mtu);
  }
  
@@ -353,7 +456,7 @@ index 2a5f3fa..35d0bc3 100644
  {
      using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
  
-@@ -435,32 +508,50 @@ bool BLEManager::Pair(const std::string& uuid)
+@@ -435,32 +548,50 @@ bool BLEManager::Pair(const std::string& uuid)
              return true;
          }
  
@@ -382,20 +485,20 @@ index 2a5f3fa..35d0bc3 100644
                  LOGE("pairing requested, kind=%d", static_cast<int>(kind));
 -                if (kind == DevicePairingKinds::ConfirmOnly)
 +                if (pin.empty() && kind == DevicePairingKinds::ConfirmOnly)
-                 {
-                     args.Accept();
-                 }
--                // Any other kind: do not call Accept() — Windows treats the
--                // handler returning as a rejection.
++                {
++                    args.Accept();
++                }
 +                else if (!pin.empty() && kind == DevicePairingKinds::ProvidePin)
 +                {
 +                    args.Accept(winrt::to_hstring(pin));
 +                }
 +                else if (!pin.empty() && kind == DevicePairingKinds::ConfirmPinMatch &&
 +                         winrt::to_string(args.Pin()) == pin)
-+                {
-+                    args.Accept();
-+                }
+                 {
+                     args.Accept();
+                 }
+-                // Any other kind: do not call Accept() — Windows treats the
+-                // handler returning as a rejection.
 +                else
 +                {
 +                    LOGE("pairing request rejected, kind=%d", static_cast<int>(kind));
@@ -417,7 +520,7 @@ index 2a5f3fa..35d0bc3 100644
              .Completed(completed);
      }
      catch (const winrt::hresult_error& e)
-@@ -547,7 +638,9 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
+@@ -547,7 +678,9 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
  
          auto result = asyncOp.GetResults();
          auto resultStatus = result.Status();
@@ -428,7 +531,7 @@ index 2a5f3fa..35d0bc3 100644
          if (resultStatus == DevicePairingResultStatus::Paired ||
              resultStatus == DevicePairingResultStatus::AlreadyPaired)
          {
-@@ -591,11 +684,11 @@ bool BLEManager::CancelConnect(const std::string& uuid)
+@@ -591,11 +724,11 @@ bool BLEManager::CancelConnect(const std::string& uuid)
  }
  
  void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
@@ -442,7 +545,7 @@ index 2a5f3fa..35d0bc3 100644
          if (mDeviceMap.find(uuid) == mDeviceMap.end())
          {
              LOGE("device with id %s not found", uuid.c_str());
-@@ -624,13 +717,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
+@@ -624,13 +757,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
  bool BLEManager::DiscoverServices(const std::string& uuid,
                                    const std::vector<winrt::guid>& serviceUUIDs)
  {
@@ -556,6 +659,27 @@ index 1741560..2b90f6d 100644
      Napi::Value Pair(const Napi::CallbackInfo&);
      Napi::Value Disconnect(const Napi::CallbackInfo&);
      Napi::Value CancelConnect(const Napi::CallbackInfo&);
+diff --git a/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.cc b/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.cc
+index f10edb9..e940ef1 100644
+--- a/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.cc
++++ b/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.cc
+@@ -193,6 +193,8 @@ void PeripheralWinrt::Disconnect()
+         }
+         gattSession->Close();
+     }
++    gattSession = std::nullopt;
++    maxPduSizeChangedToken = {};
+     if (device.has_value())
+     {
+         if(connectionToken)
+@@ -202,6 +204,7 @@ void PeripheralWinrt::Disconnect()
+         device->Close();
+     }
+     device = std::nullopt;
++    connectionToken = {};
+ }
+ 
+ void PeripheralWinrt::GetServiceFromDevice(
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h b/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h
 index ad59d02..534a08c 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h

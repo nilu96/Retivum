@@ -188,7 +188,7 @@ describe('native Noble RNode backend', () => {
     expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
     expect(persistentDeviceId).toBe(
-      '72747677696e01426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535',
+      '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535',
     );
     await backend.dispose();
   });
@@ -268,10 +268,13 @@ describe('native Noble RNode backend', () => {
     await backend.dispose();
   });
 
-  it('reopens a durable Windows device id directly without scanning', async () => {
+  it('rediscovers the saved address before reopening a durable Windows device', async () => {
     const transport = fakeTransport();
     const persistentDeviceId =
-      '72747677696e01426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+      '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+    transport.noble.startScanningAsync.mockImplementation(async () => {
+      queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+    });
     const backend = await createNobleBackend('win32', { noble: transport.noble });
 
     await backend.open('rnode-one', persistentDeviceId, {
@@ -279,11 +282,34 @@ describe('native Noble RNode backend', () => {
       onClosed: vi.fn(),
     });
 
-    expect(transport.noble.startScanningAsync).not.toHaveBeenCalled();
-    expect(transport.noble.connectAsync).toHaveBeenCalledWith(persistentDeviceId);
+    expect(transport.noble.startScanningAsync).toHaveBeenCalled();
+    expect(transport.peripheral.connectAsync).toHaveBeenCalled();
+    expect(transport.noble.connectAsync).not.toHaveBeenCalled();
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
     await backend.dispose();
   });
+
+  it('retries the complete durable Windows GATT open after a stale session', async () => {
+    const transport = fakeTransport();
+    const persistentDeviceId =
+      '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+    transport.noble.startScanningAsync.mockImplementation(async () => {
+      queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+    });
+    transport.peripheral.discoverSomeServicesAndCharacteristicsAsync
+      .mockRejectedValueOnce(new Error('Device is unreachable while discovering services'));
+    const backend = await createNobleBackend('win32', { noble: transport.noble });
+
+    await backend.open('rnode-one', persistentDeviceId, {
+      onData: vi.fn(),
+      onClosed: vi.fn(),
+    });
+
+    expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
+    expect(transport.peripheral.disconnectAsync).toHaveBeenCalledTimes(1);
+    expect(transport.notify.subscribeAsync).toHaveBeenCalled();
+    await backend.dispose();
+  }, 10_000);
 
   it('silently resolves a saved identifier, subscribes, and chunks RNode writes', async () => {
     const transport = fakeTransport();
