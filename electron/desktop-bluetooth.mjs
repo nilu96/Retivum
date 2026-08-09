@@ -248,23 +248,9 @@ export async function createNobleBackend(platform = process.platform, dependenci
         await stage('pair', () => linuxPair(peripheral.address, requestPin), PAIRING_TIMEOUT_MS);
       }
       const connected = await resolveAndConnect(deviceId);
-      let pairedNow = false;
       if (platform === 'win32' && connected.isPaired?.() !== true) {
         const pin = await requestPin();
         await stage('pair', () => connected.pairAsync({ pin }), PAIRING_TIMEOUT_MS);
-        pairedNow = true;
-      }
-      if (pairedNow) {
-        // RNode firmware disconnects after storing a new bond. WinRT can report
-        // pairing completion before Noble receives that disconnect, leaving the
-        // JS peripheral looking connected after its native device was cleared.
-        // Close it explicitly and allow the firmware to resume advertising so
-        // service discovery always runs on a fresh BluetoothLEDevice instance.
-        if (connected.state !== 'disconnected') {
-          await stage('post-pair disconnect', () => connected.disconnectAsync())
-            .catch(() => undefined);
-        }
-        await sleep(PAIRING_RECONNECT_DELAY_MS);
       }
       let lastError;
       for (let attempt = 1; attempt <= PAIRING_RECONNECT_ATTEMPTS; attempt += 1) {

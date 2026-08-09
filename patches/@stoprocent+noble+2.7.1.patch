@@ -138,7 +138,7 @@ index 525320b..59c1ffb 100644
    }
  
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
-index 2a5f3fa..449f072 100644
+index 2a5f3fa..793b921 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 +++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 @@ -323,9 +323,8 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
@@ -224,7 +224,7 @@ index 2a5f3fa..449f072 100644
 +                static_cast<uint32_t>(DevicePairingKinds::ProvidePin) |
 +                static_cast<uint32_t>(DevicePairingKinds::ProvidePassword));
 +        }
-+        custom.PairAsync(requestedKinds, DevicePairingProtectionLevel::EncryptionAndAuthentication)
++        custom.PairAsync(requestedKinds, DevicePairingProtectionLevel::Encryption)
              .Completed(completed);
      }
      catch (const winrt::hresult_error& e)

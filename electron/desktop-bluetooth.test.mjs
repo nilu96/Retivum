@@ -144,6 +144,7 @@ describe('native Noble RNode backend', () => {
       isPaired: vi.fn(() => paired),
       pairAsync: vi.fn(async () => {
         paired = true;
+        peripheral.state = 'disconnected';
       }),
       discoverSomeServicesAndCharacteristicsAsync: vi.fn().mockResolvedValue({
         services: [],
@@ -170,7 +171,7 @@ describe('native Noble RNode backend', () => {
     };
   }
 
-  it('supplies the Windows PIN and forces a fresh connection after bonding', async () => {
+  it('supplies the Windows PIN and reconnects after the bonding disconnect', async () => {
     const transport = fakeTransport();
     const backend = await createNobleBackend('win32', { noble: transport.noble });
     await backend.startScan(() => undefined);
@@ -180,10 +181,29 @@ describe('native Noble RNode backend', () => {
 
     expect(transport.peripheral.pairAsync).toHaveBeenCalledWith({ pin: '123456' });
     expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
-    expect(transport.peripheral.disconnectAsync).toHaveBeenCalledTimes(2);
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
     await backend.dispose();
   });
+
+  it('retries without a stage timeout when native discovery reports a stale connection', async () => {
+    const transport = fakeTransport();
+    transport.peripheral.pairAsync.mockImplementation(async () => {
+      transport.setPaired(true);
+      transport.peripheral.state = 'connected';
+    });
+    transport.peripheral.discoverSomeServicesAndCharacteristicsAsync
+      .mockRejectedValueOnce(new Error('device not connected while discovering services'));
+    const backend = await createNobleBackend('win32', { noble: transport.noble });
+    await backend.startScan(() => undefined);
+    transport.noble.emit('discover', transport.peripheral);
+
+    await backend.pair(transport.peripheral.id, async () => '123456');
+
+    expect(transport.peripheral.disconnectAsync).toHaveBeenCalled();
+    expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
+    expect(transport.notify.subscribeAsync).toHaveBeenCalled();
+    await backend.dispose();
+  }, 10_000);
 
   it('uses the BlueZ agent for Linux PIN pairing', async () => {
     const transport = fakeTransport();
