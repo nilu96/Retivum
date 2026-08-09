@@ -96,7 +96,7 @@ interface DesktopBluetoothEvent {
 interface RetivumDesktopBluetoothBridge {
   startScan(): Promise<void>;
   stopScan(): Promise<void>;
-  pair(options: { deviceId: string }): Promise<void>;
+  pair(options: { deviceId: string }): Promise<{ deviceId: string }>;
   open(options: { id: string; deviceId: string }): Promise<void>;
   write(options: { id: string; data: number[] }): Promise<void>;
   close(options: { id: string }): Promise<void>;

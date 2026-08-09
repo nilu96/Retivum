@@ -20,6 +20,10 @@ const WINDOWS_REDISCOVERY_TIMEOUT_MS = 8_000;
 const POST_CONNECT_SETTLE_MS = 750;
 const PAIRING_RECONNECT_ATTEMPTS = 5;
 const PAIRING_RECONNECT_DELAY_MS = 3_500;
+// Hex keeps the opaque WinRT DeviceInformation.Id compatible with Noble's
+// peripheral-id plumbing, which otherwise accepts only Bluetooth addresses.
+// The versioned prefix is the UTF-8 bytes for "rtvwin" followed by 0x01.
+const WINDOWS_DEVICE_ID_PREFIX = '72747677696e01';
 
 export function registerDesktopBluetooth(
   ipcMain,
@@ -67,7 +71,7 @@ export function registerDesktopBluetooth(
   ipcMain.handle(PAIR_CHANNEL, async (event, options) => {
     assertTrusted(event);
     const deviceId = validDeviceId(options?.deviceId);
-    await (await getBackend()).pair(deviceId, async () => {
+    const persistentDeviceId = await (await getBackend()).pair(deviceId, async () => {
       const response = await requestPairing({
         deviceId,
         pairingKind: 'providePin',
@@ -75,6 +79,7 @@ export function registerDesktopBluetooth(
       if (!response.confirmed || !validPin(response.pin)) throw new Error('RNODE_BLE_PAIRING_CANCELLED');
       return response.pin;
     });
+    return { deviceId: validDeviceId(persistentDeviceId ?? deviceId) };
   });
 
   ipcMain.handle(OPEN_CHANNEL, async (event, options) => {
@@ -205,7 +210,8 @@ export async function createNobleBackend(platform = process.platform, dependenci
   async function resolveAndConnect(deviceId) {
     await ready();
     await stopScan();
-    const known = discovered.get(deviceId) ?? await rediscoverWindowsPeripheral(deviceId);
+    const known = discovered.get(deviceId)
+      ?? (isWindowsDeviceId(deviceId) ? undefined : await rediscoverWindowsPeripheral(deviceId));
     if (known) {
       if (known.state !== 'connected') await stage('connect', () => known.connectAsync());
       return known;
@@ -243,6 +249,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
   async function pair(deviceId, requestPin) {
     const peripheral = discovered.get(deviceId);
     if (!peripheral) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
+    let persistentDeviceId = deviceId;
     try {
       if (platform === 'linux') {
         await stage('pair', () => linuxPair(peripheral.address, requestPin), PAIRING_TIMEOUT_MS);
@@ -271,6 +278,14 @@ export async function createNobleBackend(platform = process.platform, dependenci
         }
       }
       if (lastError) throw lastError;
+      if (platform === 'win32') {
+        const winrtDeviceId = connected.getDeviceId?.();
+        if (typeof winrtDeviceId !== 'string' || !winrtDeviceId) {
+          throw new Error('Windows durable device identifier unavailable');
+        }
+        persistentDeviceId = encodeWindowsDeviceId(winrtDeviceId);
+      }
+      return persistentDeviceId;
     } finally {
       const current = discovered.get(deviceId);
       if (current?.state === 'connected') await current.disconnectAsync().catch(() => undefined);
@@ -339,8 +354,16 @@ function validId(value) {
 }
 
 function validDeviceId(value) {
-  if (typeof value !== 'string' || !/^[a-zA-Z0-9:_-]{1,256}$/.test(value)) throw new Error('RNODE_BLE_DEVICE_ID_INVALID');
+  if (typeof value !== 'string' || !/^[a-zA-Z0-9:_-]{1,1024}$/.test(value)) throw new Error('RNODE_BLE_DEVICE_ID_INVALID');
   return value;
+}
+
+function encodeWindowsDeviceId(value) {
+  return `${WINDOWS_DEVICE_ID_PREFIX}${Buffer.from(value, 'utf8').toString('hex')}`;
+}
+
+function isWindowsDeviceId(value) {
+  return typeof value === 'string' && value.startsWith(WINDOWS_DEVICE_ID_PREFIX);
 }
 
 function validPin(value) {

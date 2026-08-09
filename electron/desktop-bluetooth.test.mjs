@@ -20,7 +20,10 @@ function harness() {
   const backend = {
     startScan: vi.fn(async (listener) => { scanDevice = listener; }),
     stopScan: vi.fn().mockResolvedValue(undefined),
-    pair: vi.fn(async (_deviceId, requestPin) => requestPin()),
+    pair: vi.fn(async (deviceId, requestPin) => {
+      await requestPin();
+      return deviceId;
+    }),
     open: vi.fn(async (_id, _deviceId, hooks) => { connectionHooks = hooks; }),
     write: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
@@ -62,13 +65,14 @@ describe('Electron native Bluetooth bridge', () => {
 
   it('collects a PIN without exposing it in an event or persisted bridge state', async () => {
     const context = harness();
-    await context.handlers.get('retivum:ble:pair')(context.event, { deviceId: 'aabbccddeeff' });
+    const result = await context.handlers.get('retivum:ble:pair')(context.event, { deviceId: 'aabbccddeeff' });
 
     expect(context.requestPairing).toHaveBeenCalledWith({
       deviceId: 'aabbccddeeff',
       pairingKind: 'providePin',
     });
     expect(context.backend.pair).toHaveBeenCalledWith('aabbccddeeff', expect.any(Function));
+    expect(result).toEqual({ deviceId: 'aabbccddeeff' });
     await context.dispose();
   });
 
@@ -146,6 +150,7 @@ describe('native Noble RNode backend', () => {
         paired = true;
         peripheral.state = 'disconnected';
       }),
+      getDeviceId: vi.fn(() => 'BluetoothLE#BluetoothLE00:11:22:33:44:55'),
       discoverSomeServicesAndCharacteristicsAsync: vi.fn().mockResolvedValue({
         services: [],
         characteristics: [write, notify],
@@ -177,11 +182,14 @@ describe('native Noble RNode backend', () => {
     await backend.startScan(() => undefined);
     transport.noble.emit('discover', transport.peripheral);
 
-    await backend.pair(transport.peripheral.id, async () => '123456');
+    const persistentDeviceId = await backend.pair(transport.peripheral.id, async () => '123456');
 
     expect(transport.peripheral.pairAsync).toHaveBeenCalledWith({ pin: '123456' });
     expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
+    expect(persistentDeviceId).toBe(
+      '72747677696e01426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535',
+    );
     await backend.dispose();
   });
 
@@ -257,6 +265,23 @@ describe('native Noble RNode backend', () => {
     );
     expect(transport.peripheral.connectAsync).toHaveBeenCalled();
     expect(transport.noble.connectAsync).not.toHaveBeenCalled();
+    await backend.dispose();
+  });
+
+  it('reopens a durable Windows device id directly without scanning', async () => {
+    const transport = fakeTransport();
+    const persistentDeviceId =
+      '72747677696e01426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+    const backend = await createNobleBackend('win32', { noble: transport.noble });
+
+    await backend.open('rnode-one', persistentDeviceId, {
+      onData: vi.fn(),
+      onClosed: vi.fn(),
+    });
+
+    expect(transport.noble.startScanningAsync).not.toHaveBeenCalled();
+    expect(transport.noble.connectAsync).toHaveBeenCalledWith(persistentDeviceId);
+    expect(transport.notify.subscribeAsync).toHaveBeenCalled();
     await backend.dispose();
   });
 

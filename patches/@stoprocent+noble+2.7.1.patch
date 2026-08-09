@@ -1,13 +1,15 @@
 diff --git a/node_modules/@stoprocent/noble/index.d.ts b/node_modules/@stoprocent/noble/index.d.ts
-index d4a435d..1e835cc 100644
+index d4a435d..94783d3 100644
 --- a/node_modules/@stoprocent/noble/index.d.ts
 +++ b/node_modules/@stoprocent/noble/index.d.ts
-@@ -45,22 +45,24 @@ declare module '@stoprocent/noble' {
+@@ -45,22 +45,26 @@ declare module '@stoprocent/noble' {
          stopScanningAsync(): Promise<void>;
          discoverAsync(): AsyncGenerator<Peripheral, void, unknown>;
          connectAsync(idOrAddress: PeripheralIdOrAddress, options?: ConnectOptions): Promise<Peripheral>;
 +        /** Windows only; returns whether WinRT reports a durable device bond. */
 +        isPaired(idOrAddress: PeripheralIdOrAddress): boolean;
++        /** Windows only; returns the stable WinRT DeviceInformation.Id. */
++        getDeviceId(idOrAddress: PeripheralIdOrAddress): string | null;
          /**
           * Pair with a peripheral. Windows only; requires an already-connected
 -         * peripheral and supports only the ConfirmOnly ("Just Works") ceremony.
@@ -31,7 +33,7 @@ index d4a435d..1e835cc 100644
          cancelConnect(idOrAddress: PeripheralIdOrAddress, options?: object): void;
          reset(): void;
          stop(): void;
-@@ -119,8 +121,10 @@ declare module '@stoprocent/noble' {
+@@ -119,8 +123,12 @@ declare module '@stoprocent/noble' {
          readonly uuid: string;
      
          connectAsync(): Promise<void>;
@@ -39,12 +41,14 @@ index d4a435d..1e835cc 100644
 -        pairAsync(): Promise<void>;
 +        /** Windows only; returns whether WinRT reports a durable device bond. */
 +        isPaired(): boolean;
++        /** Windows only; returns the stable WinRT DeviceInformation.Id. */
++        getDeviceId(): string | null;
 +        /** Windows only; supports ConfirmOnly and caller-supplied PIN ceremonies. */
 +        pairAsync(options?: { pin?: string }): Promise<void>;
          disconnectAsync(): Promise<void>;
          updateRssiAsync(): Promise<number>;
          discoverServicesAsync(): Promise<Service[]>;
-@@ -131,8 +135,8 @@ declare module '@stoprocent/noble' {
+@@ -131,8 +139,8 @@ declare module '@stoprocent/noble' {
          writeHandleAsync(handle: number, data: Buffer, withoutResponse: boolean): Promise<void>;
  
          connect(callback?: (error: Error | undefined) => void): void;
@@ -56,10 +60,10 @@ index d4a435d..1e835cc 100644
          updateRssi(callback?: (error: Error | undefined, rssi: number) => void): void;
          discoverServices(): void;
 diff --git a/node_modules/@stoprocent/noble/lib/noble.js b/node_modules/@stoprocent/noble/lib/noble.js
-index 716fa18..255fbdb 100644
+index 716fa18..da41d42 100644
 --- a/node_modules/@stoprocent/noble/lib/noble.js
 +++ b/node_modules/@stoprocent/noble/lib/noble.js
-@@ -418,6 +418,11 @@ class Noble extends NobleEventEmitter {
+@@ -418,6 +418,18 @@ class Noble extends NobleEventEmitter {
      });
    }
  
@@ -68,10 +72,17 @@ index 716fa18..255fbdb 100644
 +    return typeof this._bindings.isPaired === 'function' && this._bindings.isPaired(identifier) === true;
 +  }
 +
++  getDeviceId (idOrAddress) {
++    const identifier = this._getPeripheralId(idOrAddress);
++    return typeof this._bindings.getDeviceId === 'function'
++      ? this._bindings.getDeviceId(identifier)
++      : null;
++  }
++
    _onConnect (peripheralId, error) {
      const peripheral = this._peripherals.get(peripheralId);
  
-@@ -433,7 +438,11 @@ class Noble extends NobleEventEmitter {
+@@ -433,7 +445,11 @@ class Noble extends NobleEventEmitter {
      }
    }
  
@@ -84,7 +95,7 @@ index 716fa18..255fbdb 100644
      const identifier = this._getPeripheralId(idOrAddress);
      if (typeof callback === 'function') {
        this.onceExclusive(`pair:${identifier}`, error => callback(error));
-@@ -455,12 +464,13 @@ class Noble extends NobleEventEmitter {
+@@ -455,12 +471,13 @@ class Noble extends NobleEventEmitter {
        this.emit(`pair:${identifier}`, err);
        return;
      }
@@ -102,16 +113,20 @@ index 716fa18..255fbdb 100644
    }
  
 diff --git a/node_modules/@stoprocent/noble/lib/peripheral.js b/node_modules/@stoprocent/noble/lib/peripheral.js
-index 525320b..59c1ffb 100644
+index 525320b..ce33f80 100644
 --- a/node_modules/@stoprocent/noble/lib/peripheral.js
 +++ b/node_modules/@stoprocent/noble/lib/peripheral.js
-@@ -57,19 +57,27 @@ class Peripheral extends NobleEventEmitter {
+@@ -57,19 +57,31 @@ class Peripheral extends NobleEventEmitter {
      });
    }
  
 -  pair (callback) {
 +  isPaired () {
 +    return this._noble.isPaired(this.id);
++  }
++
++  getDeviceId () {
++    return this._noble.getDeviceId(this.id);
 +  }
 +
 +  pair (options, callback) {
@@ -138,10 +153,136 @@ index 525320b..59c1ffb 100644
    }
  
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
-index 2a5f3fa..152fb72 100644
+index 2a5f3fa..35d0bc3 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
 +++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.cc
-@@ -323,9 +323,8 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
+@@ -24,6 +24,36 @@ using winrt::Windows::Security::Cryptography::CryptographicBuffer;
+ using winrt::Windows::Devices::Bluetooth::Advertisement::BluetoothLEAdvertisementBytePattern;
+ using winrt::Windows::Devices::Bluetooth::GenericAttributeProfile::GattSession;
+ 
++namespace {
++const std::string WINDOWS_DEVICE_ID_PREFIX = "72747677696e01";
++
++int hexValue(char value)
++{
++    if (value >= '0' && value <= '9') return value - '0';
++    if (value >= 'a' && value <= 'f') return value - 'a' + 10;
++    if (value >= 'A' && value <= 'F') return value - 'A' + 10;
++    return -1;
++}
++
++std::optional<std::string> decodeWindowsDeviceId(const std::string& value)
++{
++    if (value.rfind(WINDOWS_DEVICE_ID_PREFIX, 0) != 0) return std::nullopt;
++    const auto encoded = value.substr(WINDOWS_DEVICE_ID_PREFIX.size());
++    if (encoded.empty() || encoded.size() % 2 != 0) return std::nullopt;
++
++    std::string decoded;
++    decoded.reserve(encoded.size() / 2);
++    for (size_t index = 0; index < encoded.size(); index += 2)
++    {
++        const auto high = hexValue(encoded[index]);
++        const auto low = hexValue(encoded[index + 1]);
++        if (high < 0 || low < 0) return std::nullopt;
++        decoded.push_back(static_cast<char>((high << 4) | low));
++    }
++    return decoded;
++}
++}
++
+ template <typename T> auto inFilter(std::vector<T> filter, T object)
+ {
+     return filter.empty() || std::find(filter.begin(), filter.end(), object) != filter.end();
+@@ -266,37 +296,44 @@ void BLEManager::OnScanStopped(BluetoothLEAdvertisementWatcher watcher,
+ 
+ bool BLEManager::Connect(const std::string& uuid)
+ {
++    const auto windowsDeviceId = decodeWindowsDeviceId(uuid);
+     if (mDeviceMap.find(uuid) == mDeviceMap.end())
+     {
+-        // Convert UUID string to MAC address format
+-        // Remove any colons if present and convert to uppercase
+-        std::string cleanUuid = uuid;
+-        cleanUuid.erase(std::remove(cleanUuid.begin(), cleanUuid.end(), ':'), cleanUuid.end());
+-        
+-        // Basic validation
+-        if (cleanUuid.length() != 12) {
+-            mEmit.Connected(uuid, "invalid device address format");
+-            return false;
++        if (windowsDeviceId.has_value())
++        {
++            PeripheralWinrt peripheral;
++            peripheral.connectable = true;
++            mEmit.Scan(uuid, peripheral.rssi, peripheral);
++            mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
+         }
++        else
++        {
++            // Convert UUID string to MAC address format.
++            std::string cleanUuid = uuid;
++            cleanUuid.erase(std::remove(cleanUuid.begin(), cleanUuid.end(), ':'), cleanUuid.end());
+ 
+-        try {
+-            // Convert string to uint64_t bluetooth address
+-            uint64_t bluetoothAddress = std::stoull(cleanUuid, nullptr, 16);
+-            
+-            // Create a new peripheral entry as if it was scanned
+-            auto peripheral = PeripheralWinrt(bluetoothAddress, 
+-                                            BluetoothLEAdvertisementType::ConnectableUndirected, 
+-                                            127,  // default RSSI for direct connect
+-                                            BluetoothLEAdvertisement()); // empty advertisement
+-            
+-            // Emit scan event just like during normal scanning
+-            mEmit.Scan(uuid, 127, peripheral);
++            if (cleanUuid.length() != 12)
++            {
++                mEmit.Connected(uuid, "invalid device address format");
++                return false;
++            }
+ 
+-            // Add to device map
+-            mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
+-        } catch (const std::exception&) {
+-            mEmit.Connected(uuid, "invalid device address format");
+-            return false;
++            try
++            {
++                uint64_t bluetoothAddress = std::stoull(cleanUuid, nullptr, 16);
++                auto peripheral = PeripheralWinrt(
++                    bluetoothAddress,
++                    BluetoothLEAdvertisementType::ConnectableUndirected,
++                    127,
++                    BluetoothLEAdvertisement());
++                mEmit.Scan(uuid, 127, peripheral);
++                mDeviceMap.emplace(std::make_pair(uuid, std::move(peripheral)));
++            }
++            catch (const std::exception&)
++            {
++                mEmit.Connected(uuid, "invalid device address format");
++                return false;
++            }
+         }
+     }
+ 
+@@ -304,8 +341,15 @@ bool BLEManager::Connect(const std::string& uuid)
+     if (!peripheral.device.has_value())
+     {
+         auto completed = bind2(this, &BLEManager::OnConnected, uuid);
+-        BluetoothLEDevice::FromBluetoothAddressAsync(peripheral.bluetoothAddress)
+-            .Completed(completed);
++        if (windowsDeviceId.has_value())
++        {
++            BluetoothLEDevice::FromIdAsync(winrt::to_hstring(*windowsDeviceId)).Completed(completed);
++        }
++        else
++        {
++            BluetoothLEDevice::FromBluetoothAddressAsync(peripheral.bluetoothAddress)
++                .Completed(completed);
++        }
+     }
+     else
+     {
+@@ -323,13 +367,11 @@ void BLEManager::OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncSt
          // device can be null if the connection failed
          if (device)
          {
@@ -152,7 +293,30 @@ index 2a5f3fa..152fb72 100644
              PeripheralWinrt& peripheral = mDeviceMap[uuid];
              peripheral.device = device;
              peripheral.connectionToken = token;
-@@ -388,7 +387,21 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
+-            mEmit.Connected(uuid);
+ 
+             // Get GATT session to access the MTU
+             auto completed = bind2(this, &BLEManager::OnGattSessionCreated, uuid);
+@@ -368,15 +410,18 @@ void BLEManager::OnGattSessionCreated(IAsyncOperation<GattSession> asyncOp, Asyn
+             peripheral.maxPduSizeChangedToken = token;
+ 
+             session.MaintainConnection(true);
++            mEmit.Connected(uuid);
+         }
+         else
+         {
+             LOGE("Failed to get GattSession for device %s", uuid.c_str());
++            mEmit.Connected(uuid, "could not create GATT session");
+         }
+     }
+     else
+     {
+         LOGE("Failed to create GattSession: %s", asyncStatusToString(status).c_str());
++        mEmit.Connected(uuid, "could not create GATT session");
+     }
+ }
+ 
+@@ -388,7 +433,35 @@ void BLEManager::OnMaxPduSizeChanged(GattSession session, winrt::Windows::Founda
      mEmit.MTU(uuid, mtu);
  }
  
@@ -171,11 +335,25 @@ index 2a5f3fa..152fb72 100644
 +    }
 +}
 +
++std::optional<std::string> BLEManager::GetDeviceId(const std::string& uuid)
++{
++    auto it = mDeviceMap.find(uuid);
++    if (it == mDeviceMap.end() || !it->second.device.has_value()) return std::nullopt;
++    try
++    {
++        return winrt::to_string(it->second.device->DeviceInformation().Id());
++    }
++    catch (...)
++    {
++        return std::nullopt;
++    }
++}
++
 +bool BLEManager::Pair(const std::string& uuid, const std::string& pin)
  {
      using winrt::Windows::Devices::Enumeration::DevicePairingKinds;
  
-@@ -435,32 +448,50 @@ bool BLEManager::Pair(const std::string& uuid)
+@@ -435,32 +508,50 @@ bool BLEManager::Pair(const std::string& uuid)
              return true;
          }
  
@@ -204,20 +382,20 @@ index 2a5f3fa..152fb72 100644
                  LOGE("pairing requested, kind=%d", static_cast<int>(kind));
 -                if (kind == DevicePairingKinds::ConfirmOnly)
 +                if (pin.empty() && kind == DevicePairingKinds::ConfirmOnly)
-+                {
-+                    args.Accept();
-+                }
+                 {
+                     args.Accept();
+                 }
+-                // Any other kind: do not call Accept() — Windows treats the
+-                // handler returning as a rejection.
 +                else if (!pin.empty() && kind == DevicePairingKinds::ProvidePin)
 +                {
 +                    args.Accept(winrt::to_hstring(pin));
 +                }
 +                else if (!pin.empty() && kind == DevicePairingKinds::ConfirmPinMatch &&
 +                         winrt::to_string(args.Pin()) == pin)
-                 {
-                     args.Accept();
-                 }
--                // Any other kind: do not call Accept() — Windows treats the
--                // handler returning as a rejection.
++                {
++                    args.Accept();
++                }
 +                else
 +                {
 +                    LOGE("pairing request rejected, kind=%d", static_cast<int>(kind));
@@ -239,7 +417,7 @@ index 2a5f3fa..152fb72 100644
              .Completed(completed);
      }
      catch (const winrt::hresult_error& e)
-@@ -547,7 +578,9 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
+@@ -547,7 +638,9 @@ void BLEManager::OnPaired(IAsyncOperation<DevicePairingResult> asyncOp, AsyncSta
  
          auto result = asyncOp.GetResults();
          auto resultStatus = result.Status();
@@ -250,7 +428,7 @@ index 2a5f3fa..152fb72 100644
          if (resultStatus == DevicePairingResultStatus::Paired ||
              resultStatus == DevicePairingResultStatus::AlreadyPaired)
          {
-@@ -591,11 +624,11 @@ bool BLEManager::CancelConnect(const std::string& uuid)
+@@ -591,11 +684,11 @@ bool BLEManager::CancelConnect(const std::string& uuid)
  }
  
  void BLEManager::OnConnectionStatusChanged(BluetoothLEDevice device,
@@ -264,7 +442,7 @@ index 2a5f3fa..152fb72 100644
          if (mDeviceMap.find(uuid) == mDeviceMap.end())
          {
              LOGE("device with id %s not found", uuid.c_str());
-@@ -624,13 +657,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
+@@ -624,13 +717,18 @@ bool BLEManager::UpdateRSSI(const std::string& uuid)
  bool BLEManager::DiscoverServices(const std::string& uuid,
                                    const std::vector<winrt::guid>& serviceUUIDs)
  {
@@ -289,20 +467,21 @@ index 2a5f3fa..152fb72 100644
  
  void BLEManager::OnServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> asyncOp,
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
-index 14a3175..eb2855c 100644
+index 14a3175..f6361c3 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
 +++ b/node_modules/@stoprocent/noble/lib/win/src/ble_manager.h
-@@ -22,7 +22,8 @@ public:
+@@ -22,7 +22,9 @@ public:
      void Scan(const std::vector<winrt::guid>& serviceUUIDs, bool allowDuplicates);
      void StopScan();
      bool Connect(const std::string& uuid);
 -    bool Pair(const std::string& uuid);
 +    bool IsPaired(const std::string& uuid);
++    std::optional<std::string> GetDeviceId(const std::string& uuid);
 +    bool Pair(const std::string& uuid, const std::string& pin);
      bool Disconnect(const std::string& uuid);
      bool CancelConnect(const std::string& uuid);
      bool UpdateRSSI(const std::string& uuid);
-@@ -46,7 +47,7 @@ private:
+@@ -46,7 +48,7 @@ private:
      void OnScanStopped(BluetoothLEAdvertisementWatcher watcher, const BluetoothLEAdvertisementWatcherStoppedEventArgs& args);
      void OnConnected(IAsyncOperation<BluetoothLEDevice> asyncOp, AsyncStatus status, std::string uuid);
      void OnPaired(IAsyncOperation<winrt::Windows::Devices::Enumeration::DevicePairingResult> asyncOp, AsyncStatus status, std::string uuid, winrt::event_token token, winrt::Windows::Devices::Enumeration::DeviceInformationCustomPairing custom);
@@ -312,10 +491,10 @@ index 14a3175..eb2855c 100644
      void OnMaxPduSizeChanged(GattSession session, winrt::Windows::Foundation::IInspectable object, std::string uuid);
      void OnServicesDiscovered(IAsyncOperation<GattDeviceServicesResult> asyncOp, AsyncStatus status, std::string uuid, std::vector<winrt::guid> serviceUUIDs);
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc b/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc
-index e7f8e1c..7f56ddb 100644
+index e7f8e1c..bec2e9d 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc
 +++ b/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.cc
-@@ -101,13 +101,25 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
+@@ -101,13 +101,37 @@ Napi::Value NobleWinrt::Connect(const Napi::CallbackInfo& info)
      return info.Env().Undefined();
  }
  
@@ -327,6 +506,18 @@ index e7f8e1c..7f56ddb 100644
 +    ARG1(String)
 +    auto uuid = info[0].As<Napi::String>().Utf8Value();
 +    return Napi::Boolean::New(info.Env(), manager->IsPaired(uuid));
++}
++
++// getDeviceId(deviceUuid)
++Napi::Value NobleWinrt::GetDeviceId(const Napi::CallbackInfo& info)
++{
++    CHECK_MANAGER()
++    ARG1(String)
++    auto uuid = info[0].As<Napi::String>().Utf8Value();
++    auto deviceId = manager->GetDeviceId(uuid);
++    return deviceId.has_value()
++        ? Napi::String::New(info.Env(), *deviceId)
++        : info.Env().Null();
 +}
 +
 +// pair(deviceUuid, optionalPin)
@@ -343,26 +534,49 @@ index e7f8e1c..7f56ddb 100644
      return info.Env().Undefined();
  }
  
-@@ -325,6 +337,7 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
+@@ -325,6 +349,8 @@ Napi::Object NobleWinrt::Init(Napi::Env env, Napi::Object exports) {
          NobleWinrt::InstanceMethod("startScanning", &NobleWinrt::Scan),
          NobleWinrt::InstanceMethod("stopScanning", &NobleWinrt::StopScan),
          NobleWinrt::InstanceMethod("connect", &NobleWinrt::Connect),
 +        NobleWinrt::InstanceMethod("isPaired", &NobleWinrt::IsPaired),
++        NobleWinrt::InstanceMethod("getDeviceId", &NobleWinrt::GetDeviceId),
          NobleWinrt::InstanceMethod("pair", &NobleWinrt::Pair),
          NobleWinrt::InstanceMethod("disconnect", &NobleWinrt::Disconnect),
          NobleWinrt::InstanceMethod("cancelConnect", &NobleWinrt::CancelConnect),
 diff --git a/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.h b/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.h
-index 1741560..330d6d0 100644
+index 1741560..2b90f6d 100644
 --- a/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.h
 +++ b/node_modules/@stoprocent/noble/lib/win/src/noble_winrt.h
-@@ -13,6 +13,7 @@ public:
+@@ -13,6 +13,8 @@ public:
      Napi::Value Scan(const Napi::CallbackInfo&);
      Napi::Value StopScan(const Napi::CallbackInfo&);
      Napi::Value Connect(const Napi::CallbackInfo&);
 +    Napi::Value IsPaired(const Napi::CallbackInfo&);
++    Napi::Value GetDeviceId(const Napi::CallbackInfo&);
      Napi::Value Pair(const Napi::CallbackInfo&);
      Napi::Value Disconnect(const Napi::CallbackInfo&);
      Napi::Value CancelConnect(const Napi::CallbackInfo&);
+diff --git a/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h b/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h
+index ad59d02..534a08c 100644
+--- a/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h
++++ b/node_modules/@stoprocent/noble/lib/win/src/peripheral_winrt.h
+@@ -66,12 +66,12 @@ public:
+                        winrt::guid descriptorUuid,
+                        std::function<void(std::optional<GattDescriptor>)> callback);
+ 
+-    int rssi;
+-    uint64_t bluetoothAddress;
++    int rssi { 127 };
++    uint64_t bluetoothAddress { 0 };
+     std::optional<BluetoothLEDevice> device;
+-    winrt::event_token connectionToken;
++    winrt::event_token connectionToken {};
+     std::optional<GattSession> gattSession;
+-    winrt::event_token maxPduSizeChangedToken;
++    winrt::event_token maxPduSizeChangedToken {};
+     std::unordered_map<winrt::guid, CachedService> cachedServices;
+     bool nameIsComplete { false }; // `name` is the Complete Local Name
+ 
 diff --git a/node_modules/@stoprocent/noble/package.json b/node_modules/@stoprocent/noble/package.json
 index 8671373..476c759 100644
 --- a/node_modules/@stoprocent/noble/package.json

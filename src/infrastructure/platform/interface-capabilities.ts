@@ -106,12 +106,12 @@ export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
   };
 }
 
-export async function authorizeRNodeDevice(type: RNodeConnectionType, deviceId?: string): Promise<void> {
+export async function authorizeRNodeDevice(type: RNodeConnectionType, deviceId?: string): Promise<string | undefined> {
   if (type === 'ble' && deviceId && window.retivumDesktopBluetooth) {
-    await window.retivumDesktopBluetooth.pair({ deviceId });
-    return;
+    return (await window.retivumDesktopBluetooth.pair({ deviceId })).deviceId;
   }
   if (type === 'ble' && deviceId && Capacitor.isNativePlatform()) {
     await authorizeNativeRNodeDevice(deviceId);
   }
+  return undefined;
 }
