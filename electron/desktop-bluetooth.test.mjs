@@ -311,6 +311,33 @@ describe('native Noble RNode backend', () => {
     await backend.dispose();
   }, 10_000);
 
+  it('does not hang when Windows omits scan-stop completion', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = fakeTransport();
+      const persistentDeviceId =
+        '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+      transport.noble.startScanningAsync.mockImplementation(async () => {
+        queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+      });
+      transport.noble.stopScanningAsync.mockReturnValue(new Promise(() => undefined));
+      const backend = await createNobleBackend('win32', { noble: transport.noble });
+
+      const opening = backend.open('rnode-one', persistentDeviceId, {
+        onData: vi.fn(),
+        onClosed: vi.fn(),
+      });
+      await vi.advanceTimersByTimeAsync(6_000);
+      await opening;
+
+      expect(transport.peripheral.connectAsync).toHaveBeenCalled();
+      expect(transport.notify.subscribeAsync).toHaveBeenCalled();
+      await backend.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('silently resolves a saved identifier, subscribes, and chunks RNode writes', async () => {
     const transport = fakeTransport();
     const backend = await createNobleBackend('darwin', { noble: transport.noble });

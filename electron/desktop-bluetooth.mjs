@@ -17,6 +17,7 @@ const MAX_WRITE_BYTES = 4 * 1024;
 const STAGE_TIMEOUT_MS = 20_000;
 const PAIRING_TIMEOUT_MS = 60_000;
 const WINDOWS_REDISCOVERY_TIMEOUT_MS = 8_000;
+const WINDOWS_SCAN_STOP_TIMEOUT_MS = 5_000;
 const POST_CONNECT_SETTLE_MS = 750;
 const PAIRING_RECONNECT_ATTEMPTS = 5;
 const PAIRING_RECONNECT_DELAY_MS = 3_500;
@@ -158,6 +159,13 @@ export async function createNobleBackend(platform = process.platform, dependenci
   const discovered = new Map();
   const connections = new Map();
   let scanListener;
+  let nativeScanActive = false;
+
+  function logReconnectStage(deviceId, stageName) {
+    if (platform === 'win32' && isWindowsDeviceId(deviceId)) {
+      console.info('RETIVUM_BLE_RECONNECT_STAGE', { stage: stageName });
+    }
+  }
 
   async function ready() {
     await stage('Bluetooth adapter', () => noble.waitForPoweredOnAsync(STAGE_TIMEOUT_MS));
@@ -165,6 +173,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
 
   async function startScan(onDevice) {
     await ready();
+    await stopNativeScan();
     if (scanListener) noble.removeListener('discover', scanListener);
     scanListener = (peripheral) => {
       const services = peripheral.advertisement?.serviceUuids?.map(normalizeUuid) ?? [];
@@ -177,13 +186,32 @@ export async function createNobleBackend(platform = process.platform, dependenci
       });
     };
     noble.on('discover', scanListener);
-    await stage('Bluetooth scan', () => noble.startScanningAsync([RNODE_NUS_SERVICE], true));
+    nativeScanActive = true;
+    try {
+      await stage('Bluetooth scan', () => noble.startScanningAsync([RNODE_NUS_SERVICE], true));
+    } catch (error) {
+      await stopNativeScan();
+      throw error;
+    }
   }
 
   async function stopScan() {
     if (scanListener) noble.removeListener('discover', scanListener);
     scanListener = undefined;
-    if (noble.state === 'poweredOn') await noble.stopScanningAsync();
+    await stopNativeScan();
+  }
+
+  async function stopNativeScan() {
+    if (!nativeScanActive || noble.state !== 'poweredOn') {
+      nativeScanActive = false;
+      return;
+    }
+    nativeScanActive = false;
+    await stage(
+      'stop Bluetooth scan',
+      () => noble.stopScanningAsync(),
+      WINDOWS_SCAN_STOP_TIMEOUT_MS,
+    ).catch(() => undefined);
   }
 
   async function rediscoverWindowsPeripheral(deviceId) {
@@ -198,6 +226,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
     };
     noble.on('discover', listener);
     try {
+      nativeScanActive = true;
       await stage('Bluetooth scan', () => noble.startScanningAsync([RNODE_NUS_SERVICE], true));
       return await stage(
         'rediscover paired RNode',
@@ -206,22 +235,27 @@ export async function createNobleBackend(platform = process.platform, dependenci
       ).catch(() => undefined);
     } finally {
       noble.removeListener('discover', listener);
-      if (noble.state === 'poweredOn') await noble.stopScanningAsync().catch(() => undefined);
+      await stopNativeScan();
     }
   }
 
   async function resolveAndConnect(deviceId) {
+    logReconnectStage(deviceId, 'adapter');
     await ready();
+    logReconnectStage(deviceId, 'stop-scan');
     await stopScan();
     const savedAddress = windowsDeviceAddress(deviceId);
+    logReconnectStage(deviceId, 'rediscover');
     const known = discovered.get(deviceId)
       ?? (savedAddress ? discovered.get(savedAddress) : undefined)
       ?? await rediscoverWindowsPeripheral(savedAddress ?? deviceId);
     if (known) {
+      logReconnectStage(deviceId, 'connect-scanned-device');
       if (known.state !== 'connected') await stage('connect', () => known.connectAsync());
       discovered.set(deviceId, known);
       return known;
     }
+    logReconnectStage(deviceId, 'connect-saved-device');
     const peripheral = await stage('connect', () => noble.connectAsync(directWindowsDeviceId(deviceId)));
     if (!peripheral) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
     discovered.set(deviceId, peripheral);
@@ -316,6 +350,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
           hooks.onClosed();
         };
         peripheral.on('disconnect', disconnected);
+        if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_STAGE', { stage: 'discover-nus' });
         const nus = await discoverNus(peripheral, hooks.onData);
         connections.set(id, { peripheral, disconnected, ...nus, closing: false });
         if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_READY', { attempt });
