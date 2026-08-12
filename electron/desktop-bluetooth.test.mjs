@@ -150,7 +150,6 @@ describe('native Noble RNode backend', () => {
         paired = true;
         peripheral.state = 'disconnected';
       }),
-      getDeviceId: vi.fn(() => 'BluetoothLE#BluetoothLE00:11:22:33:44:55'),
       discoverSomeServicesAndCharacteristicsAsync: vi.fn().mockResolvedValue({
         services: [],
         characteristics: [write, notify],
@@ -187,9 +186,7 @@ describe('native Noble RNode backend', () => {
     expect(transport.peripheral.pairAsync).toHaveBeenCalledWith({ pin: '123456' });
     expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
-    expect(persistentDeviceId).toBe(
-      '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535',
-    );
+    expect(persistentDeviceId).toBe('aabbccddeeff');
     await backend.dispose();
   });
 
@@ -270,8 +267,7 @@ describe('native Noble RNode backend', () => {
 
   it('rediscovers the saved address before reopening a durable Windows device', async () => {
     const transport = fakeTransport();
-    const persistentDeviceId =
-      '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+    const persistentDeviceId = 'aabbccddeeff';
     transport.noble.startScanningAsync.mockImplementation(async () => {
       queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
     });
@@ -291,8 +287,7 @@ describe('native Noble RNode backend', () => {
 
   it('retries the complete durable Windows GATT open after a stale session', async () => {
     const transport = fakeTransport();
-    const persistentDeviceId =
-      '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+    const persistentDeviceId = 'aabbccddeeff';
     transport.noble.startScanningAsync.mockImplementation(async () => {
       queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
     });
@@ -315,8 +310,7 @@ describe('native Noble RNode backend', () => {
     vi.useFakeTimers();
     try {
       const transport = fakeTransport();
-      const persistentDeviceId =
-        '72747677696e02aabbccddeeff426c7565746f6f74684c4523426c7565746f6f74684c4530303a31313a32323a33333a34343a3535';
+      const persistentDeviceId = 'aabbccddeeff';
       transport.noble.startScanningAsync.mockImplementation(async () => {
         queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
       });

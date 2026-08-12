@@ -22,12 +22,6 @@ const POST_CONNECT_SETTLE_MS = 750;
 const PAIRING_RECONNECT_ATTEMPTS = 5;
 const PAIRING_RECONNECT_DELAY_MS = 3_500;
 const WINDOWS_OPEN_ATTEMPTS = 5;
-// Hex keeps the opaque WinRT DeviceInformation.Id compatible with Noble's
-// peripheral-id plumbing, which otherwise accepts only Bluetooth addresses.
-// Version 2 also retains the last verified 48-bit advertising address so a
-// restart can prefer the same scan-backed connection route as first pairing.
-const WINDOWS_DEVICE_ID_V1_PREFIX = '72747677696e01';
-const WINDOWS_DEVICE_ID_V2_PREFIX = '72747677696e02';
 
 export function registerDesktopBluetooth(
   ipcMain,
@@ -162,7 +156,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
   let nativeScanActive = false;
 
   function logReconnectStage(deviceId, stageName) {
-    if (platform === 'win32' && isWindowsDeviceId(deviceId)) {
+    if (platform === 'win32' && windowsDeviceAddress(deviceId)) {
       console.info('RETIVUM_BLE_RECONNECT_STAGE', { stage: stageName });
     }
   }
@@ -256,7 +250,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
       return known;
     }
     logReconnectStage(deviceId, 'connect-saved-device');
-    const peripheral = await stage('connect', () => noble.connectAsync(directWindowsDeviceId(deviceId)));
+    const peripheral = await stage('connect', () => noble.connectAsync(savedAddress ?? deviceId));
     if (!peripheral) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
     discovered.set(deviceId, peripheral);
     return peripheral;
@@ -319,11 +313,10 @@ export async function createNobleBackend(platform = process.platform, dependenci
       }
       if (lastError) throw lastError;
       if (platform === 'win32') {
-        const winrtDeviceId = connected.getDeviceId?.();
-        if (typeof winrtDeviceId !== 'string' || !winrtDeviceId) {
-          throw new Error('Windows durable device identifier unavailable');
-        }
-        persistentDeviceId = encodeWindowsDeviceId(winrtDeviceId, deviceId);
+        persistentDeviceId = windowsDeviceAddress(connected.address)
+          ?? windowsDeviceAddress(connected.id)
+          ?? windowsDeviceAddress(deviceId);
+        if (!persistentDeviceId) throw new Error('Windows durable device address unavailable');
       }
       return persistentDeviceId;
     } finally {
@@ -334,7 +327,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
 
   async function open(id, deviceId, hooks) {
     await close(id);
-    const durableWindowsDevice = platform === 'win32' && isWindowsDeviceId(deviceId);
+    const durableWindowsDevice = platform === 'win32' && windowsDeviceAddress(deviceId) !== undefined;
     const attempts = durableWindowsDevice ? WINDOWS_OPEN_ATTEMPTS : 1;
     let lastError;
     if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_START');
@@ -363,7 +356,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
         } else if (peripheral?.state === 'connecting') {
           peripheral.cancelConnect?.();
         } else {
-          try { noble.cancelConnect?.(directWindowsDeviceId(deviceId)); } catch { /* no pending native connection */ }
+          try { noble.cancelConnect?.(windowsDeviceAddress(deviceId) ?? deviceId); } catch { /* no pending native connection */ }
         }
         discovered.delete(deviceId);
         if (!durableWindowsDevice || attempt >= attempts) break;
@@ -423,28 +416,9 @@ function validDeviceId(value) {
   return value;
 }
 
-function encodeWindowsDeviceId(value, address) {
-  const normalizedAddress = normalizeDeviceId(address);
-  if (!/^[0-9a-f]{12}$/.test(normalizedAddress)) {
-    throw new Error('Windows durable device address unavailable');
-  }
-  return `${WINDOWS_DEVICE_ID_V2_PREFIX}${normalizedAddress}${Buffer.from(value, 'utf8').toString('hex')}`;
-}
-
-function isWindowsDeviceId(value) {
-  return typeof value === 'string'
-    && (value.startsWith(WINDOWS_DEVICE_ID_V1_PREFIX) || value.startsWith(WINDOWS_DEVICE_ID_V2_PREFIX));
-}
-
 function windowsDeviceAddress(value) {
-  if (typeof value !== 'string' || !value.startsWith(WINDOWS_DEVICE_ID_V2_PREFIX)) return undefined;
-  const address = value.slice(WINDOWS_DEVICE_ID_V2_PREFIX.length, WINDOWS_DEVICE_ID_V2_PREFIX.length + 12);
+  const address = normalizeDeviceId(value);
   return /^[0-9a-f]{12}$/.test(address) ? address : undefined;
-}
-
-function directWindowsDeviceId(value) {
-  if (typeof value !== 'string' || !value.startsWith(WINDOWS_DEVICE_ID_V2_PREFIX)) return value;
-  return `${WINDOWS_DEVICE_ID_V1_PREFIX}${value.slice(WINDOWS_DEVICE_ID_V2_PREFIX.length + 12)}`;
 }
 
 function validPin(value) {
