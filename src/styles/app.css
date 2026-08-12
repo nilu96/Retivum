@@ -683,6 +683,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .provisioning-section-navigation button { display: grid; width: 100%; min-width: 0; grid-template-columns: 30px minmax(0, 1fr); align-items: center; gap: 9px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; color: var(--text); background: var(--surface-2); font-size: .78rem; font-weight: 650; text-align: start; }
 .provisioning-section-navigation button.active { border-color: var(--border-strong); background: var(--accent-soft); }
 .provisioning-section-navigation button > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.provisioning-section-label { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.provisioning-section-change-indicator { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--warning); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warning) 14%, transparent); }
 .provisioning-section-icon { color: var(--text-muted); background: transparent; }
 .provisioning-section-navigation button.active .provisioning-section-icon { color: var(--accent-strong); }
 .provisioning-directory { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }

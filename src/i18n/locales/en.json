@@ -929,6 +929,7 @@
   "provisioning.refresh": "Refresh current section",
   "provisioning.section.label": "Provisioning section",
   "provisioning.section.status": "Node status",
+  "provisioning.section.pendingHint": "A dot marks sections with changes that have not been committed.",
   "provisioning.info.destination": "Management destination",
   "provisioning.info.firmware": "Firmware version",
   "provisioning.info.schema": "Schema version",

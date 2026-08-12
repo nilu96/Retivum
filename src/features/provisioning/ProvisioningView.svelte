@@ -153,6 +153,19 @@
   const activeValidationErrorCount = $derived(Object.keys(fieldValidationErrors).filter((key) => (
     activeNamespaceIds.has(Number(key.split(':', 1)[0]))
   )).length);
+  const pendingRootNamespaceIds = $derived.by(() => {
+    if (!loaded) return new Set<number>();
+    const loadedDevice = loaded;
+    const pendingNamespaceIds = new Set([
+      ...dirtyFields,
+      ...firmwareDraftFields,
+      ...Object.keys(fieldValidationErrors),
+    ].map((key) => Number(key.split(':', 1)[0])));
+    return new Set(rootNamespaces.filter((rootNamespace) => (
+      namespaceTree(loadedDevice.schema.namespaces, rootNamespace.id)
+        .some((namespace) => pendingNamespaceIds.has(namespace.id))
+    )).map((namespace) => namespace.id));
+  });
 
   onDestroy(() => {
     loadSequence += 1;
@@ -996,13 +1009,16 @@
       <select
         class="provisioning-section-select"
         aria-label={$t('provisioning.section.label')}
+        aria-describedby={pendingRootNamespaceIds.size > 0 ? 'provisioning-section-pending-hint' : undefined}
         value={activeSection}
         disabled={busy}
         onchange={(event) => selectSection(event.currentTarget.value)}
       >
         <option value="status">{$t('provisioning.section.status')}</option>
         {#each rootNamespaces as namespace (namespace.id)}
-          <option value={`namespace:${namespace.id}`}>{namespace.name}</option>
+          <option value={`namespace:${namespace.id}`}>
+            {namespace.name}{pendingRootNamespaceIds.has(namespace.id) ? ' •' : ''}
+          </option>
         {/each}
       </select>
     {/if}
@@ -1018,6 +1034,11 @@
           </button>
         </div>
       </section>
+    {/if}
+    {#if selectedNode && loaded && pendingRootNamespaceIds.size > 0}
+      <span id="provisioning-section-pending-hint" class="sr-only">
+        {$t('provisioning.section.pendingHint')}
+      </span>
     {/if}
   </form>
 
@@ -1141,6 +1162,9 @@
                 class:active={activeSection === `namespace:${namespace.id}`}
                 type="button"
                 aria-current={activeSection === `namespace:${namespace.id}` ? 'page' : undefined}
+                aria-describedby={pendingRootNamespaceIds.has(namespace.id)
+                  ? 'provisioning-section-pending-hint'
+                  : undefined}
                 disabled={busy}
                 onclick={() => selectSection(`namespace:${namespace.id}`)}
               >
@@ -1151,7 +1175,12 @@
                 >
                   <Icon name={readOnlySection ? 'info' : 'settings'} size={16} />
                 </span>
-                <span>{namespace.name}</span>
+                <span class="provisioning-section-label">
+                  <span>{namespace.name}</span>
+                  {#if pendingRootNamespaceIds.has(namespace.id)}
+                    <span class="provisioning-section-change-indicator" aria-hidden="true"></span>
+                  {/if}
+                </span>
               </button>
             {/each}
           </div>

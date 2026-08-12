@@ -526,6 +526,12 @@ describe('ProvisioningView', () => {
 
     const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
     const revert = screen.getByRole('button', { name: 'Revert' });
+    const sectionNavigation = screen.getByRole('navigation', { name: 'Provisioning section' });
+    const namespaceNavigationItem = within(sectionNavigation).getByRole('button', {
+      name: 'RNode General Config',
+    });
+    const namespaceOption = Array.from((sectionSelect as HTMLSelectElement).options)
+      .find((option) => option.value === 'namespace:10');
     const namespaceActions = saveNamespace.parentElement;
     expect(namespaceActions).toHaveClass('provisioning-status-actions', 'provisioning-namespace-actions');
     expect(Array.from(namespaceActions?.children ?? [])).toEqual([revert, saveNamespace]);
@@ -534,6 +540,10 @@ describe('ProvisioningView', () => {
     }));
     expect(saveNamespace).toBeDisabled();
     expect(revert).toBeDisabled();
+    expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
+      .not.toBeInTheDocument();
+    expect(namespaceOption).toHaveTextContent('RNode General Config');
+    expect(namespaceOption).not.toHaveTextContent('•');
     expect(screen.queryByRole('button', { name: 'Commit all' })).not.toBeInTheDocument();
 
     const deviceName = screen.getByRole('textbox', { name: 'Device name' });
@@ -545,9 +555,18 @@ describe('ProvisioningView', () => {
     expect(document.activeElement).toBe(deviceName);
     expect(saveNamespace).toBeEnabled();
     expect(revert).toBeEnabled();
+    expect(namespaceNavigationItem).toHaveAttribute('aria-describedby', 'provisioning-section-pending-hint');
+    expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
+      .toBeInTheDocument();
+    expect(namespaceOption).toHaveTextContent('RNode General Config •');
+    expect(screen.getByText('A dot marks sections with changes that have not been committed.'))
+      .toHaveClass('sr-only');
     await fireEvent.input(deviceName, { target: { value: 'Original name' } });
     expect(saveNamespace).toBeDisabled();
     expect(revert).toBeDisabled();
+    expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
+      .not.toBeInTheDocument();
+    expect(namespaceOption).not.toHaveTextContent('•');
     await fireEvent.input(deviceName, { target: { value: 'Pending name' } });
     await fireEvent.click(saveNamespace);
 
@@ -555,6 +574,9 @@ describe('ProvisioningView', () => {
     expect(load).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Save namespace' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Revert' })).toBeEnabled();
+    expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
+      .toBeInTheDocument();
+    expect(namespaceOption).toHaveTextContent('RNode General Config •');
     const pendingBar = screen.getByText('Saved fields pending: 1').closest('.provisioning-pending-bar');
     expect(pendingBar).toBeInTheDocument();
     expect(sectionSelect.nextElementSibling).toBe(pendingBar);
@@ -570,6 +592,9 @@ describe('ProvisioningView', () => {
     expect(getState).toHaveBeenCalledWith([10]);
     expect(screen.queryByRole('button', { name: 'Commit all' })).not.toBeInTheDocument();
     expect(screen.getByDisplayValue('Pending name')).toBeInTheDocument();
+    expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
+      .not.toBeInTheDocument();
+    expect(namespaceOption).not.toHaveTextContent('•');
     expect(close).not.toHaveBeenCalled();
   });
 
