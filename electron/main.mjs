@@ -53,13 +53,19 @@ async function createWindow() {
   const { dispose: disposeDevices, requestBluetoothPairing } = installDeviceAccess(window, ipcMain);
   const disposeBluetooth = registerDesktopBluetooth(ipcMain, isTrustedRendererFrame, requestBluetoothPairing);
   const disposeAppLifecycle = installDesktopAppLifecycle(window, powerMonitor);
-  disposeDesktopIntegration = () => {
+  let integrationDisposed = false;
+  const disposeWindowIntegration = () => {
+    if (integrationDisposed) return;
+    integrationDisposed = true;
     disposeAppLifecycle();
-    void disposeBluetooth();
+    void disposeBluetooth().catch((error) => {
+      console.error('RETIVUM_ELECTRON_BLUETOOTH_DISPOSE_FAILED', error);
+    });
     disposeDevices();
     disposeDatagrams();
     disposeSockets();
   };
+  disposeDesktopIntegration = disposeWindowIntegration;
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
@@ -71,10 +77,13 @@ async function createWindow() {
     } catch { /* reject non-file navigation */ }
     event.preventDefault();
   });
-  window.on('closed', () => {
-    disposeDesktopIntegration?.();
-    disposeDesktopIntegration = undefined;
-    mainWindow = undefined;
+  // Dispose while webContents is still alive. The closed event remains as an
+  // idempotent fallback for abnormal native-window teardown.
+  window.once('close', disposeWindowIntegration);
+  window.once('closed', () => {
+    disposeWindowIntegration();
+    if (disposeDesktopIntegration === disposeWindowIntegration) disposeDesktopIntegration = undefined;
+    if (mainWindow === window) mainWindow = undefined;
   });
 
   await window.loadFile(rendererEntry);

@@ -26,7 +26,6 @@
       "package.json",
       "!electron/**/*.test.mjs",
       "!node_modules/@stoprocent/bluetooth-hci-socket{,/**}",
-      "!node_modules/@stoprocent/noble/build{,/**}",
       "!node_modules/@serialport{,/**}",
       "!node_modules/@types/w3c-web-usb{,/**}",
       "!node_modules/serialport{,/**}",

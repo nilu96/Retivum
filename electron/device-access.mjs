@@ -12,8 +12,8 @@ const PAIRING_REQUEST_CHANNEL = 'retivum:device:pairing-request';
 const PAIRING_RESPONSE_CHANNEL = 'retivum:device:pairing-response';
 const PAIRING_KINDS = new Set(['confirm', 'confirmPin', 'providePin']);
 
-function isTrustedWebContents(window, webContents) {
-  return webContents?.id === window.webContents.id;
+function isTrustedWebContents(expectedWebContents, webContents) {
+  return webContents?.id === expectedWebContents.id;
 }
 
 async function requestNativeMediaAccess(mediaTypes) {
@@ -33,7 +33,11 @@ async function requestNativeMediaAccess(mediaTypes) {
  * narrow IPC exchange; no generic ipcRenderer surface reaches the page.
  */
 export function installDeviceAccess(window, ipcMain) {
-  const { session } = window.webContents;
+  // BrowserWindow.webContents throws once its native window has been
+  // destroyed. Keep the EventEmitter reference so late/fallback disposal can
+  // still remove listeners without touching that getter during shutdown.
+  const rendererWebContents = window.webContents;
+  const { session } = rendererWebContents;
   const pending = new Map();
   const pendingPairing = new Map();
   let bluetoothTimeout;
@@ -43,7 +47,7 @@ export function installDeviceAccess(window, ipcMain) {
   function requestSelection(type, devices, callback) {
     const requestId = randomUUID();
     pending.set(requestId, { callback, deviceIds: new Set(devices.map((device) => device.id)) });
-    window.webContents.send(REQUEST_CHANNEL, { requestId, type, devices });
+    rendererWebContents.send(REQUEST_CHANNEL, { requestId, type, devices });
   }
 
   function requestBluetoothPairing(details) {
@@ -51,7 +55,7 @@ export function installDeviceAccess(window, ipcMain) {
     const requestId = randomUUID();
     return new Promise((resolve) => {
       pendingPairing.set(requestId, { resolve, pairingKind: details.pairingKind });
-      window.webContents.send(PAIRING_REQUEST_CHANNEL, {
+      rendererWebContents.send(PAIRING_REQUEST_CHANNEL, {
         requestId,
         deviceId: typeof details.deviceId === 'string' ? details.deviceId : '',
         pairingKind: details.pairingKind,
@@ -88,8 +92,8 @@ export function installDeviceAccess(window, ipcMain) {
     }
   };
 
-  const selectSerial = (event, ports, webContents, callback) => {
-    if (webContents.id !== window.webContents.id) return;
+  const selectSerial = (event, ports, serialWebContents, callback) => {
+    if (serialWebContents.id !== rendererWebContents.id) return;
     event.preventDefault();
     if (ports.length === 0) {
       callback('');
@@ -103,7 +107,7 @@ export function installDeviceAccess(window, ipcMain) {
   };
 
   ipcMain.handle(RESPONSE_CHANNEL, (event, response) => {
-    if (event.sender.id !== window.webContents.id || typeof response?.requestId !== 'string') return;
+    if (event.sender.id !== rendererWebContents.id || typeof response?.requestId !== 'string') return;
     const selection = pending.get(response.requestId);
     if (!selection) return;
     pending.delete(response.requestId);
@@ -114,7 +118,7 @@ export function installDeviceAccess(window, ipcMain) {
   });
 
   ipcMain.handle(PAIRING_RESPONSE_CHANNEL, (event, response) => {
-    if (event.sender.id !== window.webContents.id || typeof response?.requestId !== 'string') return;
+    if (event.sender.id !== rendererWebContents.id || typeof response?.requestId !== 'string') return;
     const pairing = pendingPairing.get(response.requestId);
     if (!pairing) return;
     pendingPairing.delete(response.requestId);
@@ -129,7 +133,7 @@ export function installDeviceAccess(window, ipcMain) {
 
   if (process.platform !== 'darwin' && typeof session.setBluetoothPairingHandler === 'function') {
     session.setBluetoothPairingHandler((details, callback) => {
-      if ((details.frame && details.frame !== window.webContents.mainFrame)
+      if ((details.frame && details.frame !== rendererWebContents.mainFrame)
         || !PAIRING_KINDS.has(details.pairingKind)) {
         callback({ confirmed: false });
         return;
@@ -138,19 +142,19 @@ export function installDeviceAccess(window, ipcMain) {
     });
   }
 
-  window.webContents.on('select-bluetooth-device', selectBluetooth);
+  rendererWebContents.on('select-bluetooth-device', selectBluetooth);
   session.on('select-serial-port', selectSerial);
   session.setDevicePermissionHandler((details) => details.deviceType === 'serial' && details.origin.startsWith('file://'));
-  session.setPermissionCheckHandler((webContents, permission, _origin, details) => (
+  session.setPermissionCheckHandler((requestingWebContents, permission, _origin, details) => (
     permissionCheckAllowed(
-      isTrustedWebContents(window, webContents),
+      isTrustedWebContents(rendererWebContents, requestingWebContents),
       permission,
       details,
     )
   ));
-  session.setPermissionRequestHandler((webContents, permission, callback, details) => {
+  session.setPermissionRequestHandler((requestingWebContents, permission, callback, details) => {
     const decision = permissionRequestDecision(
-      isTrustedWebContents(window, webContents),
+      isTrustedWebContents(rendererWebContents, requestingWebContents),
       permission,
       details,
     );
@@ -178,7 +182,7 @@ export function installDeviceAccess(window, ipcMain) {
     pending.clear();
     for (const pairing of pendingPairing.values()) pairing.resolve({ confirmed: false });
     pendingPairing.clear();
-    window.webContents.removeListener('select-bluetooth-device', selectBluetooth);
+    rendererWebContents.removeListener('select-bluetooth-device', selectBluetooth);
     session.removeListener('select-serial-port', selectSerial);
     session.setDevicePermissionHandler(null);
     session.setPermissionCheckHandler(null);
