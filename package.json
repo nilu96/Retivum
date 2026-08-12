@@ -1,21 +1,47 @@
 {
   "name": "retivum",
   "version": "0.2.1",
+  "description": "A local-first Reticulum and LXMF messenger.",
+  "author": "Nils-Lucas Schönfeld <nl@schoenfeld.dev>",
+  "desktopName": "Retivum.desktop",
   "main": "electron/main.mjs",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=24",
+    "npm": ">=11"
+  },
   "build": {
     "appId": "de.nilu96.retivum",
     "productName": "Retivum",
     "directories": {
-      "buildResources": "electron/assets"
+      "buildResources": "electron/assets",
+      "output": "release"
     },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!electron/**/*.test.mjs",
+      "!node_modules/@stoprocent/bluetooth-hci-socket{,/**}",
+      "!node_modules/@stoprocent/noble/build{,/**}",
+      "!node_modules/@serialport{,/**}",
+      "!node_modules/@types/w3c-web-usb{,/**}",
+      "!node_modules/serialport{,/**}",
+      "!node_modules/usb{,/**}"
+    ],
+    "npmRebuild": false,
     "asarUnpack": [
       "node_modules/@stoprocent/noble/**/*.node"
     ],
     "mac": {
       "icon": "icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
       "hardenedRuntime": true,
       "entitlements": "electron/entitlements.mac.plist",
       "entitlementsInherit": "electron/entitlements.mac.inherit.plist",
@@ -26,10 +52,20 @@
       }
     },
     "win": {
-      "icon": "icon.ico"
+      "icon": "icon.ico",
+      "target": [
+        "nsis",
+        "zip"
+      ]
     },
     "linux": {
-      "icon": "icon.png"
+      "icon": "icon.png",
+      "category": "Network",
+      "syncDesktopName": true,
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     }
   },
   "scripts": {
@@ -41,8 +77,12 @@
     "native:sync": "npm run build && cap sync",
     "android:open": "npm run native:sync && cap open android",
     "ios:open": "npm run native:sync && cap open ios",
-    "desktop:run": "npm run desktop:rebuild && npm run build && electron electron/main.mjs",
-    "desktop:rebuild": "electron-rebuild -f --build-from-source -w @stoprocent/noble",
+    "desktop:run": "node scripts/run-electron.mjs",
+    "desktop:rebuild": "node scripts/rebuild-electron.mjs",
+    "desktop:package": "node scripts/package-electron.mjs",
+    "desktop:package:mac": "node scripts/package-electron.mjs --mac",
+    "desktop:package:win": "node scripts/package-electron.mjs --win",
+    "desktop:package:linux": "node scripts/package-electron.mjs --linux",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
@@ -79,6 +119,7 @@
     "@types/node": "26.1.1",
     "@types/qrcode": "1.5.5",
     "electron": "43.1.1",
+    "electron-builder": "26.15.3",
     "fake-indexeddb": "6.2.5",
     "jsdom": "29.1.1",
     "sharp": "^0.34.5",

@@ -18,6 +18,7 @@ ios/App/Pods/
 ios/App/build/
 electron/dist/
 electron/release/
+/release/
 *.jks
 *.keystore
 *.p8
