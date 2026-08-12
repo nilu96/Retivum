@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, powerMonitor, shell } from 'electron';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDeviceAccess } from './device-access.mjs';
@@ -97,7 +97,11 @@ async function createWindow() {
 
 void app.whenReady()
   .then(() => {
-    if (process.platform === 'darwin') app.dock?.setIcon(appIcon);
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(appIcon);
+    } else {
+      Menu.setApplicationMenu(null);
+    }
     return createWindow();
   })
   .catch((error) => {
