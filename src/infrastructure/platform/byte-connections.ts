@@ -33,6 +33,7 @@ export function createRNodeByteConnection(
   log: (code: string, details?: Record<string, string | number | boolean>) => void = () => undefined,
 ): ByteConnection {
   if (config.connection.type !== 'ble') return new SerialByteConnection(config);
+  if (window.retivumDesktopBluetooth) return new DesktopBluetoothByteConnection(config);
   return Capacitor.isNativePlatform()
     ? new NativeBluetoothByteConnection(config, log)
     : new BluetoothByteConnection(config, log);
@@ -136,6 +137,60 @@ class SerialByteConnection implements ByteConnection {
     } finally {
       if (!this.closing) onClosed();
     }
+  }
+}
+
+class DesktopBluetoothByteConnection implements ByteConnection {
+  private removeListener?: () => void;
+  private closing = false;
+
+  constructor(private readonly config: RNodeInterfaceConfig) {}
+
+  async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
+    const bridge = window.retivumDesktopBluetooth;
+    if (!bridge) throw new Error('RNODE_BLE_UNAVAILABLE');
+    const deviceId = this.config.connection.deviceId;
+    if (!deviceId) throw new Error('RNODE_BLE_NOT_AUTHORIZED');
+    this.closing = false;
+    this.removeListener?.();
+    this.removeListener = bridge.onEvent((event) => {
+      if (event.id !== this.config.id) return;
+      if (event.type === 'data' && event.data?.length) onData(Uint8Array.from(event.data));
+      if (!this.closing && (event.type === 'closed' || event.type === 'error')) onClosed();
+    });
+    try {
+      await bridge.open({ id: this.config.id, deviceId });
+    } catch (error) {
+      this.removeListener?.();
+      this.removeListener = undefined;
+      throw desktopBridgeError(error);
+    }
+  }
+
+  async write(data: Uint8Array): Promise<void> {
+    const bridge = window.retivumDesktopBluetooth;
+    if (!bridge) throw new Error('RNODE_BLE_UNAVAILABLE');
+    try {
+      await bridge.write({ id: this.config.id, data: Array.from(data) });
+    } catch (error) {
+      throw desktopBridgeError(error);
+    }
+  }
+
+  async close(finalData?: Uint8Array): Promise<void> {
+    this.closing = true;
+    const bridge = window.retivumDesktopBluetooth;
+    if (bridge && finalData?.byteLength) {
+      const delivered = await bleStage(
+        'send RNode shutdown',
+        () => bridge.write({ id: this.config.id, data: Array.from(finalData) }),
+        BLE_SHUTDOWN_WRITE_TIMEOUT_MS,
+      ).then(() => true, () => false);
+      if (delivered) await sleep(BLE_SHUTDOWN_DELIVERY_GRACE_MS);
+    }
+    await bridge?.close({ id: this.config.id }).catch(() => undefined);
+    this.removeListener?.();
+    this.removeListener = undefined;
   }
 }
 
@@ -471,6 +526,12 @@ async function bleStage<T>(
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function desktopBridgeError(error: unknown): Error {
+  const message = errorMessage(error);
+  const code = message.match(/RNODE_[A-Z0-9_]+/)?.[0];
+  return new Error(code ?? 'RNODE_BLE_CONNECTION_FAILED');
 }
 
 function normalizeUuid(value: string): string {

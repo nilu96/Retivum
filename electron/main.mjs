@@ -1,9 +1,10 @@
-import { app, BrowserWindow, ipcMain, powerMonitor, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, powerMonitor, shell } from 'electron';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { installDeviceAccess } from './device-access.mjs';
 import { registerDesktopSockets } from './desktop-sockets.mjs';
 import { registerDesktopDatagrams } from './desktop-datagrams.mjs';
+import { registerDesktopBluetooth } from './desktop-bluetooth.mjs';
 import { installDesktopAppLifecycle } from './app-lifecycle.mjs';
 
 const projectRoot = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -49,14 +50,22 @@ async function createWindow() {
 
   const disposeSockets = registerDesktopSockets(ipcMain, isTrustedRendererFrame);
   const disposeDatagrams = registerDesktopDatagrams(ipcMain, isTrustedRendererFrame);
-  const disposeDevices = installDeviceAccess(window, ipcMain);
+  const { dispose: disposeDevices, requestBluetoothPairing } = installDeviceAccess(window, ipcMain);
+  const disposeBluetooth = registerDesktopBluetooth(ipcMain, isTrustedRendererFrame, requestBluetoothPairing);
   const disposeAppLifecycle = installDesktopAppLifecycle(window, powerMonitor);
-  disposeDesktopIntegration = () => {
+  let integrationDisposed = false;
+  const disposeWindowIntegration = () => {
+    if (integrationDisposed) return;
+    integrationDisposed = true;
     disposeAppLifecycle();
+    void disposeBluetooth().catch((error) => {
+      console.error('RETIVUM_ELECTRON_BLUETOOTH_DISPOSE_FAILED', error);
+    });
     disposeDevices();
     disposeDatagrams();
     disposeSockets();
   };
+  disposeDesktopIntegration = disposeWindowIntegration;
 
   window.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('https://')) void shell.openExternal(url);
@@ -68,10 +77,13 @@ async function createWindow() {
     } catch { /* reject non-file navigation */ }
     event.preventDefault();
   });
-  window.on('closed', () => {
-    disposeDesktopIntegration?.();
-    disposeDesktopIntegration = undefined;
-    mainWindow = undefined;
+  // Dispose while webContents is still alive. The closed event remains as an
+  // idempotent fallback for abnormal native-window teardown.
+  window.once('close', disposeWindowIntegration);
+  window.once('closed', () => {
+    disposeWindowIntegration();
+    if (disposeDesktopIntegration === disposeWindowIntegration) disposeDesktopIntegration = undefined;
+    if (mainWindow === window) mainWindow = undefined;
   });
 
   await window.loadFile(rendererEntry);
@@ -85,7 +97,11 @@ async function createWindow() {
 
 void app.whenReady()
   .then(() => {
-    if (process.platform === 'darwin') app.dock?.setIcon(appIcon);
+    if (process.platform === 'darwin') {
+      app.dock?.setIcon(appIcon);
+    } else {
+      Menu.setApplicationMenu(null);
+    }
     return createWindow();
   })
   .catch((error) => {

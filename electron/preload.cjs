@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const EVENT_CHANNEL = 'retivum:tcp:event';
 const UDP_EVENT_CHANNEL = 'retivum:udp:event';
+const BLE_EVENT_CHANNEL = 'retivum:ble:event';
 const DEVICE_REQUEST_CHANNEL = 'retivum:device:selection-request';
 const PAIRING_REQUEST_CHANNEL = 'retivum:device:pairing-request';
 const APP_RESUME_CHANNEL = 'retivum:app:resume';
@@ -25,6 +26,20 @@ contextBridge.exposeInMainWorld('retivumDesktopUdpSockets', Object.freeze({
     const handler = (_event, value) => listener(value);
     ipcRenderer.on(UDP_EVENT_CHANNEL, handler);
     return () => ipcRenderer.removeListener(UDP_EVENT_CHANNEL, handler);
+  },
+}));
+
+contextBridge.exposeInMainWorld('retivumDesktopBluetooth', Object.freeze({
+  startScan: () => ipcRenderer.invoke('retivum:ble:scan-start'),
+  stopScan: () => ipcRenderer.invoke('retivum:ble:scan-stop'),
+  pair: (options) => ipcRenderer.invoke('retivum:ble:pair', options),
+  open: (options) => ipcRenderer.invoke('retivum:ble:open', options),
+  write: (options) => ipcRenderer.invoke('retivum:ble:write', options),
+  close: (options) => ipcRenderer.invoke('retivum:ble:close', options),
+  onEvent: (listener) => {
+    const handler = (_event, value) => listener(value);
+    ipcRenderer.on(BLE_EVENT_CHANNEL, handler);
+    return () => ipcRenderer.removeListener(BLE_EVENT_CHANNEL, handler);
   },
 }));
 

@@ -85,6 +85,24 @@ interface RetivumUdpSocketBridge {
   onEvent(listener: (event: DesktopUdpSocketEvent) => void): () => void;
 }
 
+interface DesktopBluetoothEvent {
+  id?: string;
+  type: 'device' | 'data' | 'closed' | 'error';
+  device?: { id: string; name: string; detail?: string };
+  data?: number[];
+  errorCode?: string;
+}
+
+interface RetivumDesktopBluetoothBridge {
+  startScan(): Promise<void>;
+  stopScan(): Promise<void>;
+  pair(options: { deviceId: string }): Promise<{ deviceId: string }>;
+  open(options: { id: string; deviceId: string }): Promise<void>;
+  write(options: { id: string; data: number[] }): Promise<void>;
+  close(options: { id: string }): Promise<void>;
+  onEvent(listener: (event: DesktopBluetoothEvent) => void): () => void;
+}
+
 interface DesktopDeviceSelectionRequest {
   requestId: string;
   type: 'ble' | 'serial';
@@ -115,6 +133,7 @@ interface Window {
   retivumDesktopSockets?: RetivumSocketBridge;
   retivumMobileSockets?: RetivumSocketBridge;
   retivumDesktopUdpSockets?: RetivumUdpSocketBridge;
+  retivumDesktopBluetooth?: RetivumDesktopBluetoothBridge;
   retivumDesktopDevices?: RetivumDesktopDeviceBridge;
   retivumDesktopLifecycle?: RetivumDesktopLifecycleBridge;
 }

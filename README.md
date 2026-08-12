@@ -17,7 +17,7 @@ The initial application foundation includes:
 - IndexedDB-backed application preferences, NomadNet directories, and persistent heterogeneous interface definitions;
 - a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations;
 - one shared RNode KISS implementation with firmware/radio negotiation, flow control, MTU enforcement, heartbeat, and platform byte-stream adapters;
-- Capacitor BLE, TCP, and UDP adapters for iOS/Android plus a minimal sandboxed Electron shell with Web Bluetooth/Web Serial device selection and narrow `node:net`/`node:dgram` main/preload bridges;
+- Capacitor BLE, TCP, and UDP adapters for iOS/Android plus a minimal sandboxed Electron shell with native BLE, Web Serial, `node:net`, and `node:dgram` main/preload bridges;
 - the bundled Leviculum/LXMF WASM running in a dedicated module worker;
 - first-run Reticulum identity generation plus AES-GCM-encrypted private-key and runtime-snapshot persistence;
 - persistent multi-identity management with add, edit, activate, delete, standard 64-byte Reticulum identity import/export, and legacy Retivum JSON import compatibility;
@@ -41,7 +41,7 @@ NomadNet form submission and page caching, the PWA offline cache, native secure-
 
 Requirements:
 
-- Node.js 22.12 or newer
+- Node.js 24 or newer
 - npm 11 or newer
 - Xcode 26 or newer for iOS development
 - Android Studio 2025.2.1 or newer, its bundled supported JDK, and Android SDK 36 for Android development
@@ -69,7 +69,15 @@ Build and run the local Electron desktop shell:
 npm run desktop:run
 ```
 
-The Electron shell loads the same bundled `dist/` assets without an application web server. TCP and UDP are available through validated `node:net` and `node:dgram` bridges; RNode device selection uses Electron's Web Bluetooth and Web Serial permission events.
+This command rebuilds Noble only on macOS and Windows, refreshes `dist/`, and launches Electron. Linux uses Noble's JavaScript D-Bus backend and therefore skips native compilation. The Electron shell loads the same bundled assets without an application web server. TCP and UDP are available through validated `node:net` and `node:dgram` bridges. RNode BLE uses a fixed-service native bridge so bonded devices can be rediscovered after restart; RNode serial selection continues to use Electron's Web Serial permission events.
+
+Create an unsigned distributable for the current desktop platform and architecture:
+
+```sh
+npm run desktop:package
+```
+
+The platform-specific aliases are `desktop:package:mac`, `desktop:package:win`, and `desktop:package:linux`; each must run on its matching operating system. Artifacts are written to `release/`. GitHub Actions builds macOS x64/arm64, Windows x64, and Linux x64/arm64 artifacts. These development artifacts are not signed or notarized; signing and the remaining release-security requirements must be completed before public distribution.
 
 Synchronize the production web assets into both mobile projects:
 
