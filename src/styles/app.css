@@ -1323,6 +1323,14 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .interface-advanced-content { display: grid; gap: 20px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
 .interface-advanced-group { display: grid; gap: 8px; min-width: 0; }
 .interface-advanced-content .field small { color: var(--text-subtle); font-size: .68rem; line-height: 1.4; }
+.interface-ifac-section { gap: 12px; padding-block-start: 18px; border-block-start: 1px solid var(--border); }
+.interface-ifac-heading { display: grid; gap: 4px; }
+.interface-ifac-heading strong { color: var(--text); font-size: .78rem; }
+.interface-ifac-heading small { color: var(--text-subtle); font-size: .68rem; line-height: 1.45; }
+.interface-ifac-grid { grid-template-columns: minmax(0, 1fr) minmax(120px, .34fr); }
+.interface-ifac-passphrase { grid-column: 1 / -1; }
+.password-input { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px; }
+.password-reveal-button { width: 42px; min-width: 42px; min-height: 42px; padding: 0; }
 .interface-mode-notice { margin: 0; color: var(--text-subtle); font-size: .68rem; line-height: 1.45; }
 .validation-summary { padding: 10px 12px; border: 1px solid var(--danger); border-radius: 9px; background: var(--danger-soft); }
 .validation-summary p { margin: 0; color: var(--danger); font-size: .74rem; }
@@ -1332,7 +1340,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 @container interface-editor (max-width: 500px) {
   .interface-editor-grid, .rnode-radio-grid { grid-template-columns: 1fr; }
   .rnode-radio-grid .field:nth-child(n) { grid-column: auto; }
-  .tcp-endpoint-grid, .udp-endpoint-grid { grid-template-columns: 1fr; }
+  .tcp-endpoint-grid, .udp-endpoint-grid, .interface-ifac-grid { grid-template-columns: 1fr; }
+  .interface-ifac-passphrase { grid-column: auto; }
   .tcp-endpoint-grid .port-field, .udp-endpoint-grid .port-field { grid-column: auto; }
   .interface-editor footer { display: grid; grid-template-columns: minmax(0, 1fr); }
   .interface-editor footer .button { width: 100%; }

@@ -17,6 +17,12 @@ export interface AnnouncePacketMetadata {
 }
 
 export function interfaceNetworkFingerprint(config: InterfaceConfig): string {
+  const ifac = {
+    enabled: Boolean(config.ifac.networkName || config.ifac.passphrase),
+    networkName: config.ifac.networkName,
+    sizeBytes: config.ifac.sizeBytes,
+    credentialRevision: config.ifac.passphrase ? config.ifac.credentialRevision : undefined,
+  };
   if (config.type === 'websocket') {
     return JSON.stringify({
       version: 1,
@@ -26,6 +32,7 @@ export function interfaceNetworkFingerprint(config: InterfaceConfig): string {
       host: config.connection.host,
       port: config.connection.port,
       path: config.connection.path,
+      ifac,
     });
   }
   if (config.type === 'tcp') {
@@ -35,6 +42,7 @@ export function interfaceNetworkFingerprint(config: InterfaceConfig): string {
       mode: config.mode,
       host: config.connection.host,
       port: config.connection.port,
+      ifac,
     });
   }
   if (config.type === 'udp') {
@@ -46,6 +54,7 @@ export function interfaceNetworkFingerprint(config: InterfaceConfig): string {
       listenPort: config.connection.listenPort,
       forwardHost: config.connection.forwardHost,
       forwardPort: config.connection.forwardPort,
+      ifac,
     });
   }
   return JSON.stringify({
@@ -63,6 +72,7 @@ export function interfaceNetworkFingerprint(config: InterfaceConfig): string {
     codingRate: config.radio.codingRate,
     dutyCycle: config.radio.dutyCycle,
     flowControl: config.radio.flowControl,
+    ifac,
   });
 }
 

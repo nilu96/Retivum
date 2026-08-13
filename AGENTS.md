@@ -13,7 +13,7 @@ Keep these boundaries intact:
 - Retivum can store multiple identities but runs exactly one active identity/node/router at a time.
 - Feature components use app-owned ports and stores. Do not import Electron, Capacitor, browser device handles, or generated WASM internals directly into feature code.
 - Remote packets, announces, labels, LXMF fields, NomadNet pages, provisioning responses, imported files, and transport errors are untrusted input.
-- Private identity material and runtime snapshots are sensitive. Do not log them or include them in ordinary support exports.
+- Private identity material, runtime snapshots, and IFAC passphrases are sensitive. Do not log them or include them in ordinary support exports.
 - All user-facing strings, including accessibility text and errors, go through the bundled localization catalog. English source strings live in `src/i18n/locales/en.json`.
 
 ## Start here
@@ -97,7 +97,7 @@ Treat these reference directories as read-only unless the task explicitly asks t
 
 ### Source state and provenance caution
 
-The local Leviculum checkout currently reports version `0.8.0`, origin `https://codeberg.org/nilu96/leviculum.git`, and upstream `https://codeberg.org/Lew_Palm/leviculum.git`. The current generated WASM corresponds to merge commit `2b00a05e354de081b42f294ef69057fe15dc296e` and Git tree `248d5fdafbb6d68f153bd7ebe4300b59802e2101`. That commit merges `feat/wasm` base `5780befe93d4f87c5010e3a5dd79663ba2ef0db2` with upstream `bb7c4f64db3f6d6d2c27cc7d5e6e9fd0617ab801` and includes the WASM adapter changes. Those changes use one browser clock seam (`performance.now()` for monotonic deadlines and `Date.now()` for Unix wall time), source ordinary LXMF wire timestamps from the node, preserve explicit timestamps only for the same logical message across retries or propagation fallback, apply checked delivery-announcement stamp costs, and implement the upstream storage table enumeration requirements. The source also keeps recovery-friendly repeated `PropagationStampPending` events while avoiding persistence requests when only their derived retry cursor advances, projects the request destination hash through WASM, makes request-handler deregistration destination-scoped, normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, Python-compatible direct-delivery attempt accounting and Resource-failure handling, optional `interfaceIndex` targeting for `announceLxmf()`, and current core path-response behavior that regenerates announces while retaining the last explicitly announced application data.
+The local Leviculum checkout currently reports version `0.8.0`, origin `https://codeberg.org/nilu96/leviculum.git`, and upstream `https://codeberg.org/Lew_Palm/leviculum.git`. The current generated WASM corresponds to commit `5348c646caec4a762f015e510282b1bd79e594f6` and Git tree `53c5bc2ff5d4b1332f4ca8c7b5175e286d33fdab`. That commit adds IFAC media-class default resolution and explicit-size validation on top of commit `33d7dd3a50f11ee72d6c5e1870d6b9a02bca4b36`, which adds per-interface IFAC validation and outgoing packet finalization to the WASM adapter. The facade accepts an IFAC interface type of `serial` or `network`; only an omitted size resolves through Leviculum core's respective default, while explicit sizes must be from 1 through 64. The earlier adapter changes use one browser clock seam (`performance.now()` for monotonic deadlines and `Date.now()` for Unix wall time), source ordinary LXMF wire timestamps from the node, preserve explicit timestamps only for the same logical message across retries or propagation fallback, apply checked delivery-announcement stamp costs, and implement the upstream storage table enumeration requirements. The source also keeps recovery-friendly repeated `PropagationStampPending` events while avoiding persistence requests when only their derived retry cursor advances, projects the request destination hash through WASM, makes request-handler deregistration destination-scoped, normalizes integer- or float-encoded propagation transfer/sync limits to `u64`, includes propagation response progress and transfer size in sync-state events and snapshots, and exposes active incoming LXMF Resources through a read-only snapshot API. The Python LXMF reference and deterministic fixture are pinned to official 1.1.0, and the remaining LXMF/RNS parity work is documented in the Leviculum checkout. This source also includes the `inDestinationHashes()` binding, shared five-attempt LXMF delivery scheduling, Python-compatible direct-delivery attempt accounting and Resource-failure handling, optional `interfaceIndex` targeting for `announceLxmf()`, and current core path-response behavior that regenerates announces while retaining the last explicitly announced application data.
 
 Use the immutable Leviculum commit and tree above together with the recorded toolchain, build command, and artifact hashes when publishing or reproducing this generated build.
 
@@ -114,10 +114,10 @@ Current fingerprints:
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `leviculum_wasm.js` | `0f7fa57fbd0e10084578bc35eab93de918be17f250b7eb7d91808d28bbbed30b` |
-| `leviculum_wasm_bg.wasm` | `9dcd157265fa50b38d5d641b1a865c2a5e534922d9c0da0e85d749ecc4365a88` |
-| `leviculum_wasm.d.ts` | `d10885f80977b246ac6de7eac9967556011e936d6f36002ecd79c3dbf9701039` |
-| `leviculum_wasm_bg.wasm.d.ts` | `f8f304cd4be42fc7fa6c088976906fcdc1cf62a136e881293271e3fd843913a7` |
+| `leviculum_wasm.js` | `6c163933c5df267d5625308322579f8a7c71d666ef66408c4b8ab76b9c6fec3e` |
+| `leviculum_wasm_bg.wasm` | `f8eb592b4824e1be4ba925b43155e947179ceca45c75a39b48e2cc5486321124` |
+| `leviculum_wasm.d.ts` | `1b2cc3da627098cbc44ec8df66a16e79443355690dc2d2a0334d50d2a10bccf2` |
+| `leviculum_wasm_bg.wasm.d.ts` | `41c5222653f5fc8eb87e8a97844d82e95b512bcc51c7eceb02493d1b823da9f2` |
 
 The current build was produced with Rust 1.95.0 and `wasm-bindgen` 0.2.126. From the Leviculum checkout, the documented development build is:
 

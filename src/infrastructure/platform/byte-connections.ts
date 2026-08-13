@@ -48,13 +48,14 @@ export function createRNodeByteConnection(
 export async function authorizeNativeRNodeDevice(deviceId: string): Promise<void> {
   const connection = new NativeBluetoothByteConnection({
     id: 'native-rnode-authorization',
-    schemaVersion: 4,
+    schemaVersion: 5,
     createdAt: new Date(0).toISOString(),
     type: 'rnode',
     name: 'RNode',
     enabled: false,
     mode: 'full',
     reannounceOnReconnect: false,
+    ifac: { networkName: '', passphrase: '', credentialRevision: 'authorization' },
     connection: { type: 'ble', deviceId },
     radio: {
       frequency: 869_462_500,

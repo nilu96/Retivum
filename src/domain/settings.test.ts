@@ -124,6 +124,48 @@ describe('platform interface configuration', () => {
     })?.reannounceOnReconnect).toBe(false);
   });
 
+  it('keeps IFAC size absent by default and preserves valid explicit sizes', () => {
+    expect(createRNodeInterfaceDraft('ble').ifac).toMatchObject({
+      networkName: '',
+      passphrase: '',
+    });
+    expect(createWebSocketInterfaceDraft().ifac).not.toHaveProperty('sizeBytes');
+    expect(createTcpInterfaceDraft().ifac).not.toHaveProperty('sizeBytes');
+    expect(createUdpInterfaceDraft().ifac).not.toHaveProperty('sizeBytes');
+
+    const legacy = createRNodeInterfaceDraft('ble', 'legacy-ifac');
+    const { ifac: _ifac, ...withoutIfac } = legacy;
+    expect(normalizeInterfaceConfig({ ...withoutIfac, schemaVersion: 4 })?.ifac).toMatchObject({
+      networkName: '',
+      passphrase: '',
+    });
+
+    const configured = createWebSocketInterfaceDraft('configured-ifac');
+    configured.ifac.networkName = 'field-network';
+    configured.ifac.passphrase = 'shared secret';
+    expect(normalizeInterfaceConfig(configured)?.ifac).toMatchObject({
+      networkName: 'field-network',
+      passphrase: 'shared secret',
+    });
+
+    configured.ifac.sizeBytes = 31;
+    expect(normalizeInterfaceConfig(configured)?.ifac.sizeBytes).toBe(31);
+  });
+
+  it('allows an absent IFAC size and validates explicit sizes from 1 through 64', () => {
+    const draft = createWebSocketInterfaceDraft('ifac-size-validation');
+    draft.name = 'Relay';
+    expect(validateWebSocketInterface(draft)).toEqual([]);
+    draft.ifac.sizeBytes = 1;
+    expect(validateWebSocketInterface(draft)).toEqual([]);
+    draft.ifac.sizeBytes = 64;
+    expect(validateWebSocketInterface(draft)).toEqual([]);
+    draft.ifac.sizeBytes = 0;
+    expect(validateWebSocketInterface(draft)).toContain('interface.validation.ifacSizeInvalid');
+    draft.ifac.sizeBytes = 64.5;
+    expect(validateWebSocketInterface(draft)).toContain('interface.validation.ifacSizeInvalid');
+  });
+
   it('normalizes and validates RNode radio and device settings', () => {
     const draft = createRNodeInterfaceDraft('ble', 'rnode-1');
     expect(draft.radio).toMatchObject({

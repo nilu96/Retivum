@@ -14,7 +14,7 @@
   let draft = $state(createTcpInterfaceDraft());
   let errors = $state<InterfaceValidationCode[]>([]);
   let saving = $state(false);
-  $effect.pre(() => { if (config && draft.id !== config.id) draft = { ...config, connection: { ...config.connection } }; });
+  $effect.pre(() => { if (config && draft.id !== config.id) draft = { ...config, connection: { ...config.connection }, ifac: { ...config.ifac } }; });
 
   async function submit(event: SubmitEvent): Promise<void> {
     event.preventDefault();
@@ -24,6 +24,7 @@
     try {
       draft.name = draft.name.trim();
       draft.connection.host = draft.connection.host.trim();
+      draft.ifac.networkName = draft.ifac.networkName.trim();
       await onsave($state.snapshot(draft));
     } finally {
       saving = false;
@@ -46,8 +47,10 @@
         <InterfaceAdvancedSettings
           mode={draft.mode}
           reannounceOnReconnect={draft.reannounceOnReconnect}
+          ifac={draft.ifac}
           onchange={(mode) => { draft.mode = mode; }}
           onreannouncechange={(enabled) => { draft.reannounceOnReconnect = enabled; }}
+          onifacchange={(ifac) => { draft.ifac = ifac; }}
         />
       </div>
       <footer><button class="button secondary" type="button" onclick={oncancel}>{$t('common.cancel')}</button><button class="button primary" type="submit" disabled={saving}>{saving ? $t('common.loading') : $t('common.save')}</button></footer>

@@ -15,7 +15,7 @@ The initial application foundation includes:
 - Chat, NomadNet, Tools, and Settings views with Reticulum logs, Path management, Remote provisioning, live status, and raw destination probing available from the Tools directory;
 - a bundled typed English localization catalog used by all GUI components;
 - IndexedDB-backed application preferences, NomadNet directories, and persistent heterogeneous interface definitions;
-- a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations;
+- a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations, including per-interface IFAC network-name, passphrase, and optional size controls with media-appropriate Leviculum defaults;
 - one shared RNode KISS implementation with firmware/radio negotiation, flow control, MTU enforcement, heartbeat, and platform byte-stream adapters;
 - Capacitor BLE, TCP, and UDP adapters for iOS/Android plus a minimal sandboxed Electron shell with native BLE, Web Serial, `node:net`, and `node:dgram` main/preload bridges;
 - the bundled Leviculum/LXMF WASM running in a dedicated module worker;
@@ -96,7 +96,7 @@ Development live reload is not configured in `capacitor.config.ts`; native build
 
 ## Data and security status
 
-The browser build generates a non-extractable AES-GCM wrapping key and stores it with the encrypted private identity key and encrypted runtime snapshot in origin-bound IndexedDB. This protects the private bytes at rest, but any code executing under the same browser origin can use the wrapping key; the Settings screen discloses this weaker browser protection. User-requested identity exports necessarily contain an unencrypted private key and show a confirmation plus persistent warning. Native Keychain, Keystore, and desktop secure-storage adapters are still required before production native distribution. Messages, settings, interfaces, announces, bookmarks, and bounded session logs intentionally remain plaintext inside the application sandbox for v1.
+The browser build generates a non-extractable AES-GCM wrapping key and stores it with the encrypted private identity key and encrypted runtime snapshot in origin-bound IndexedDB. This protects the private bytes at rest, but any code executing under the same browser origin can use the wrapping key; the Settings screen discloses this weaker browser protection. User-requested identity exports necessarily contain an unencrypted private key and show a confirmation plus persistent warning. Native Keychain, Keystore, and desktop secure-storage adapters are still required before production native distribution. Messages, settings, interface configurations, announces, bookmarks, and bounded session logs intentionally remain plaintext inside the application sandbox for v1; interface configurations include plaintext IFAC passphrases.
 
 ## License
 

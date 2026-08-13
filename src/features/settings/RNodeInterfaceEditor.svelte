@@ -36,7 +36,7 @@
 
   $effect.pre(() => {
     if (config && draft.id !== config.id) {
-      draft = { ...config, connection: { ...config.connection }, radio: { ...config.radio } };
+      draft = { ...config, connection: { ...config.connection }, radio: { ...config.radio }, ifac: { ...config.ifac } };
     } else if (!config && !connections.includes(draft.connection.type)) {
       draft = createRNodeInterfaceDraft(connections[0] ?? 'ble');
     }
@@ -95,6 +95,7 @@
     saving = true;
     try {
       draft.name = draft.name.trim();
+      draft.ifac.networkName = draft.ifac.networkName.trim();
       await onsave($state.snapshot(draft));
     } finally {
       saving = false;
@@ -170,8 +171,10 @@
         <InterfaceAdvancedSettings
           mode={draft.mode}
           reannounceOnReconnect={draft.reannounceOnReconnect}
+          ifac={draft.ifac}
           onchange={(mode) => { draft.mode = mode; }}
           onreannouncechange={(enabled) => { draft.reannounceOnReconnect = enabled; }}
+          onifacchange={(ifac) => { draft.ifac = ifac; }}
         />
       </div>
       <footer>

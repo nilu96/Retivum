@@ -31,6 +31,7 @@
       draft = {
         ...config,
         connection: { ...config.connection },
+        ifac: { ...config.ifac },
       };
     }
   });
@@ -44,6 +45,7 @@
     try {
       draft.name = draft.name.trim();
       draft.connection.host = draft.connection.host.trim();
+      draft.ifac.networkName = draft.ifac.networkName.trim();
       await onsave($state.snapshot(draft));
     } finally {
       saving = false;
@@ -104,8 +106,10 @@
         <InterfaceAdvancedSettings
           mode={draft.mode}
           reannounceOnReconnect={draft.reannounceOnReconnect}
+          ifac={draft.ifac}
           onchange={(mode) => { draft.mode = mode; }}
           onreannouncechange={(enabled) => { draft.reannounceOnReconnect = enabled; }}
+          onifacchange={(ifac) => { draft.ifac = ifac; }}
         />
       </div>
 

@@ -65,6 +65,7 @@ import type {
 import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
 import { diagnosticErrorMessage } from '../infrastructure/reticulum/diagnostic-error';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
+import { leviculumIfacOptions } from '../infrastructure/reticulum/ifac-options';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import {
   planRuntimeInterfaceTransition,
@@ -90,10 +91,8 @@ interface WasmOutput {
 }
 
 interface WasmAction {
-  type: 'send' | 'broadcast' | string;
-  iface?: number;
-  excludeIface?: number;
-  excludeIfaces?: number[];
+  type: 'send' | string;
+  iface: number;
   data: Uint8Array | number[];
   packet: {
     packetType?: 'data' | 'announce' | 'linkRequest' | 'proof';
@@ -242,6 +241,7 @@ interface InterfaceDriver {
 }
 
 const drivers = new Map<string, InterfaceDriver>();
+const driversByRuntimeId = new Map<number, InterfaceDriver>();
 const activeLinkIds = new Set<string>();
 const nomadPendingJobs = new Map<string, NomadPageJob[]>();
 const nomadRequests = new Map<string, NomadPageJob>();
@@ -765,6 +765,8 @@ async function rebuildRuntime(
       : new PlatformInterfaceDriver(interfaceConfig);
     drivers.set(interfaceConfig.id, driver);
     driver.attach(node);
+    const runtimeIndex = driver.runtimeIndex();
+    if (runtimeIndex !== undefined) driversByRuntimeId.set(runtimeIndex, driver);
     driver.connect();
   }
 
@@ -1154,6 +1156,7 @@ function cleanupRuntime(alreadyDownRuntimeIndexes: ReadonlySet<number> = new Set
     driver.disconnect(runtimeIndex === undefined || !alreadyDownRuntimeIndexes.has(runtimeIndex));
   }
   drivers.clear();
+  driversByRuntimeId.clear();
   node?.free();
   node = undefined;
 }
@@ -1182,11 +1185,10 @@ function processOutput(
     ) continue;
     let dispatched = 0;
     const dispatchedDrivers: InterfaceDriver[] = [];
-    for (const driver of drivers.values()) {
-      if (driver.dispatch(action)) {
-        dispatched += 1;
-        dispatchedDrivers.push(driver);
-      }
+    const driver = driversByRuntimeId.get(action.iface);
+    if (driver?.dispatch(action)) {
+      dispatched += 1;
+      dispatchedDrivers.push(driver);
     }
     const destinationHash = announcePacketDestinationHash(action.packet);
     if (
@@ -3144,9 +3146,7 @@ function handleChatTransferEvent(event: Record<string, unknown>): void {
   );
 
   if (isSender === true) {
-    // A reflected UDP advertisement can be inspected before Core recognises
-    // this node as the sender. Once the authoritative sender event arrives,
-    // discard any staged copy so it can never become an inbound UI transfer.
+    // Sender-side Resource events never represent an inbound UI transfer.
     pendingInboundResourceAdvertisements.delete(resourceId);
     return;
   }
@@ -3159,10 +3159,9 @@ function handleChatTransferEvent(event: Record<string, unknown>): void {
     const dataSize = eventNumber(event, 'dataSize') ?? 0;
     const transferSize = eventNumber(event, 'transferSize');
 
-    // This is a WASM-boundary inspection event emitted before Reticulum Core
-    // filters and accepts the packet. UDP relays can reflect our own Resource
-    // Advertisement, so retain its metadata but do not expose a receiving
-    // transfer until Core confirms it with ResourceTransferStarted.
+    // WASM has already confirmed that Core accepted this advertisement and
+    // emits its metadata immediately before the receiver-side start event.
+    // Stage it so that start can create the correctly segmented UI transfer.
     if (pendingInboundResourceAdvertisements.size >= maxPendingInboundResourceAdvertisements) {
       const oldest = pendingInboundResourceAdvertisements.keys().next().value;
       if (oldest !== undefined) pendingInboundResourceAdvertisements.delete(oldest);
@@ -4177,7 +4176,7 @@ function eventString(event: Record<string, unknown>, camelName: string): string 
 }
 
 function stableInterfaceId(runtimeId: number | undefined): string | undefined {
-  return Array.from(drivers.values()).find((driver) => driver.hasRuntimeId(runtimeId))?.stableId;
+  return runtimeId === undefined ? undefined : driversByRuntimeId.get(runtimeId)?.stableId;
 }
 
 function runtimeInterfaceBindings(): RuntimeInterfaceBinding[] {
@@ -4557,7 +4556,7 @@ function closeAllActiveLinks(): void {
 }
 
 function driverForRuntimeId(runtimeId: number | undefined): InterfaceDriver | undefined {
-  return Array.from(drivers.values()).find((driver) => driver.hasRuntimeId(runtimeId));
+  return runtimeId === undefined ? undefined : driversByRuntimeId.get(runtimeId);
 }
 
 class PlatformInterfaceDriver implements InterfaceDriver {
@@ -4597,6 +4596,7 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     this.runtimeId = owner.addInterface({
       name: this.config.name,
       mode: leviculumInterfaceMode(this.config.mode),
+      ...leviculumIfacOptions(this.config),
       ...(radio ? {
         hwMtu: 508,
         bitrateBps: computeRNodeBitrate(radio.spreadingFactor, radio.codingRate, radio.bandwidth),
@@ -4620,7 +4620,7 @@ class PlatformInterfaceDriver implements InterfaceDriver {
   }
 
   dispatch(action: WasmAction): boolean {
-    if (this.state !== 'online' || this.runtimeId === undefined || !actionTargetsRuntimeInterface(action, this.runtimeId)) return false;
+    if (this.state !== 'online' || this.runtimeId === undefined) return false;
     const data = new Uint8Array(action.data);
     this.telemetry.recordTransmit(data.byteLength, action.packet.packetType === 'announce');
     emit({
@@ -4691,14 +4691,6 @@ class PlatformInterfaceDriver implements InterfaceDriver {
     emit({ type: 'interfaceStatus', id: this.config.id, state, errorCode });
     emitAggregateStatus();
   }
-}
-
-function actionTargetsRuntimeInterface(action: WasmAction, runtimeId: number): boolean {
-  if (action.type === 'send') return action.iface === runtimeId;
-  if (action.type !== 'broadcast') return false;
-  const excluded = new Set(action.excludeIfaces ?? []);
-  if (action.excludeIface !== undefined) excluded.add(action.excludeIface);
-  return !excluded.has(runtimeId);
 }
 
 function logNomadProtocolAction(action: WasmAction, dispatched: number): void {
@@ -4774,7 +4766,11 @@ class WebSocketDriver {
   }
 
   attach(owner: ReticulumNode): void {
-    this.runtimeId = owner.addInterface({ name: this.config.name, mode: leviculumInterfaceMode(this.config.mode) });
+    this.runtimeId = owner.addInterface({
+      name: this.config.name,
+      mode: leviculumInterfaceMode(this.config.mode),
+      ...leviculumIfacOptions(this.config),
+    });
   }
 
   connect(): void {
@@ -4829,14 +4825,6 @@ class WebSocketDriver {
 
   dispatch(action: WasmAction): boolean {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN || this.runtimeId === undefined) return false;
-    if (action.type === 'send' && action.iface !== this.runtimeId) return false;
-    if (action.type === 'broadcast') {
-      const excluded = new Set(action.excludeIfaces ?? []);
-      if (action.excludeIface !== undefined) excluded.add(action.excludeIface);
-      if (excluded.has(this.runtimeId)) return false;
-    } else if (action.type !== 'send') {
-      return false;
-    }
     const data = new Uint8Array(action.data);
     this.telemetry.recordTransmit(data.byteLength, action.packet.packetType === 'announce');
     this.socket.send(data);

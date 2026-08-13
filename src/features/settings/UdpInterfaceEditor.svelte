@@ -24,7 +24,7 @@
   let saving = $state(false);
 
   $effect.pre(() => {
-    if (config && draft.id !== config.id) draft = { ...config, connection: { ...config.connection } };
+    if (config && draft.id !== config.id) draft = { ...config, connection: { ...config.connection }, ifac: { ...config.ifac } };
   });
 
   async function submit(event: SubmitEvent): Promise<void> {
@@ -36,6 +36,7 @@
       draft.name = draft.name.trim();
       draft.connection.listenHost = draft.connection.listenHost.trim();
       draft.connection.forwardHost = draft.connection.forwardHost.trim();
+      draft.ifac.networkName = draft.ifac.networkName.trim();
       await onsave($state.snapshot(draft));
     } finally {
       saving = false;
@@ -96,8 +97,10 @@
         <InterfaceAdvancedSettings
           mode={draft.mode}
           reannounceOnReconnect={draft.reannounceOnReconnect}
+          ifac={draft.ifac}
           onchange={(mode) => { draft.mode = mode; }}
           onreannouncechange={(enabled) => { draft.reannounceOnReconnect = enabled; }}
+          onifacchange={(ifac) => { draft.ifac = ifac; }}
         />
       </div>
       <footer>

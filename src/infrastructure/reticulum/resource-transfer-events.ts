@@ -1,9 +1,9 @@
 export type ResourceTransferEventDisposition = 'stage' | 'start' | 'update' | 'ignore';
 
 /**
- * Raw advertisement inspection happens before Reticulum Core packet filtering.
- * It may supply metadata, but only an accepted receiver-side start may create
- * an inbound transfer. Later events are relevant only for that accepted start.
+ * WASM emits authenticated advertisement metadata immediately before the
+ * authoritative Core acceptance/start event. Only the receiver-side start may
+ * create an inbound transfer; later events are relevant only for that start.
  */
 export function classifyInboundResourceEvent(
   type: string,

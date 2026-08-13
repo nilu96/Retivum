@@ -5,6 +5,8 @@
     | 'settings'
     | 'tools'
     | 'search'
+    | 'eye'
+    | 'eye-off'
     | 'plus'
     | 'arrow-left'
     | 'arrow-right'
@@ -78,6 +80,11 @@
   {:else if name === 'search'}
     <circle cx="10.5" cy="10.5" r="6.5" />
     <path d="m15.5 15.5 5 5" />
+  {:else if name === 'eye'}
+    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+    <circle cx="12" cy="12" r="2.5" />
+  {:else if name === 'eye-off'}
+    <path d="M3 3l18 18M10.6 6.2A9.7 9.7 0 0 1 12 6c6 0 9.5 6 9.5 6a15 15 0 0 1-2.4 3.1M6.4 6.5C3.9 8.2 2.5 12 2.5 12s3.5 6 9.5 6c1.2 0 2.3-.2 3.3-.6" />
   {:else if name === 'plus'}
     <path d="M12 5v14M5 12h14" />
   {:else if name === 'arrow-left'}

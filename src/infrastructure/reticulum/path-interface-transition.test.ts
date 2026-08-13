@@ -14,13 +14,14 @@ function configuredInterface(
 ): WebSocketInterfaceConfig {
   return {
     id,
-    schemaVersion: 4,
+    schemaVersion: 5,
     createdAt: '2026-07-29T12:00:00.000Z',
     type: 'websocket',
     name: id,
     enabled,
     mode: 'full',
     reannounceOnReconnect: true,
+    ifac: { networkName: '', passphrase: '', credentialRevision: 'test' },
     connection: { scheme: 'wss', host, path: '/' },
   };
 }

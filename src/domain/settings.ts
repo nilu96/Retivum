@@ -15,6 +15,26 @@ export const DEFAULT_CHAT_IMAGE_LONG_EDGE = 1_500;
 export const MIN_CHAT_IMAGE_LONG_EDGE = 320;
 export const MAX_CHAT_IMAGE_LONG_EDGE = 8_192;
 export const messageRetentionDayOptions: readonly MessageRetentionDays[] = [0, 1, 2, 3, 7, 30, 90];
+export const MIN_IFAC_SIZE_BYTES = 1;
+export const MAX_IFAC_SIZE_BYTES = 64;
+
+export interface IfacConfig {
+  networkName: string;
+  passphrase: string;
+  sizeBytes?: number;
+  credentialRevision: string;
+}
+
+interface InterfaceConfigBase {
+  id: string;
+  schemaVersion: 5;
+  createdAt: string;
+  name: string;
+  enabled: boolean;
+  mode: InterfaceMode;
+  reannounceOnReconnect: boolean;
+  ifac: IfacConfig;
+}
 
 export const interfaceModes: readonly InterfaceMode[] = [
   'full',
@@ -52,15 +72,8 @@ export interface AppPreferences {
   lxmf: LxmfPreferences;
 }
 
-export interface WebSocketInterfaceConfig {
-  id: string;
-  schemaVersion: 4;
-  createdAt: string;
+export interface WebSocketInterfaceConfig extends InterfaceConfigBase {
   type: 'websocket';
-  name: string;
-  enabled: boolean;
-  mode: InterfaceMode;
-  reannounceOnReconnect: boolean;
   connection: {
     scheme: WebSocketScheme;
     host: string;
@@ -69,15 +82,8 @@ export interface WebSocketInterfaceConfig {
   };
 }
 
-export interface RNodeInterfaceConfig {
-  id: string;
-  schemaVersion: 4;
-  createdAt: string;
+export interface RNodeInterfaceConfig extends InterfaceConfigBase {
   type: 'rnode';
-  name: string;
-  enabled: boolean;
-  mode: InterfaceMode;
-  reannounceOnReconnect: boolean;
   connection: {
     type: RNodeConnectionType;
     deviceId?: string;
@@ -96,30 +102,16 @@ export interface RNodeInterfaceConfig {
   };
 }
 
-export interface TcpInterfaceConfig {
-  id: string;
-  schemaVersion: 3;
-  createdAt: string;
+export interface TcpInterfaceConfig extends InterfaceConfigBase {
   type: 'tcp';
-  name: string;
-  enabled: boolean;
-  mode: InterfaceMode;
-  reannounceOnReconnect: boolean;
   connection: {
     host: string;
     port: number;
   };
 }
 
-export interface UdpInterfaceConfig {
-  id: string;
-  schemaVersion: 3;
-  createdAt: string;
+export interface UdpInterfaceConfig extends InterfaceConfigBase {
   type: 'udp';
-  name: string;
-  enabled: boolean;
-  mode: InterfaceMode;
-  reannounceOnReconnect: boolean;
   connection: {
     listenHost: string;
     listenPort: number;
@@ -129,6 +121,14 @@ export interface UdpInterfaceConfig {
 }
 
 export type InterfaceConfig = WebSocketInterfaceConfig | RNodeInterfaceConfig | TcpInterfaceConfig | UdpInterfaceConfig;
+
+function createIfacConfig(): IfacConfig {
+  return {
+    networkName: '',
+    passphrase: '',
+    credentialRevision: crypto.randomUUID(),
+  };
+}
 
 export const rnodeBandwidths = [
   7_800, 10_400, 15_600, 20_800, 31_250, 41_700, 62_500, 125_000, 250_000, 500_000,
@@ -295,19 +295,32 @@ export function normalizeAutoAnnounceInterval(value: unknown, legacyEnabled?: bo
     : legacyEnabled === true ? 360 : defaultAppPreferences.lxmf.autoAnnounceIntervalMinutes;
 }
 
+function normalizeIfacConfig(value: unknown): IfacConfig {
+  const source = value && typeof value === 'object' ? value as Partial<IfacConfig> : undefined;
+  return {
+    networkName: typeof source?.networkName === 'string' ? source.networkName : '',
+    passphrase: typeof source?.passphrase === 'string' ? source.passphrase : '',
+    ...(validIfacSize(source?.sizeBytes) ? { sizeBytes: source.sizeBytes } : {}),
+    credentialRevision: typeof source?.credentialRevision === 'string' && source.credentialRevision
+      ? source.credentialRevision
+      : crypto.randomUUID(),
+  };
+}
+
 export function createWebSocketInterfaceDraft(
   id: string = crypto.randomUUID(),
   createdAt = new Date().toISOString(),
 ): WebSocketInterfaceConfig {
   return {
     id,
-    schemaVersion: 4,
+    schemaVersion: 5,
     createdAt,
     type: 'websocket',
     name: '',
     enabled: true,
     mode: 'full',
     reannounceOnReconnect: true,
+    ifac: createIfacConfig(),
     connection: {
       scheme: 'ws',
       host: 'localhost',
@@ -324,13 +337,14 @@ export function createRNodeInterfaceDraft(
 ): RNodeInterfaceConfig {
   return {
     id,
-    schemaVersion: 4,
+    schemaVersion: 5,
     createdAt,
     type: 'rnode',
     name: '',
     enabled: true,
     mode: 'full',
     reannounceOnReconnect: true,
+    ifac: createIfacConfig(),
     connection: { type: connectionType },
     radio: {
       frequency: 869_462_500,
@@ -350,13 +364,14 @@ export function createTcpInterfaceDraft(
 ): TcpInterfaceConfig {
   return {
     id,
-    schemaVersion: 3,
+    schemaVersion: 5,
     createdAt,
     type: 'tcp',
     name: '',
     enabled: true,
     mode: 'full',
     reannounceOnReconnect: true,
+    ifac: createIfacConfig(),
     connection: { host: 'localhost', port: 4242 },
   };
 }
@@ -367,13 +382,14 @@ export function createUdpInterfaceDraft(
 ): UdpInterfaceConfig {
   return {
     id,
-    schemaVersion: 3,
+    schemaVersion: 5,
     createdAt,
     type: 'udp',
     name: '',
     enabled: true,
     mode: 'full',
     reannounceOnReconnect: true,
+    ifac: createIfacConfig(),
     connection: {
       listenHost: '0.0.0.0',
       listenPort: 4242,
@@ -411,6 +427,7 @@ export function normalizeWebSocketInterfaceConfig(value: unknown): WebSocketInte
   normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
     ? source.reannounceOnReconnect
     : true;
+  normalized.ifac = normalizeIfacConfig((source as { ifac?: unknown }).ifac);
   normalized.connection.scheme = source.connection?.scheme === 'wss' ? 'wss' : 'ws';
   normalized.connection.host = typeof source.connection?.host === 'string' ? source.connection.host : '';
   normalized.connection.port = typeof source.connection?.port === 'number' ? source.connection.port : undefined;
@@ -432,6 +449,7 @@ export function normalizeRNodeInterfaceConfig(value: unknown): RNodeInterfaceCon
   normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
     ? source.reannounceOnReconnect
     : true;
+  normalized.ifac = normalizeIfacConfig(source.ifac);
   normalized.connection.deviceId = typeof source.connection?.deviceId === 'string' ? source.connection.deviceId : undefined;
   normalized.connection.deviceName = typeof source.connection?.deviceName === 'string' ? source.connection.deviceName : undefined;
   normalized.connection.usbVendorId = finiteInteger(source.connection?.usbVendorId);
@@ -458,6 +476,7 @@ export function normalizeTcpInterfaceConfig(value: unknown): TcpInterfaceConfig 
   normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
     ? source.reannounceOnReconnect
     : true;
+  normalized.ifac = normalizeIfacConfig(source.ifac);
   normalized.connection.host = typeof source.connection?.host === 'string' ? source.connection.host : '';
   normalized.connection.port = finiteNumber(source.connection?.port) ?? normalized.connection.port;
   return normalized;
@@ -475,6 +494,7 @@ export function normalizeUdpInterfaceConfig(value: unknown): UdpInterfaceConfig 
   normalized.reannounceOnReconnect = typeof source.reannounceOnReconnect === 'boolean'
     ? source.reannounceOnReconnect
     : true;
+  normalized.ifac = normalizeIfacConfig(source.ifac);
   normalized.connection.listenHost = typeof source.connection?.listenHost === 'string'
     ? source.connection.listenHost
     : normalized.connection.listenHost;
@@ -522,7 +542,8 @@ export type InterfaceValidationCode =
   | 'interface.validation.txPowerInvalid'
   | 'interface.validation.spreadingFactorInvalid'
   | 'interface.validation.codingRateInvalid'
-  | 'interface.validation.dutyCycleInvalid';
+  | 'interface.validation.dutyCycleInvalid'
+  | 'interface.validation.ifacSizeInvalid';
 
 export function validateWebSocketInterface(config: WebSocketInterfaceConfig): InterfaceValidationCode[] {
   const errors: InterfaceValidationCode[] = [];
@@ -533,7 +554,7 @@ export function validateWebSocketInterface(config: WebSocketInterfaceConfig): In
     errors.push('interface.validation.portInvalid');
   }
   if (!config.connection.path.startsWith('/')) errors.push('interface.validation.pathInvalid');
-
+  validateIfac(config.ifac, errors);
   return errors;
 }
 
@@ -555,6 +576,7 @@ export function validateRNodeInterface(config: RNodeInterfaceConfig): InterfaceV
   if (!Number.isInteger(config.radio.dutyCycle) || config.radio.dutyCycle < 0 || config.radio.dutyCycle >= 100) {
     errors.push('interface.validation.dutyCycleInvalid');
   }
+  validateIfac(config.ifac, errors);
   return errors;
 }
 
@@ -565,6 +587,7 @@ export function validateTcpInterface(config: TcpInterfaceConfig): InterfaceValid
   if (!Number.isInteger(config.connection.port) || config.connection.port < 1 || config.connection.port > 65_535) {
     errors.push('interface.validation.portInvalid');
   }
+  validateIfac(config.ifac, errors);
   return errors;
 }
 
@@ -580,7 +603,20 @@ export function validateUdpInterface(config: UdpInterfaceConfig): InterfaceValid
   ) {
     errors.push('interface.validation.portInvalid');
   }
+  validateIfac(config.ifac, errors);
   return errors;
+}
+
+function validateIfac(ifac: IfacConfig, errors: InterfaceValidationCode[]): void {
+  if (ifac.sizeBytes !== undefined && !validIfacSize(ifac.sizeBytes)) {
+    errors.push('interface.validation.ifacSizeInvalid');
+  }
+}
+
+function validIfacSize(value: unknown): value is number {
+  return Number.isInteger(value)
+    && (value as number) >= MIN_IFAC_SIZE_BYTES
+    && (value as number) <= MAX_IFAC_SIZE_BYTES;
 }
 
 export function websocketUrl(config: WebSocketInterfaceConfig): string {

@@ -129,6 +129,14 @@ describe('interface announcement history', () => {
       ...websocket,
       connection: { ...websocket.connection, host: 'another-relay.example' },
     })).not.toBe(fingerprint);
+    expect(interfaceNetworkFingerprint({
+      ...websocket,
+      ifac: {
+        ...websocket.ifac,
+        passphrase: 'new secret',
+        credentialRevision: 'new-credential',
+      },
+    })).not.toBe(fingerprint);
 
     const rnode = createRNodeInterfaceDraft('ble', 'rnode-1');
     const rnodeFingerprint = interfaceNetworkFingerprint(rnode);

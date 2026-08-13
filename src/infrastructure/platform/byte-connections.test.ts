@@ -38,13 +38,14 @@ import { createRNodeByteConnection, isRetryableBleError } from './byte-connectio
 
 const config: RNodeInterfaceConfig = {
   id: 'native-rnode',
-  schemaVersion: 4,
+  schemaVersion: 5,
   createdAt: '2026-07-29T12:00:00.000Z',
   type: 'rnode',
   name: 'RNode',
   enabled: true,
   mode: 'full',
   reannounceOnReconnect: false,
+  ifac: { networkName: '', passphrase: '', credentialRevision: 'test' },
   connection: { type: 'ble', deviceId: 'AA:BB:CC:DD:EE:FF' },
   radio: {
     frequency: 869_525_000,

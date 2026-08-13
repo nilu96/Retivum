@@ -59,6 +59,38 @@ describe('BrowserSettingsRepository', () => {
     expect(restored.interfaces).toEqual([config]);
   });
 
+  it('stores IFAC passphrases with the interface configuration', async () => {
+    const repository = new BrowserSettingsRepository();
+    const config = createWebSocketInterfaceDraft('protected-relay');
+    config.name = 'Protected relay';
+    config.ifac.networkName = 'field-network';
+    config.ifac.passphrase = 'correct horse battery staple';
+    config.ifac.sizeBytes = 31;
+    await repository.saveInterface(config);
+
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('retivum');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    const transaction = database.transaction('interfaces', 'readonly');
+    const stored = await new Promise<Record<string, unknown>>((resolve, reject) => {
+      const request = transaction.objectStore('interfaces').get(config.id);
+      request.onsuccess = () => resolve(request.result as Record<string, unknown>);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+
+    expect(stored).toMatchObject({
+      ifac: {
+        networkName: 'field-network',
+        passphrase: 'correct horse battery staple',
+        sizeBytes: 31,
+      },
+    });
+    expect((await repository.load()).interfaces).toEqual([config]);
+  });
+
   it('deletes an interface without changing preferences', async () => {
     const repository = new BrowserSettingsRepository();
     const historyRepository = new BrowserInterfaceAnnounceHistoryRepository();
@@ -197,6 +229,6 @@ describe('BrowserSettingsRepository', () => {
       '1970-01-01T00:00:00.000Z',
       '1970-01-01T00:00:00.001Z',
     ]);
-    expect(firstLoad.interfaces.every((config) => config.schemaVersion === 4)).toBe(true);
+    expect(firstLoad.interfaces.every((config) => config.schemaVersion === 5)).toBe(true);
   });
 });

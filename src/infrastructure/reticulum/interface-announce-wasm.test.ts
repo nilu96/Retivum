@@ -82,4 +82,56 @@ describe('Leviculum interface-up announcement contract', () => {
       node.free();
     }
   });
+
+  it('emits IFAC-finalized interface bytes that only a matching peer accepts', async () => {
+    const wasm = await readFile(new URL('../../../leviculum_wasm/leviculum_wasm_bg.wasm', import.meta.url));
+    await initWasm({ module_or_path: wasm });
+    const senderIdentity = ReticulumNode.generateIdentity() as { privateKey: Uint8Array };
+    const receiverIdentity = ReticulumNode.generateIdentity() as { privateKey: Uint8Array };
+    const wrongIdentity = ReticulumNode.generateIdentity() as { privateKey: Uint8Array };
+    const sender = new ReticulumNode({ identityPrivateKey: senderIdentity.privateKey });
+    const receiver = new ReticulumNode({ identityPrivateKey: receiverIdentity.privateKey });
+    const wrongReceiver = new ReticulumNode({ identityPrivateKey: wrongIdentity.privateKey });
+    try {
+      const matchingIfac = {
+        networkName: 'field-network',
+        passphrase: 'shared secret',
+        interfaceType: 'network',
+      };
+      const senderInterface = sender.addInterface({ name: 'sender', ifac: matchingIfac });
+      const receiverInterface = receiver.addInterface({ name: 'receiver', ifac: matchingIfac });
+      const wrongInterface = wrongReceiver.addInterface({
+        name: 'wrong',
+        ifac: { ...matchingIfac, passphrase: 'wrong secret' },
+      });
+      sender.setInterfaceOnline(senderInterface, true);
+      receiver.setInterfaceOnline(receiverInterface, true);
+      wrongReceiver.setInterfaceOnline(wrongInterface, true);
+      const destinationHash = sender.registerDestination({
+        appName: 'retivum-test',
+        aspects: ['ifac'],
+      });
+      const output = sender.announce(destinationHash) as {
+        actions: Array<{ iface: number; data: Uint8Array; packet: { packetType?: string } }>;
+      };
+
+      expect(output.actions).toHaveLength(1);
+      expect(output.actions[0]?.iface).toBe(senderInterface);
+      expect(output.actions[0]!.data[0]! & 0x80).toBe(0x80);
+      expect(output.actions[0]?.packet.packetType).toBe('announce');
+
+      const accepted = receiver.receive(receiverInterface, output.actions[0]!.data) as {
+        events: Array<{ type?: string }>;
+      };
+      const rejected = wrongReceiver.receive(wrongInterface, output.actions[0]!.data) as {
+        events: Array<{ type?: string }>;
+      };
+      expect(accepted.events.some((event) => event.type === 'announceReceived')).toBe(true);
+      expect(rejected.events.some((event) => event.type === 'announceReceived')).toBe(false);
+    } finally {
+      sender.free();
+      receiver.free();
+      wrongReceiver.free();
+    }
+  });
 });
