@@ -21,8 +21,8 @@ jobs:
     name: Validate web assets
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -75,8 +75,8 @@ jobs:
               release/*.deb
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -85,7 +85,7 @@ jobs:
         run: npm run desktop:package:${{ matrix.platform }} -- --${{ matrix.arch }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: retivum-${{ matrix.platform }}-${{ matrix.arch }}
           path: ${{ matrix.artifacts }}
