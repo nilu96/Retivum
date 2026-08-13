@@ -1302,6 +1302,131 @@ describe('ReticulumRuntimeController chat deletion', () => {
     }
   });
 
+  it('keeps an unknown recipient in discovery until LXMF queueing replaces it', async () => {
+    const destinationHash = '6'.repeat(32);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const save = vi.spyOn(internals.chatRepository, 'saveMessage').mockResolvedValue();
+    const replace = vi.spyOn(internals.chatRepository, 'replaceMessage').mockResolvedValue();
+
+    const pending = reticulumRuntime.sendChatMessage(destinationHash, 'Find this recipient');
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+    await internals.handleEvent({
+      type: 'chatMessageResolving',
+      requestId: command.requestId,
+      identityId: 'identity-1',
+      messageId: '1'.repeat(64),
+      sourceHash: 'a'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Find this recipient',
+      method: 'direct',
+      propagationFallback: false,
+      queuedAt: '2026-08-13T10:00:00.000Z',
+    });
+
+    await expect(pending).resolves.toEqual({ ok: true });
+    expect(get(chatMessages)).toEqual([expect.objectContaining({
+      messageId: '1'.repeat(64),
+      status: 'resolving',
+    })]);
+    expect(get(chatMessages)[0]).not.toHaveProperty('timestamp');
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ status: 'resolving' }));
+
+    await internals.handleEvent({
+      type: 'chatMessageQueued',
+      requestId: command.requestId,
+      identityId: 'identity-1',
+      messageId: '2'.repeat(64),
+      sourceHash: 'a'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Find this recipient',
+      method: 'direct',
+      propagationFallback: false,
+      propagationFallbackPending: true,
+      replacesMessageId: '1'.repeat(64),
+      timestamp: 1_755_079_205,
+      queuedAt: '2026-08-13T10:00:05.000Z',
+    });
+
+    expect(get(chatMessages)).toEqual([expect.objectContaining({
+      messageId: '2'.repeat(64),
+      status: 'queued',
+      timestamp: 1_755_079_205,
+    })]);
+    expect(replace).toHaveBeenCalledWith(
+      `identity-1:${'1'.repeat(64)}`,
+      expect.objectContaining({ messageId: '2'.repeat(64), status: 'queued' }),
+    );
+  });
+
+  it('fails unresolved recipients and starts discovery again when retried', async () => {
+    const destinationHash = '7'.repeat(32);
+    const resolvingMessageId = '3'.repeat(64);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    vi.spyOn(internals.chatRepository, 'saveMessage').mockResolvedValue();
+    const replace = vi.spyOn(internals.chatRepository, 'replaceMessage').mockResolvedValue();
+
+    await internals.handleEvent({
+      type: 'chatMessageResolving',
+      requestId: 'initial-request',
+      identityId: 'identity-1',
+      messageId: resolvingMessageId,
+      sourceHash: 'a'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Retry discovery',
+      method: 'direct',
+      propagationFallback: false,
+      queuedAt: '2026-08-13T10:00:00.000Z',
+    });
+    await internals.handleEvent({
+      type: 'chatMessageState',
+      identityId: 'identity-1',
+      messageId: resolvingMessageId,
+      state: 'failed',
+    });
+    expect(get(chatMessages)[0]).toMatchObject({ messageId: resolvingMessageId, status: 'failed' });
+
+    const retry = reticulumRuntime.retryChatMessage(resolvingMessageId);
+    const retryCommand = postMessage.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(retryCommand).toMatchObject({
+      type: 'sendLxmfMessage',
+      destinationHash,
+      replacesMessageId: resolvingMessageId,
+    });
+    expect(retryCommand).not.toHaveProperty('timestamp');
+
+    await internals.handleEvent({
+      type: 'chatMessageResolving',
+      requestId: retryCommand.requestId,
+      identityId: 'identity-1',
+      messageId: '4'.repeat(64),
+      sourceHash: 'a'.repeat(32),
+      destinationHash,
+      title: '',
+      content: 'Retry discovery',
+      method: 'direct',
+      propagationFallback: false,
+      replacesMessageId: resolvingMessageId,
+      queuedAt: '2026-08-13T10:00:20.000Z',
+    });
+
+    await expect(retry).resolves.toEqual({ ok: true });
+    expect(get(chatMessages)).toEqual([expect.objectContaining({
+      messageId: '4'.repeat(64),
+      status: 'resolving',
+    })]);
+    expect(replace).toHaveBeenLastCalledWith(
+      `identity-1:${resolvingMessageId}`,
+      expect.objectContaining({ messageId: '4'.repeat(64), status: 'resolving' }),
+    );
+  });
+
   it('retries a failed attachment as a fresh delivery under the current method', async () => {
     const destinationHash = 'd'.repeat(32);
     const attachment = {

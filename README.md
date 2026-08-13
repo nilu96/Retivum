@@ -24,7 +24,7 @@ The initial application foundation includes:
 - a bounded current-session Reticulum log viewer for WASM, persistence, and WebSocket diagnostics;
 - real binary WebSocket interface drivers, including simultaneous configured interfaces and bounded text-frame compatibility;
 - live LXMF delivery-announce and inbound-message projection from the WASM worker into persistent, identity-scoped Chat directories and conversation history;
-- outbound LXMF composition that first uses direct or opportunistic delivery, then falls back to a configured propagation node after terminal failure, with persistent delivery-state updates, stable message IDs, and open-link reuse;
+- outbound LXMF composition with recipient-identity discovery before queueing, direct or opportunistic primary delivery, optional propagation fallback after terminal failure, persistent delivery-state updates, stable message IDs, and open-link reuse;
 - manual, interval-based, or optional app-resume retrieval of waiting LXMF messages from a configured propagation node, independently of whether propagation sending is enabled; interval synchronization defaults to never and resume synchronization defaults to off;
 - persistent identity-scoped contacts with local custom names, including announce-name prefilling;
 - persistent global NomadNet announces plus identity-scoped bookmarks with searchable local names;

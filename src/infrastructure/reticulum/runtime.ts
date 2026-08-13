@@ -614,7 +614,8 @@ class ReticulumRuntimeController {
     this.deletingChatMessageIds.add(message.messageId);
     try {
       const displayStatus = chatMessageDisplayStatus(message);
-      if (message.direction === 'outgoing' && (displayStatus === 'queued' || displayStatus === 'sending')) {
+      if (message.direction === 'outgoing'
+        && (displayStatus === 'resolving' || displayStatus === 'queued' || displayStatus === 'sending')) {
         if (!await this.cancelChatMessageDelivery(message.messageId)) return false;
       }
       await this.chatRepository.deleteMessage(message.id);
@@ -636,7 +637,7 @@ class ReticulumRuntimeController {
     ));
     const displayStatus = message ? chatMessageDisplayStatus(message) : undefined;
     if (!identity || !message || message.direction !== 'outgoing'
-      || (displayStatus !== 'queued' && displayStatus !== 'sending')) return false;
+      || (displayStatus !== 'resolving' && displayStatus !== 'queued' && displayStatus !== 'sending')) return false;
 
     try {
       if (!await this.cancelChatMessageDelivery(message.messageId)) return false;
@@ -647,7 +648,7 @@ class ReticulumRuntimeController {
       // pending.
       const current = get(chatMessages).find((item) => item.id === message.id);
       const currentStatus = current ? chatMessageDisplayStatus(current) : undefined;
-      if (current && (currentStatus === 'queued' || currentStatus === 'sending')) {
+      if (current && (currentStatus === 'resolving' || currentStatus === 'queued' || currentStatus === 'sending')) {
         const failed: ChatMessage = {
           ...current,
           status: 'failed',
@@ -678,7 +679,8 @@ class ReticulumRuntimeController {
     try {
       const pending = messages.filter((message) => {
         const status = chatMessageDisplayStatus(message);
-        return message.direction === 'outgoing' && (status === 'queued' || status === 'sending');
+        return message.direction === 'outgoing'
+          && (status === 'resolving' || status === 'queued' || status === 'sending');
       });
       const cancellations = await Promise.all(
         pending.map((message) => this.cancelChatMessageDelivery(message.messageId)),
@@ -726,7 +728,7 @@ class ReticulumRuntimeController {
       content: message.content,
       attachments: message.attachments,
       replacesMessageId: message.messageId,
-      timestamp: message.timestamp,
+      ...(message.timestamp === undefined ? {} : { timestamp: message.timestamp }),
     });
     return new Promise((resolve) => {
       const timeout = window.setTimeout(() => {
@@ -854,7 +856,7 @@ class ReticulumRuntimeController {
         return message.identityId === identity.id
           && chatMessagePeerHash(message) === normalizedDestination
           && message.direction === 'outgoing'
-          && (status === 'queued' || status === 'sending');
+          && (status === 'resolving' || status === 'queued' || status === 'sending');
       });
       const cancellations = await Promise.all(
         pending.map((message) => this.cancelChatMessageDelivery(message.messageId)),
@@ -1489,6 +1491,46 @@ class ReticulumRuntimeController {
       this.lxmaPeerWaiters.delete(event.requestId);
       return;
     }
+    if (event.type === 'chatMessageResolving') {
+      const previousId = event.replacesMessageId ? `${event.identityId}:${event.replacesMessageId}` : undefined;
+      const message: ChatMessage = {
+        id: `${event.identityId}:${event.messageId}`,
+        identityId: event.identityId,
+        messageId: event.messageId,
+        sourceHash: event.sourceHash,
+        destinationHash: event.destinationHash,
+        title: event.title,
+        content: event.content,
+        attachments: event.attachments,
+        method: event.method,
+        direction: 'outgoing',
+        status: 'resolving',
+        propagationFallback: event.propagationFallback,
+        propagationFallbackPending: false,
+        receivedAt: event.queuedAt,
+      };
+      const orderedMessage = assignChatMessageOrdering(get(chatMessages), message, {
+        replacesMessageId: previousId,
+      });
+      chatMessages.update((items) => upsertChatMessage(
+        previousId && previousId !== orderedMessage.id
+          ? items.filter((item) => item.id !== previousId)
+          : items,
+        orderedMessage,
+      ));
+      try {
+        if (previousId) await this.chatRepository.replaceMessage(previousId, orderedMessage);
+        else await this.chatRepository.saveMessage(orderedMessage);
+        appendLocalLog('debug', 'persistence', 'CHAT_OUTBOUND_RECIPIENT_DISCOVERY_PERSISTED', {
+          messageId: orderedMessage.messageId,
+        });
+      } catch {
+        runtimeErrorCode.set('RUNTIME_CHAT_PERSIST_FAILED');
+      }
+      this.messageWaiters.get(event.requestId)?.({ ok: true });
+      this.messageWaiters.delete(event.requestId);
+      return;
+    }
     if (event.type === 'chatMessageReceived') {
       if (this.isChatDestinationBlocked(event.sourceHash)) {
         appendLocalLog('info', 'runtime', 'CHAT_MESSAGE_BLOCKED', {
@@ -1903,6 +1945,20 @@ class ReticulumRuntimeController {
     chatDirectoryReady.set(false);
     const directory = await this.chatRepository.load(identityId);
     if (get(activeIdentity)?.id !== identityId) return;
+    const interruptedResolutions = directory.messages.filter((message) => message.status === 'resolving');
+    if (interruptedResolutions.length > 0) {
+      const interruptedIds = new Set(interruptedResolutions.map((message) => message.id));
+      directory.messages = directory.messages.map((message) => (
+        interruptedIds.has(message.id) ? { ...message, status: 'failed' as const } : message
+      ));
+      try {
+        await Promise.all(directory.messages
+          .filter((message) => interruptedIds.has(message.id))
+          .map((message) => this.chatRepository.saveMessage(message)));
+      } catch {
+        runtimeErrorCode.set('RUNTIME_CHAT_PERSIST_FAILED');
+      }
+    }
     if (this.loadedChatIdentityId && this.loadedChatIdentityId !== identityId) markChatMessagesRead();
     this.loadedChatIdentityId = identityId;
     chatContacts.update((liveItems) => liveItems
@@ -1936,7 +1992,8 @@ class ReticulumRuntimeController {
     const pendingMessages = expiredCurrentMessages.filter((message) => {
       const status = chatMessageDisplayStatus(message);
       return message.direction === 'outgoing'
-        && (status === 'queued' || status === 'sending' || message.propagationFallbackPending === true);
+        && (status === 'resolving' || status === 'queued' || status === 'sending'
+          || message.propagationFallbackPending === true);
     });
     for (const message of expiredCurrentMessages) this.deletingChatMessageIds.add(message.messageId);
     try {

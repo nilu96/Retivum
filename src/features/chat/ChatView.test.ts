@@ -1007,6 +1007,9 @@ describe('ChatView', () => {
     chatMessages.set([{ ...outbound, status: 'queued', attempts: undefined, maxAttempts: undefined }]);
     expect(await screen.findByText('Queued')).toBeInTheDocument();
 
+    chatMessages.set([{ ...outbound, status: 'resolving', attempts: undefined, maxAttempts: undefined }]);
+    expect(await screen.findByText('Discovering recipient')).toBeInTheDocument();
+
     chatMessages.set([{
       ...outbound,
       status: 'sending',

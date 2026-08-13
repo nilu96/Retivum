@@ -110,6 +110,7 @@
   "chat.message.verification.valid": "Valid",
   "chat.message.verification.invalid": "Invalid",
   "chat.message.verification.unverified": "Unverified",
+  "chat.message.status.resolving": "Discovering recipient",
   "chat.message.status.queued": "Queued",
   "chat.message.status.sending": "Sending",
   "chat.message.status.sendingAttempt": "Sending (attempt {attempt}/{max})",

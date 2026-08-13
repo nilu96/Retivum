@@ -66,6 +66,7 @@ import { maximumProbePayloadBytes } from '../infrastructure/reticulum/protocol';
 import { diagnosticErrorMessage } from '../infrastructure/reticulum/diagnostic-error';
 import { leviculumInterfaceMode } from '../infrastructure/reticulum/interface-mode';
 import { leviculumIfacOptions } from '../infrastructure/reticulum/ifac-options';
+import { publicKeyMatchesLxmfDeliveryDestination } from '../infrastructure/reticulum/lxmf-recipient-identity';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import {
   planRuntimeInterfaceTransition,
@@ -200,6 +201,15 @@ interface DestinationPathRequestJob {
   timer: ReturnType<typeof setTimeout>;
 }
 
+type SendLxmfMessageCommand = Extract<RuntimeCommand, { type: 'sendLxmfMessage' }>;
+
+interface PendingLxmfRecipientResolution {
+  messageId: string;
+  command: SendLxmfMessageCommand;
+  destinationHash: string;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 let node: ReticulumNode | undefined;
 let wrappingKey: CryptoKey | undefined;
 let privateKey: Uint8Array | undefined;
@@ -210,6 +220,7 @@ let blockedDestinationHashes: string[] = [];
 let localLxmfDeliveryDestinationHash: string | undefined;
 let interfaceAnnounceHistory = new Map<string, InterfaceAnnounceHistoryRecord>();
 let contactDestinationHashes = new Set<string>();
+let lxmfDeliveryNameHash: Uint8Array | undefined;
 let nomadNodeNameHash: Uint8Array | undefined;
 let managementNodeNameHash: Uint8Array | undefined;
 let tickTimer: ReturnType<typeof setTimeout> | undefined;
@@ -255,6 +266,7 @@ const provisioningLinksById = new Map<string, ProvisioningLinkState>();
 const probeJobs = new Map<string, ProbeJob>();
 const probeJobsByPacketHash = new Map<string, ProbeJob>();
 const destinationPathRequestJobs = new Map<string, DestinationPathRequestJob>();
+const pendingLxmfRecipientResolutions = new Map<string, PendingLxmfRecipientResolution>();
 const knownDestinationPublicKeys = new Map<string, Uint8Array>();
 const registeredFullDestinationNames = [
   'lxmf.delivery',
@@ -351,6 +363,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       pruneInterfaceAnnounceHistory(command.configuration.interfaces);
       emit({ type: 'runtimeStatus', state: 'starting' });
       await initWasm();
+      lxmfDeliveryNameHash = ReticulumNode.fullHash(new TextEncoder().encode('lxmf.delivery')).slice(0, 10);
       nomadNodeNameHash = ReticulumNode.fullHash(new TextEncoder().encode('nomadnetwork.node')).slice(0, 10);
       managementNodeNameHash = ReticulumNode.fullHash(new TextEncoder().encode('rnstransport.remote.management')).slice(0, 10);
 
@@ -1122,6 +1135,7 @@ function cleanupRuntime(alreadyDownRuntimeIndexes: ReadonlySet<number> = new Set
   clearProvisioningState('PROVISIONING_RUNTIME_RESET');
   clearProbeState('PROBE_RUNTIME_RESET');
   clearDestinationPathRequests('PATH_REQUEST_RUNTIME_RESET');
+  clearPendingLxmfRecipientResolutions('LXMF_RECIPIENT_RESOLUTION_RUNTIME_RESET');
   knownDestinationPublicKeys.clear();
   knownDestinationFullNames.clear();
   localLxmfDeliveryDestinationHash = undefined;
@@ -1460,23 +1474,31 @@ function recordSuccessfulBroadcastAnnounce(): void {
   });
 }
 
-function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessage' }>): void {
+function sendLxmfMessage(command: SendLxmfMessageCommand, resolvingMessageId?: string): void {
   const destinationHash = normalizeDestinationHash(command.destinationHash);
   const content = command.content.trim();
   let attachments;
   try {
     attachments = normalizeChatAttachments(command.attachments);
   } catch (error) {
-    emit({ type: 'chatMessageQueueFailed', requestId: command.requestId, code: errorCode(error) });
+    failLxmfMessageQueue(command, errorCode(error), resolvingMessageId);
     return;
   }
   if (!node || !identity || !configuration || !destinationHash || (!content && attachments.length === 0)
     || content.length > 65_536) {
-    emit({ type: 'chatMessageQueueFailed', requestId: command.requestId, code: 'LXMF_MESSAGE_INVALID' });
+    failLxmfMessageQueue(command, 'LXMF_MESSAGE_INVALID', resolvingMessageId);
     return;
   }
   if (blockedDestinationHashes.includes(destinationHash)) {
-    emit({ type: 'chatMessageQueueFailed', requestId: command.requestId, code: 'LXMF_DESTINATION_BLOCKED' });
+    failLxmfMessageQueue(command, 'LXMF_DESTINATION_BLOCKED', resolvingMessageId);
+    return;
+  }
+  if (!lxmfRecipientIdentityKnown(destinationHash)) {
+    if (resolvingMessageId) {
+      failLxmfMessageQueue(command, 'LXMF_RECIPIENT_IDENTITY_UNAVAILABLE', resolvingMessageId);
+    } else {
+      beginLxmfRecipientResolution(command, destinationHash, content, attachments);
+    }
     return;
   }
 
@@ -1499,13 +1521,13 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
       } catch (fallbackError) {
         const code = errorCode(fallbackError);
         log('error', 'wasm', 'LXMF_MESSAGE_QUEUE_FAILED', { destinationHash, code });
-        emit({ type: 'chatMessageQueueFailed', requestId: command.requestId, code });
+        failLxmfMessageQueue(command, code, resolvingMessageId);
         return;
       }
     } else {
       const code = errorCode(primaryError);
       log('error', 'wasm', 'LXMF_MESSAGE_QUEUE_FAILED', { destinationHash, code });
-      emit({ type: 'chatMessageQueueFailed', requestId: command.requestId, code });
+      failLxmfMessageQueue(command, code, resolvingMessageId);
       return;
     }
   }
@@ -1527,7 +1549,7 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
     path: currentChatMessagePath(destinationHash),
     propagationFallback: isPropagationFallback,
     propagationFallbackPending: !isPropagationFallback && attempt.method !== 'propagated' && deliveryPlan.tryPropagation,
-    replacesMessageId: command.replacesMessageId,
+    replacesMessageId: resolvingMessageId ?? command.replacesMessageId,
     timestamp: attempt.timestamp,
     queuedAt: new Date(attempt.timestamp * 1_000).toISOString(),
   });
@@ -1537,6 +1559,130 @@ function sendLxmfMessage(command: Extract<RuntimeCommand, { type: 'sendLxmfMessa
     destinationHash,
     method: attempt.method,
   });
+}
+
+function lxmfRecipientIdentityKnown(destinationHash: string): boolean {
+  const publicKey = destinationHash === localLxmfDeliveryDestinationHash
+    ? identity?.publicKey
+    : knownDestinationPublicKeys.get(destinationHash);
+  return publicKeyMatchesLxmfDeliveryDestination(
+    destinationHash,
+    publicKey,
+    ReticulumNode.hashFromNameAndIdentity,
+  );
+}
+
+function beginLxmfRecipientResolution(
+  command: SendLxmfMessageCommand,
+  destinationHash: string,
+  content: string,
+  attachments: ChatAttachment[],
+): void {
+  if (!node || !identity || !configuration || !localLxmfDeliveryDestinationHash) {
+    failLxmfMessageQueue(command, 'LXMF_RUNTIME_UNAVAILABLE');
+    return;
+  }
+  const alreadyResolvingDestination = Array.from(pendingLxmfRecipientResolutions.values())
+    .some((job) => job.destinationHash === destinationHash);
+  const messageId = bytesToHex(crypto.getRandomValues(new Uint8Array(32)));
+  const deliveryPlan = resolveLxmfDeliveryPlan(configuration.preferences.lxmf);
+  const method = command.propagationFallback === true ? 'propagated' : deliveryPlan.method;
+  const job: PendingLxmfRecipientResolution = {
+    messageId,
+    command: {
+      ...command,
+      destinationHash,
+      title: command.title.trim().slice(0, 1_024),
+      content,
+      attachments,
+    },
+    destinationHash,
+    timer: setTimeout(() => {
+      failPendingLxmfRecipientResolutions(destinationHash, 'LXMF_RECIPIENT_IDENTITY_UNAVAILABLE');
+    }, pathRequestTimeoutMs),
+  };
+  pendingLxmfRecipientResolutions.set(messageId, job);
+  emit({
+    type: 'chatMessageResolving',
+    requestId: command.requestId,
+    identityId: identity.id,
+    messageId,
+    sourceHash: localLxmfDeliveryDestinationHash,
+    destinationHash,
+    title: job.command.title,
+    content,
+    attachments,
+    method,
+    propagationFallback: command.propagationFallback === true,
+    replacesMessageId: command.replacesMessageId,
+    queuedAt: new Date().toISOString(),
+  });
+  if (alreadyResolvingDestination) return;
+  try {
+    observedDestinationPaths.add(destinationHash);
+    processOutput(node.requestPath(hexToBytes(destinationHash)) as WasmOutput);
+    emitDestinationPathStatuses([destinationHash]);
+    log('info', 'wasm', 'LXMF_RECIPIENT_IDENTITY_REQUESTED', { destinationHash });
+  } catch {
+    failPendingLxmfRecipientResolutions(destinationHash, 'LXMF_RECIPIENT_PATH_REQUEST_FAILED');
+  }
+}
+
+function resumePendingLxmfRecipientResolutions(destinationHash: string): void {
+  if (!lxmfRecipientIdentityKnown(destinationHash)) return;
+  const jobs = Array.from(pendingLxmfRecipientResolutions.values())
+    .filter((job) => job.destinationHash === destinationHash);
+  for (const job of jobs) {
+    if (!pendingLxmfRecipientResolutions.delete(job.messageId)) continue;
+    clearTimeout(job.timer);
+    log('info', 'wasm', 'LXMF_RECIPIENT_IDENTITY_RESOLVED', {
+      destinationHash,
+      messageId: job.messageId,
+    });
+    sendLxmfMessage({ ...job.command, replacesMessageId: job.messageId }, job.messageId);
+  }
+}
+
+function failPendingLxmfRecipientResolution(messageId: string, code: string): boolean {
+  const job = pendingLxmfRecipientResolutions.get(messageId);
+  if (!job || !pendingLxmfRecipientResolutions.delete(messageId)) return false;
+  clearTimeout(job.timer);
+  if (identity) {
+    emit({ type: 'chatMessageState', identityId: identity.id, messageId, state: 'failed' });
+  }
+  log('warning', 'wasm', code, { destinationHash: job.destinationHash, messageId });
+  return true;
+}
+
+function failPendingLxmfRecipientResolutions(destinationHash: string, code: string): void {
+  for (const job of Array.from(pendingLxmfRecipientResolutions.values())) {
+    if (job.destinationHash === destinationHash) {
+      failPendingLxmfRecipientResolution(job.messageId, code);
+    }
+  }
+}
+
+function clearPendingLxmfRecipientResolutions(code: string): void {
+  for (const job of Array.from(pendingLxmfRecipientResolutions.values())) {
+    failPendingLxmfRecipientResolution(job.messageId, code);
+  }
+}
+
+function failLxmfMessageQueue(
+  command: SendLxmfMessageCommand,
+  code: string,
+  resolvingMessageId?: string,
+): void {
+  if (resolvingMessageId && identity) {
+    emit({
+      type: 'chatMessageState',
+      identityId: identity.id,
+      messageId: resolvingMessageId,
+      state: 'failed',
+    });
+    return;
+  }
+  emit({ type: 'chatMessageQueueFailed', requestId: command.requestId, code });
 }
 
 function importLxmaPeer(command: Extract<RuntimeCommand, { type: 'importLxmaPeer' }>): void {
@@ -1567,6 +1713,7 @@ function importLxmaPeer(command: Extract<RuntimeCommand, { type: 'importLxmaPeer
     });
     emitKnownDestinationSnapshot();
     queueSnapshotPersistence();
+    queueMicrotask(() => resumePendingLxmfRecipientResolutions(destinationHash));
     log('debug', 'wasm', 'LXMF_PEER_IMPORTED', { destinationHash });
     emit({ type: 'lxmaPeerImportResult', requestId: command.requestId, ok: true, destinationHash });
   } catch {
@@ -1576,13 +1723,31 @@ function importLxmaPeer(command: Extract<RuntimeCommand, { type: 'importLxmaPeer
 }
 
 function cancelLxmfMessage(command: Extract<RuntimeCommand, { type: 'cancelLxmfMessage' }>): void {
-  if (!node || !/^[0-9a-f]{64}$/i.test(command.messageId)) {
+  const messageId = command.messageId.toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(messageId)) {
+    emit({ type: 'chatMessageOperationResult', requestId: command.requestId, ok: false, code: 'LXMF_MESSAGE_INVALID' });
+    return;
+  }
+  if (pendingLxmfRecipientResolutions.has(messageId)) {
+    const job = pendingLxmfRecipientResolutions.get(messageId);
+    if (job && pendingLxmfRecipientResolutions.delete(messageId)) {
+      clearTimeout(job.timer);
+      if (identity) emit({ type: 'chatMessageState', identityId: identity.id, messageId, state: 'cancelled' });
+      emit({ type: 'chatMessageOperationResult', requestId: command.requestId, ok: true });
+      log('info', 'runtime', 'LXMF_RECIPIENT_RESOLUTION_CANCELLED', {
+        messageId,
+        destinationHash: job.destinationHash,
+      });
+      return;
+    }
+  }
+  if (!node) {
     emit({ type: 'chatMessageOperationResult', requestId: command.requestId, ok: false, code: 'LXMF_MESSAGE_INVALID' });
     return;
   }
   try {
-    processOutput(node.cancelLxmf(hexToBytes(command.messageId)) as WasmOutput);
-    lxmfOutboundStatusCache.delete(command.messageId.toLowerCase());
+    processOutput(node.cancelLxmf(hexToBytes(messageId)) as WasmOutput);
+    lxmfOutboundStatusCache.delete(messageId);
     emit({ type: 'chatMessageOperationResult', requestId: command.requestId, ok: true });
     log('info', 'wasm', 'LXMF_MESSAGE_CANCELLED', { messageId: command.messageId });
   } catch (error) {
@@ -3060,6 +3225,7 @@ function handleWasmEvent(event: Record<string, unknown>): void {
       // Announce and path events can be part of the same WASM output. Defer
       // sending until every event has been projected so the public identity
       // needed to validate the full destination name is available.
+      queueMicrotask(() => resumePendingLxmfRecipientResolutions(destinationHashHex));
       queueMicrotask(() => sendPendingProbes(destinationHashHex));
       queueMicrotask(emitKnownDestinationSnapshot);
     }
@@ -3833,6 +3999,10 @@ function handleReceivedAnnounce(event: Record<string, unknown>): void {
   if (publicKey?.byteLength === 64) {
     knownDestinationPublicKeys.set(bytesToHex(destinationHash), new Uint8Array(publicKey));
     emitKnownDestinationSnapshot();
+    if (lxmfDeliveryNameHash && equalBytes(nameHash, lxmfDeliveryNameHash)) {
+      const resolvedDestinationHash = bytesToHex(destinationHash);
+      queueMicrotask(() => resumePendingLxmfRecipientResolutions(resolvedDestinationHash));
+    }
   }
   const pathHops = node?.hopsTo(destinationHash);
   const hops = typeof pathHops === 'number' && Number.isSafeInteger(pathHops) && pathHops >= 0

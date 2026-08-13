@@ -304,6 +304,21 @@ export type RuntimeEvent =
       code?: string;
     }
   | {
+      type: 'chatMessageResolving';
+      requestId: string;
+      identityId: string;
+      messageId: string;
+      sourceHash: string;
+      destinationHash: string;
+      title: string;
+      content: string;
+      attachments?: ChatAttachment[];
+      method: string;
+      propagationFallback: boolean;
+      replacesMessageId?: string;
+      queuedAt: string;
+    }
+  | {
       type: 'chatMessageQueued';
       requestId: string;
       identityId: string;

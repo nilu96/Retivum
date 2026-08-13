@@ -18,7 +18,7 @@ export interface ChatBlockedDestination {
 }
 
 export type ChatMessageDirection = 'incoming' | 'outgoing';
-export type ChatMessageStatus = 'queued' | 'sending' | 'sent' | 'delivered' | 'failed';
+export type ChatMessageStatus = 'resolving' | 'queued' | 'sending' | 'sent' | 'delivered' | 'failed';
 export type ChatDeliveryRepresentation = 'opportunisticPacket' | 'directPacket' | 'directResource' | 'propagated';
 export type ChatMessageStampStatus =
   | 'requiredAccepted'

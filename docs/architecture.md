@@ -54,7 +54,7 @@ Capacitor itself officially targets iOS, Android, and Web. Retivum uses a direct
 - The browser build needs an HTTP(S) origin for its first load and service-worker installation. After the full pre-cache succeeds, it can launch while the origin server is unreachable or the device is offline. Its registration and storage remain bound to that origin and may be evicted. Opening `index.html` directly through `file://` is not a supported deployment mode because ES modules, WASM, storage origins, and service workers behave inconsistently there.
 - LXMF communication still requires a configured Reticulum connection. That may be a WebSocket endpoint, an RNode radio, or a native TCP/UDP endpoint according to platform capabilities. This is a network dependency, but not an application web backend.
 - No feature may silently depend on a REST/GraphQL application API. All user and runtime state is local.
-- The UI and queued data remain available when no interface is connected. Messages stay queued until a route becomes available or the user cancels them.
+- The UI and pending data remain available when no interface is connected. A send to an unknown LXMF recipient remains in recipient-discovery state until a validated path-response announce supplies its public identity, discovery fails, or the user cancels it. Once handed to LXMF, normal route discovery and queue handling belong to the LXMF runtime.
 - A fresh installation creates its default identity but no interface definition and makes no network connection. After a user adds an interface, both its configuration and enabled/disabled state persist; every enabled interface automatically attempts to reconnect when Retivum starts.
 - Retivum does not ship a default or built-in WebSocket bridge address. Each endpoint is an ordinary persistent Reticulum interface configured by the user.
 
@@ -563,6 +563,7 @@ interface LxmfPreferences {
 - Before propagated sending or synchronization, the LXMF layer selects the preferred node only when it is announced, enabled, and currently reachable. Otherwise it chooses the reachable enabled announced node with the fewest hops, using lower advertised costs and the destination hash as deterministic tie-breakers. If no candidate exists, propagated delivery fails.
 - Automatic propagation synchronization defaults to **Never**, with sync-on-resume disabled. When an interval is selected, Retivum periodically requests waiting messages from the preferred or best available node while the app is running. A run reached while offline is deferred until an interface reconnects. When sync-on-resume is enabled, Capacitor inactive-to-active transitions, Electron system-resume events, and browser hidden-to-visible transitions request an automatic synchronization as soon as the renderer runtime is online. Manual synchronization remains available even without a preferred node.
 - **Direct** and **opportunistic** do not require a configured propagation node. A route may still be unavailable, which is reported through the normal queued/failed state flow.
+- Retivum hands an outbound message to LXMF only when the recipient's complete public identity is known. A send to a bare unknown hash is persisted in `resolving`, requests the destination path, and changes to normal `queued` only after a cryptographically valid `lxmf.delivery` announce supplies a public key that derives the requested hash. Discovery timeout changes it directly to `failed`; Retry repeats discovery when the identity remains unknown. Route discovery after the identity is known remains owned by LXMF.
 - The primary attempt persists whether propagation fallback remains pending. When fallback is used, the propagated queue result replaces that attempt in one transaction so the chat continues to show one logical message. The retry preserves the original timestamp and payload, which keeps the LXMF message ID stable under normal ticket reuse and allows recipient-side deduplication if primary delivery succeeded but its proof was lost.
 - The engine's paper-message capability is outside the online sending choices for v1 and may be designed separately later.
 - Required inbound stamp cost defaults to **8**. Setting it to **0** disables inbound stamp enforcement. Positive costs are advertised in delivery announces and validated cooperatively in the worker before an inbound message is accepted; tickets retain the Python-reference bypass behavior.
@@ -588,6 +589,11 @@ sequenceDiagram
     C->>A: send draft
     A->>DB: transaction: create message + outbox item
     DB-->>A: local message ID committed
+    A->>R: check recipient identity
+    alt identity unknown
+        A->>R: request destination path
+        R-->>A: validated delivery announce or timeout
+    end
     A->>R: prepare/enqueue LXMF
     R-->>A: LXMF message ID + queued event
     A->>DB: bind IDs and update state
@@ -602,7 +608,7 @@ Never display a message as queued until the local transaction succeeds. Reconcil
 
 Normalize core states into a stable UI state machine:
 
-`draft → queued → preparing → sending → sent → delivered`
+`draft → resolving (when identity unknown) → queued → preparing → sending → sent → delivered`
 
 Terminal alternatives are `rejected`, `cancelled`, and `failed`. A user-requested retry creates a new attempt record while preserving the original message and audit trail. The automatic propagation fallback instead replaces the failed active attempt for the same logical message and preserves its LXMF message ID whenever possible. Primary delivery method (`opportunistic` or `direct`) and propagation-fallback state are persisted metadata, not transient UI state.
 

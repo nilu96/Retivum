@@ -7,6 +7,31 @@ import type {
 import MessageDetailsDialog from './MessageDetailsDialog.svelte';
 
 describe('MessageDetailsDialog delivery stamp presentation', () => {
+  it('does not present a local discovery identifier as a computed LXMF message ID', () => {
+    render(MessageDetailsDialog, {
+      message: {
+        id: 'identity:discovery',
+        identityId: 'identity',
+        messageId: 'd'.repeat(64),
+        sourceHash: 'b'.repeat(32),
+        destinationHash: 'c'.repeat(32),
+        title: '',
+        content: 'Discovering',
+        direction: 'outgoing',
+        status: 'resolving',
+        receivedAt: '2026-08-13T12:00:00.000Z',
+      },
+      onclose: vi.fn(),
+    });
+
+    const details = within(screen.getByRole('dialog', { name: 'Message details' }));
+    const messageIdRow = details.getByText('Computed message ID').closest('div');
+    const signatureRow = details.getByText('Signature').closest('div');
+    expect(messageIdRow).toHaveTextContent('Unavailable');
+    expect(messageIdRow).not.toHaveTextContent('d'.repeat(64));
+    expect(signatureRow).toHaveTextContent('Unavailable');
+  });
+
   it.each([
     {
       direction: 'incoming',

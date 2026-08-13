@@ -193,6 +193,7 @@
   };
 
   const statusKeys: Record<ChatMessageStatus, MessageKey> = {
+    resolving: 'chat.message.status.resolving',
     queued: 'chat.message.status.queued',
     sending: 'chat.message.status.sending',
     sent: 'chat.message.status.sent',
@@ -1813,7 +1814,8 @@
       <Icon name="info" size={17} />{$t('chat.message.actions.details')}
     </button>
     {#if chatMessageDirection(messageActions.message) === 'outgoing'
-      && (chatMessageDisplayStatus(messageActions.message) === 'queued'
+      && (chatMessageDisplayStatus(messageActions.message) === 'resolving'
+        || chatMessageDisplayStatus(messageActions.message) === 'queued'
         || chatMessageDisplayStatus(messageActions.message) === 'sending')}
       <button role="menuitem" onclick={() => abortMessage(messageActions!.message)}>
         <Icon name="stop" size={17} />{$t('chat.message.actions.abort')}

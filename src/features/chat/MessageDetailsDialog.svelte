@@ -38,6 +38,7 @@
   }
 
   const senderTimestamp = $derived(formattedTimestamp(message.timestamp));
+  const hasProtocolMessage = $derived(direction === 'incoming' || senderTimestamp !== undefined);
   const receiverTimestamp = $derived(direction === 'incoming'
     ? formattedIsoTimestamp(message.receivedAt)
     : undefined);
@@ -94,7 +95,10 @@
     <dl class="message-details-list">
       <div class="message-details-wide">
         <dt>{$t('chat.message.details.messageId')}</dt>
-        <dd><code>{message.messageId}</code></dd>
+        <dd>
+          {#if hasProtocolMessage}<code>{message.messageId}</code>
+          {:else}<span class="message-details-unavailable">{$t('chat.message.details.unavailable')}</span>{/if}
+        </dd>
       </div>
       <div class="message-details-hash">
         <dt>{$t('chat.message.details.sourceHash')}</dt>
@@ -170,7 +174,9 @@
       <div class="message-details-pair">
         <dt>{$t('chat.message.details.signature')}</dt>
         <dd>{$t(direction === 'outgoing'
-          ? 'chat.message.details.signature.signedLocally'
+          ? hasProtocolMessage
+            ? 'chat.message.details.signature.signedLocally'
+            : 'chat.message.details.unavailable'
           : message.verification
             ? verificationKeys[message.verification] ?? 'chat.message.verification.unverified'
             : 'chat.message.details.unavailable')}</dd>
