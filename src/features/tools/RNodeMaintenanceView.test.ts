@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/provisioning';
 import { createRNodeInterfaceDraft } from '../../domain/settings';
 import { LocalProvisioningClient, RNodeMaintenanceSession } from '../../infrastructure/platform/rnode-maintenance';
-import { interfaceConfigurations, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
+import { interfaceConfigurations, interfaceStatuses, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
 import { clearToasts, toasts } from '../../lib/notifications/toasts';
 import RNodeMaintenanceView from './RNodeMaintenanceView.svelte';
 
@@ -15,6 +16,7 @@ describe('RNodeMaintenanceView', () => {
     config.connection.usbVendorId = 0x10c4;
     config.connection.usbProductId = 0xea60;
     interfaceConfigurations.set([config]);
+    interfaceStatuses.set({});
     Object.defineProperty(navigator, 'serial', {
       configurable: true,
       value: {
@@ -33,6 +35,7 @@ describe('RNodeMaintenanceView', () => {
     delete (navigator as Navigator & { serial?: Serial }).serial;
     delete (navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
     interfaceConfigurations.set([]);
+    interfaceStatuses.set({});
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -63,31 +66,6 @@ describe('RNodeMaintenanceView', () => {
     expect(getPorts).toHaveBeenCalledTimes(callsAfterLeavingDevice);
   });
 
-  it('offers to scroll the complete view back to the top', async () => {
-    const main = document.createElement('main');
-    const scrollTo = vi.fn((options?: ScrollToOptions) => {
-      if (typeof options?.top === 'number') main.scrollTop = options.top;
-    });
-    Object.defineProperty(main, 'scrollTo', { configurable: true, value: scrollTo });
-    document.body.append(main);
-    render(RNodeMaintenanceView, { target: main });
-    scrollTo.mockClear();
-
-    main.scrollTop = 120;
-    await fireEvent.scroll(main);
-    const scrollButton = await screen.findByRole('button', { name: 'Scroll to top' });
-    expect(scrollButton).toHaveClass('message-scroll-latest');
-    await fireEvent.click(scrollButton);
-
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 0,
-      left: 0,
-      behavior: 'smooth',
-    });
-    expect(screen.queryByRole('button', { name: 'Scroll to top' })).not.toBeInTheDocument();
-    main.remove();
-  });
-
   it('lists an already-authorized configured serial RNode and keeps the system picker available', async () => {
     render(RNodeMaintenanceView);
 
@@ -112,6 +90,7 @@ describe('RNodeMaintenanceView', () => {
     config.name = 'Pocket RNode';
     config.connection = { type: 'ble', deviceId: 'ble-device-1', deviceName: 'Pocket RNode' };
     interfaceConfigurations.set([config]);
+    interfaceStatuses.set({ [config.id]: 'online' });
     const bluetoothDevice = Object.assign(new EventTarget(), {
       id: 'ble-device-1',
       name: 'Pocket RNode',
@@ -143,6 +122,31 @@ describe('RNodeMaintenanceView', () => {
     })));
   });
 
+  it('hides an authorized Bluetooth RNode that is not currently connected', async () => {
+    const config = createRNodeInterfaceDraft('ble', 'offline-ble-rnode');
+    config.name = 'Offline RNode';
+    config.connection = { type: 'ble', deviceId: 'ble-device-1', deviceName: 'Offline RNode' };
+    interfaceConfigurations.set([config]);
+    const bluetoothDevice = Object.assign(new EventTarget(), {
+      id: 'ble-device-1',
+      name: 'Offline RNode',
+    }) as BluetoothDevice;
+    const getDevices = vi.fn().mockResolvedValue([bluetoothDevice]);
+    Object.defineProperty(navigator, 'bluetooth', {
+      configurable: true,
+      value: {
+        getDevices,
+        requestDevice: vi.fn(),
+      },
+    });
+    render(RNodeMaintenanceView);
+
+    await vi.waitFor(() => expect(getDevices).toHaveBeenCalled());
+    expect(screen.queryByText('Offline RNode')).not.toBeInTheDocument();
+    expect(screen.getByText('No connected RNodes are available yet.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Choose Bluetooth device' })).toBeInTheDocument();
+  });
+
   it('selects and connects a new browser Bluetooth RNode', async () => {
     const bluetoothDevice = Object.assign(new EventTarget(), {
       id: 'new-ble-device',
@@ -172,6 +176,9 @@ describe('RNodeMaintenanceView', () => {
       messageKey: 'rnodeMaintenance.connect.success',
       parameters: { name: 'New BLE RNode' },
     })));
+    expect(screen.getByText('New BLE RNode')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    await vi.waitFor(() => expect(screen.queryByText('New BLE RNode')).not.toBeInTheDocument());
   });
 
   it('shows a success toast after connecting to a local serial RNode', async () => {
@@ -288,10 +295,195 @@ describe('RNodeMaintenanceView', () => {
     expect(screen.queryByRole('heading', { name: 'Radio link' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Channel' })).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Power' })).not.toBeInTheDocument();
+    const deviceRebootStatus = screen.getByText('Reboot required').closest('div');
+    expect(within(deviceRebootStatus!).getByText('No')).toHaveClass('badge', 'success');
+    await fireEvent.click(screen.getByRole('button', { name: 'Extended provisioning' }));
+    const provisioningRebootStatus = screen.getByText('Reboot required').closest('div');
+    expect(within(provisioningRebootStatus!).getByText('No')).toHaveClass('badge', 'success');
     await fireEvent.click(screen.getByRole('button', { name: 'Logs' }));
     expect(screen.getByText('[INF] device ready')).toBeInTheDocument();
     expect(screen.getByText('[DBG] radio state')).toBeInTheDocument();
     expect(screen.queryByText('RNODE_MAINTENANCE_CONNECTED')).not.toBeInTheDocument();
+  });
+
+  it('uses the shared provisioning fields and saves all local namespace changes in one commit', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({
+      firmwareVersion: '1.73',
+      board: 0x50,
+    });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    const load = vi.spyOn(LocalProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { firmwareVersion: 'microReticulum', schemaVersion: 2, needsReboot: false },
+      schema: {
+        namespaces: [{
+          id: 10,
+          name: 'General',
+          parentId: 0,
+          fields: [{ id: 1, name: 'Device name', type: provisioningFieldTypes.string, flags: 0 }, {
+            id: 2,
+            name: 'Serial number',
+            type: provisioningFieldTypes.string,
+            flags: provisioningFieldFlags.readOnly,
+          }],
+        }, {
+          id: 11,
+          name: 'Display',
+          parentId: 10,
+          fields: [{
+            id: 1,
+            name: 'Display timeout',
+            type: provisioningFieldTypes.integer,
+            flags: 0,
+            minInteger: 0,
+          }],
+        }, {
+          id: 20,
+          name: 'Wi-Fi',
+          parentId: 0,
+          fields: [{ id: 1, name: 'SSID', type: provisioningFieldTypes.string, flags: 0 }],
+        }],
+      },
+      state: {
+        10: { 1: 'Workshop', 2: 'RNode-01' },
+        11: { 1: 30 },
+        20: { 1: 'mesh' },
+      },
+    });
+    const save = vi.spyOn(LocalProvisioningClient.prototype, 'save').mockResolvedValue({
+      applied: 2,
+      needsReboot: true,
+    });
+    const discard = vi.spyOn(LocalProvisioningClient.prototype, 'discard').mockResolvedValue();
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Extended provisioning' }));
+
+    const generalHeading = screen.getByRole('heading', { level: 2, name: 'General' });
+    const displayHeading = screen.getByRole('heading', { level: 2, name: 'Display' });
+    const wifiHeading = screen.getByRole('heading', { level: 2, name: 'Wi-Fi' });
+    const generalCard = generalHeading.closest('.provisioning-namespace-card');
+    expect(generalCard).toContainElement(displayHeading);
+    expect(wifiHeading.closest('.provisioning-namespace-card')).not.toBe(generalCard);
+    expect(screen.getByText('Generic nRF52 (0x50)')).toBeInTheDocument();
+    expect(screen.getByText('RNode-01').closest('label')).toHaveClass('read-only');
+    const deviceName = screen.getByRole('textbox', { name: 'Device name' });
+    const displayTimeout = screen.getByRole('spinbutton', { name: 'Display timeout' });
+    expect(screen.queryByRole('button', { name: 'Revert' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save changes/ })).not.toBeInTheDocument();
+
+    await fireEvent.input(deviceName, { target: { value: 'Field node' } });
+    await fireEvent.input(displayTimeout, { target: { value: '45' } });
+    const saveChanges = screen.getByRole('button', { name: 'Save changes (2)' });
+    const revert = screen.getByRole('button', { name: 'Revert' });
+    expect(revert.parentElement).toHaveClass('provisioning-save-actions');
+    expect(saveChanges).toBeEnabled();
+    expect(revert).toBeEnabled();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Save changes (2)' }));
+    await vi.waitFor(() => expect(save).toHaveBeenCalledWith({
+      10: { 1: 'Field node' },
+      11: { 1: 45 },
+    }, [10, 11]));
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.provisioning.saveSuccessRebootRequired',
+      parameters: { count: 2 },
+    }));
+    expect(get(toasts).some((entry) => entry.messageKey === 'rnodeMaintenance.provisioning.saveSuccess')).toBe(false);
+
+    await fireEvent.input(screen.getByRole('textbox', { name: 'SSID' }), { target: { value: 'temporary' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Revert' }));
+    expect(screen.getByRole('textbox', { name: 'SSID' })).toHaveValue('mesh');
+    expect(screen.queryByRole('button', { name: /Save changes/ })).not.toBeInTheDocument();
+    expect(discard).not.toHaveBeenCalled();
+  });
+
+  it('shows reload feedback only for a manual extended-provisioning refresh', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({ firmwareVersion: '1.73' });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    const load = vi.spyOn(LocalProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { firmwareVersion: 'microReticulum', schemaVersion: 2, needsReboot: false },
+      schema: { namespaces: [] },
+      state: {},
+    });
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Extended provisioning' }));
+    expect(get(toasts).some((entry) => entry.messageKey === 'rnodeMaintenance.provisioning.reloadSuccess')).toBe(false);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reload settings' }));
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.provisioning.reloadSuccess',
+    }));
+
+    load.mockRejectedValueOnce(new Error('reload failed'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reload settings' }));
+    await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'error',
+      messageKey: 'rnodeMaintenance.provisioning.reloadError',
+    })));
+  });
+
+  it('offers the standard RNode reboot action without exposing an unsupported factory reset', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    const release = vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({ firmwareVersion: '1.73' });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    const reboot = vi.spyOn(RNodeMaintenanceSession.prototype, 'reboot').mockResolvedValue();
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unsupported'));
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    const rebootButton = await screen.findByRole('button', { name: 'Reboot device' });
+    expect(screen.queryByRole('button', { name: 'Factory reset' })).not.toBeInTheDocument();
+    await fireEvent.click(rebootButton);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Reboot device' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Reboot device' }));
+
+    await vi.waitFor(() => expect(reboot).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(release).toHaveBeenCalledWith('configured-rnode');
+      expect(screen.getByText('Disconnected')).toBeInTheDocument();
+      expect(get(toasts)).toContainEqual(expect.objectContaining({
+        kind: 'success',
+        messageKey: 'provisioning.reboot.sent',
+      }));
+    });
+  });
+
+  it('offers provisioning factory reset only for compatible local firmware', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({ firmwareVersion: '1.73' });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { firmwareVersion: 'microReticulum', schemaVersion: 2, needsReboot: false },
+      schema: { namespaces: [] },
+      state: {},
+    });
+    const factoryReset = vi.spyOn(LocalProvisioningClient.prototype, 'factoryReset').mockResolvedValue();
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    const factoryResetButton = await screen.findByRole('button', { name: 'Factory reset' });
+    await fireEvent.click(factoryResetButton);
+    const dialog = await screen.findByRole('alertdialog', { name: 'Factory reset' });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Factory reset' }));
+
+    await vi.waitFor(() => expect(factoryReset).toHaveBeenCalledOnce());
+    expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'provisioning.factoryReset.sent',
+    }));
   });
 
   it('shows an error toast when connecting to a local serial RNode fails', async () => {

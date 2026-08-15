@@ -3,10 +3,8 @@
   import { navigateBack } from '../../app/router';
   import type { ReticulumLogEntry, ReticulumLogLevel } from '../../domain/logging';
   import {
-    provisioningFieldFlags,
     provisioningFieldTypes,
     type ProvisioningField,
-    type ProvisioningNamespace,
     type ProvisioningState,
     type ProvisioningValue,
   } from '../../domain/provisioning';
@@ -23,6 +21,7 @@
   import {
     appendLocalLog,
     interfaceConfigurations,
+    interfaceStatuses,
     reticulumRuntime,
   } from '../../infrastructure/reticulum/runtime';
   import type { RNodeBatteryState, RNodeInterfaceTelemetry } from '../../infrastructure/reticulum/protocol';
@@ -31,11 +30,23 @@
   import Icon from '../../lib/components/Icon.svelte';
   import DeviceLogViewer from '../../lib/components/DeviceLogViewer.svelte';
   import { toast } from '../../lib/notifications/toasts';
+  import ProvisioningNamespaceEditor from '../provisioning/ProvisioningNamespaceEditor.svelte';
+  import ProvisioningSaveBar from '../provisioning/ProvisioningSaveBar.svelte';
+  import {
+    provisioningEditableState,
+    provisioningFieldIsWriteOnly,
+    provisioningFieldKey,
+    provisioningStateWithDrafts,
+    provisioningValuesEqual,
+  } from '../provisioning/provisioning-editor';
   import RNodeNodeConfig from './RNodeNodeConfig.svelte';
 
   type MaintenanceTab = 'device' | 'nodeConfig' | 'provisioning' | 'logs';
+  interface DeviceLogLine {
+    id: number;
+    text: string;
+  }
 
-  let page: HTMLDivElement;
   let devices = $state<AuthorizedRNode[]>([]);
   let selectedDevice = $state<AuthorizedRNode>();
   let session = $state<RNodeMaintenanceSession>();
@@ -45,17 +56,19 @@
   let loaded = $state<Awaited<ReturnType<LocalProvisioningClient['load']>>>();
   let draft = $state<ProvisioningState>({});
   let dirtyFields = $state<string[]>([]);
+  let commandValues = $state<Record<string, ProvisioningValue>>({});
+  let fieldValidationErrors = $state<Record<string, string>>({});
   let activeTab = $state<MaintenanceTab>('device');
   let busy = $state(false);
   let status = $state<MessageKey>('rnodeMaintenance.status.disconnected');
-  let deviceLogs = $state<string[]>([]);
+  let deviceLogs = $state<DeviceLogLine[]>([]);
+  let nextDeviceLogId = 1;
   let claimedInterfaceId = $state<string>();
   let wipeEepromPending = $state(false);
+  let pendingDeviceAction = $state<'reboot' | 'factoryReset'>();
   let pendingCommand = $state<{ namespaceId: number; field: ProvisioningField }>();
   let bluetoothPin = $state('');
   let deviceRefresh: Promise<{ ok: boolean; count: number }> | undefined;
-  let scrollContainer: HTMLElement | undefined;
-  let scrollToTopVisible = $state(false);
   const disconnectedTabs: MaintenanceTab[] = ['device'];
   const standardTabs: MaintenanceTab[] = ['device', 'nodeConfig'];
   const extendedTabs: MaintenanceTab[] = ['device', 'nodeConfig', 'provisioning', 'logs'];
@@ -96,25 +109,15 @@
     deviceTelemetry.channelLoadLongPercent,
   ].some((value) => value !== undefined));
   const rootNamespaces = $derived(loaded?.schema.namespaces.filter((namespace) => namespace.parentId === 0) ?? []);
+  const validationErrorCount = $derived(Object.keys(fieldValidationErrors).length);
 
   onMount(() => {
     void refreshDevices();
-    scrollContainer = page.closest<HTMLElement>('main') ?? undefined;
-    scrollContainer?.scrollTo({ top: 0, left: 0 });
-    const updateScrollState = (): void => {
-      scrollToTopVisible = currentPageScrollTop() > 0;
-    };
-    scrollContainer?.addEventListener('scroll', updateScrollState, { passive: true });
-    window.addEventListener('scroll', updateScrollState, { passive: true });
     const refreshInterval = setInterval(() => {
       if (activeTab === 'device' && !busy) void refreshDevices();
     }, 1_000);
-    updateScrollState();
     return () => {
       clearInterval(refreshInterval);
-      scrollContainer?.removeEventListener('scroll', updateScrollState);
-      window.removeEventListener('scroll', updateScrollState);
-      scrollContainer = undefined;
     };
   });
 
@@ -134,7 +137,12 @@
 
   function appendDeviceLogs(message: string): void {
     const lines = message.split(/\r?\n/).filter((line) => line.length > 0);
-    if (lines.length > 0) deviceLogs = [...deviceLogs, ...lines].slice(-1_000);
+    if (lines.length > 0) {
+      deviceLogs = [
+        ...deviceLogs,
+        ...lines.map((text) => ({ id: nextDeviceLogId++, text })),
+      ].slice(-1_000);
+    }
   }
 
   function codedName(value: number | undefined, names: Record<number, string>): string {
@@ -151,27 +159,22 @@
     return `${value}% (${$t(`status.battery.${state ?? 'unknown'}`)})`;
   }
 
-  function currentPageScrollTop(): number {
-    return Math.max(
-      scrollContainer?.scrollTop ?? 0,
-      window.scrollY,
-      document.documentElement.scrollTop,
-      document.body.scrollTop,
-    );
-  }
-
-  function scrollPageToTop(): void {
-    scrollToTopVisible = false;
-    scrollContainer?.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    if (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0) {
-      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    }
+  function connectedMaintenanceDevices(candidates: AuthorizedRNode[]): AuthorizedRNode[] {
+    const activeBleDeviceId = session && selectedDevice?.transport === 'ble'
+      ? selectedDevice.id
+      : undefined;
+    return candidates.filter((candidate) => (
+      candidate.transport === 'serial'
+      || candidate.id === activeBleDeviceId
+      || (candidate.configuredInterface !== undefined
+        && $interfaceStatuses[candidate.configuredInterface.id] === 'online')
+    ));
   }
 
   async function refreshDevices(showFeedback = false): Promise<void> {
     const refresh = deviceRefresh ?? (async () => {
       try {
-        devices = await listAuthorizedRNodes(availableRNodeInterfaces);
+        devices = connectedMaintenanceDevices(await listAuthorizedRNodes(availableRNodeInterfaces));
         appendLog('debug', 'RNODE_MAINTENANCE_DEVICES_REFRESHED', { devices: devices.length });
         return { ok: true, count: devices.length };
       } catch (error) {
@@ -231,6 +234,10 @@
             loaded = undefined;
             activeTab = 'device';
             status = 'rnodeMaintenance.status.disconnected';
+            if (nextSession.device.transport === 'ble') {
+              devices = devices.filter((candidate) => candidate.id !== nextSession.device.id);
+              selectedDevice = undefined;
+            }
           }
         },
         (pin) => { bluetoothPin = pin; },
@@ -244,6 +251,8 @@
       loaded = undefined;
       draft = {};
       dirtyFields = [];
+      commandValues = {};
+      fieldValidationErrors = {};
       status = 'rnodeMaintenance.status.connected';
       appendLog('info', 'RNODE_MAINTENANCE_CONNECTED', {
         device: device.label,
@@ -256,6 +265,7 @@
       toast.error('rnodeMaintenance.connect.error', { name: device.label });
       status = 'rnodeMaintenance.status.disconnected';
       selectedDevice = undefined;
+      if (device.transport === 'ble') devices = devices.filter((candidate) => candidate.id !== device.id);
       deviceInfo = undefined;
       deviceTelemetry = {};
       loaded = undefined;
@@ -268,6 +278,7 @@
 
   async function disconnect(): Promise<void> {
     if (busy) return;
+    const disconnectedDevice = selectedDevice;
     const deviceName = selectedDevice?.label ?? $t('rnodeMaintenance.device.fallbackName');
     busy = true;
     try {
@@ -281,6 +292,9 @@
       appendLog('error', 'RNODE_MAINTENANCE_DISCONNECT_FAILED', { message: errorMessage(error) });
       toast.error('rnodeMaintenance.device.disconnectError', { name: deviceName });
     } finally {
+      if (disconnectedDevice?.transport === 'ble') {
+        devices = devices.filter((candidate) => candidate.id !== disconnectedDevice.id);
+      }
       selectedDevice = undefined;
       deviceInfo = undefined;
       deviceTelemetry = {};
@@ -304,19 +318,23 @@
     if (interfaceId) await reticulumRuntime.releaseRNodeInterfaceFromMaintenance(interfaceId);
   }
 
-  async function loadProvisioning(): Promise<void> {
+  async function loadProvisioning(showFeedback = false): Promise<void> {
     const provisioningClient = client;
     if (!provisioningClient) return;
     try {
       const result = await provisioningClient.load();
       if (client !== provisioningClient) return;
       loaded = result;
-      draft = structuredClone(result.state);
+      draft = provisioningStateWithDrafts(result.state, result.drafts);
       dirtyFields = [];
+      commandValues = {};
+      fieldValidationErrors = {};
       appendLog('debug', 'RNODE_LOCAL_PROVISIONING_READY', { namespaces: result.schema.namespaces.length });
+      if (showFeedback) toast.success('rnodeMaintenance.provisioning.reloadSuccess');
     } catch (error) {
       if (client !== provisioningClient) return;
       appendLog('warning', 'RNODE_LOCAL_PROVISIONING_UNAVAILABLE', { message: errorMessage(error) });
+      if (showFeedback) toast.error('rnodeMaintenance.provisioning.reloadError');
     }
   }
 
@@ -324,23 +342,37 @@
     activeTab = tab;
   }
 
-  function namespaceTree(root: ProvisioningNamespace): ProvisioningNamespace[] {
-    const all = loaded?.schema.namespaces ?? [];
-    const result: ProvisioningNamespace[] = [];
-    const visit = (namespace: ProvisioningNamespace) => {
-      result.push(namespace);
-      all.filter((candidate) => candidate.parentId === namespace.id).forEach(visit);
-    };
-    visit(root);
-    return result;
-  }
-
   function fieldKey(namespaceId: number, fieldId: number): string {
-    return `${namespaceId}:${fieldId}`;
+    return provisioningFieldKey(namespaceId, fieldId);
   }
 
-  function fieldValue(namespaceId: number, fieldId: number): ProvisioningValue {
-    return draft[namespaceId]?.[fieldId] ?? null;
+  function fieldValidationError(namespaceId: number, field: ProvisioningField): string | undefined {
+    return fieldValidationErrors[fieldKey(namespaceId, field.id)];
+  }
+
+  function setFieldValidationError(namespaceId: number, field: ProvisioningField, error?: string): void {
+    const key = fieldKey(namespaceId, field.id);
+    if (error) fieldValidationErrors = { ...fieldValidationErrors, [key]: error };
+    else if (fieldValidationErrors[key]) {
+      fieldValidationErrors = Object.fromEntries(Object.entries(fieldValidationErrors)
+        .filter(([candidate]) => candidate !== key));
+    }
+  }
+
+  function originalFieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
+    const firmwareDraft = loaded?.drafts?.[namespaceId];
+    if (firmwareDraft && Object.prototype.hasOwnProperty.call(firmwareDraft, field.id)) {
+      return firmwareDraft[field.id];
+    }
+    const committed = loaded?.state?.[namespaceId];
+    if (committed && Object.prototype.hasOwnProperty.call(committed, field.id)) {
+      return committed[field.id];
+    }
+    return field.defaultValue;
+  }
+
+  function fieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
+    return draft[namespaceId]?.[field.id] ?? field.defaultValue;
   }
 
   function updateField(namespaceId: number, field: ProvisioningField, value: ProvisioningValue): void {
@@ -348,43 +380,55 @@
       ...draft,
       [namespaceId]: { ...draft[namespaceId], [field.id]: value },
     };
-    if ((field.flags & provisioningFieldFlags.writeOnly) !== 0) return;
     const key = fieldKey(namespaceId, field.id);
-    if (!dirtyFields.includes(key)) dirtyFields = [...dirtyFields, key];
+    if (provisioningValuesEqual(value, originalFieldValue(namespaceId, field))) {
+      dirtyFields = dirtyFields.filter((candidate) => candidate !== key);
+    } else if (!dirtyFields.includes(key)) dirtyFields = [...dirtyFields, key];
   }
 
-  function inputValue(value: ProvisioningValue): string | number {
-    if (typeof value === 'bigint') return value.toString();
-    if (typeof value === 'number' || typeof value === 'string') return value;
-    if (value instanceof Uint8Array) return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('');
-    return '';
+  function editableFieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
+    return provisioningFieldIsWriteOnly(field)
+      ? commandValues[fieldKey(namespaceId, field.id)] ?? field.defaultValue
+      : fieldValue(namespaceId, field);
   }
 
-  function updateTextField(namespaceId: number, field: ProvisioningField, raw: string): void {
-    if (field.type === provisioningFieldTypes.integer) updateField(namespaceId, field, BigInt(raw || '0'));
-    else if (field.type === provisioningFieldTypes.float) updateField(namespaceId, field, Number(raw));
-    else if (field.type === provisioningFieldTypes.bytes) {
-      const normalized = raw.replace(/[^0-9a-f]/gi, '');
-      updateField(namespaceId, field, Uint8Array.from(normalized.match(/.{1,2}/g)?.map((byte) => Number.parseInt(byte, 16)) ?? []));
-    } else updateField(namespaceId, field, raw);
+  function updateEditableField(namespaceId: number, field: ProvisioningField, value: ProvisioningValue): void {
+    if (provisioningFieldIsWriteOnly(field)) {
+      commandValues = { ...commandValues, [fieldKey(namespaceId, field.id)]: value };
+    } else updateField(namespaceId, field, value);
+  }
+
+  function revertProvisioning(): void {
+    if (!loaded || busy) return;
+    draft = provisioningStateWithDrafts(loaded.state, loaded.drafts);
+    dirtyFields = [];
+    commandValues = {};
+    fieldValidationErrors = {};
+  }
+
+  function requestProvisioningCommand(namespaceId: number, field: ProvisioningField): void {
+    if (!client || busy || fieldValidationError(namespaceId, field)) return;
+    const value = field.type === provisioningFieldTypes.void
+      ? null
+      : editableFieldValue(namespaceId, field);
+    if (value !== undefined) pendingCommand = { namespaceId, field };
   }
 
   async function saveProvisioning(): Promise<void> {
-    if (!client || dirtyFields.length === 0 || busy) return;
+    if (!client || !loaded || dirtyFields.length === 0 || validationErrorCount > 0 || busy) return;
+    const changedFieldCount = dirtyFields.length;
+    const namespaceIds = new Set(dirtyFields.map((key) => Number(key.split(':', 1)[0])));
     busy = true;
     try {
-      const changed: ProvisioningState = {};
-      const namespaceIds = new Set<number>();
-      for (const key of dirtyFields) {
-        const [namespaceId, fieldId] = key.split(':').map(Number);
-        namespaceIds.add(namespaceId);
-        changed[namespaceId] = { ...changed[namespaceId], [fieldId]: draft[namespaceId]?.[fieldId] ?? null };
-      }
-      await client.save(changed, [...namespaceIds]);
-      appendLog('info', 'RNODE_LOCAL_PROVISIONING_SAVED', { fields: dirtyFields.length });
+      const result = await client.save(provisioningEditableState(dirtyFields, draft, namespaceIds), [...namespaceIds]);
+      appendLog('info', 'RNODE_LOCAL_PROVISIONING_SAVED', { fields: changedFieldCount });
       await loadProvisioning();
+      toast.success(result.needsReboot
+        ? 'rnodeMaintenance.provisioning.saveSuccessRebootRequired'
+        : 'rnodeMaintenance.provisioning.saveSuccess', { count: changedFieldCount });
     } catch (error) {
       appendLog('error', 'RNODE_LOCAL_PROVISIONING_SAVE_FAILED', { message: errorMessage(error) });
+      toast.error('rnodeMaintenance.provisioning.saveError');
     } finally {
       busy = false;
     }
@@ -396,17 +440,28 @@
       pendingCommand = undefined;
       return;
     }
+    const value = command.field.type === provisioningFieldTypes.void
+      ? null
+      : editableFieldValue(command.namespaceId, command.field);
+    if (value === undefined) {
+      pendingCommand = undefined;
+      return;
+    }
     busy = true;
     try {
       await client.save({
         [command.namespaceId]: {
-          [command.field.id]: fieldValue(command.namespaceId, command.field.id),
+          [command.field.id]: value,
         },
       }, [command.namespaceId]);
+      commandValues = Object.fromEntries(Object.entries(commandValues)
+        .filter(([key]) => key !== fieldKey(command.namespaceId, command.field.id)));
       appendLog('info', 'RNODE_LOCAL_PROVISIONING_COMMAND_SENT', { field: command.field.name });
       await loadProvisioning();
+      toast.success('provisioning.command.success');
     } catch (error) {
       appendLog('error', 'RNODE_LOCAL_PROVISIONING_COMMAND_FAILED', { message: errorMessage(error) });
+      toast.error('provisioning.command.failed');
     } finally {
       busy = false;
       pendingCommand = undefined;
@@ -432,12 +487,61 @@
     }
   }
 
+  async function rebootDevice(): Promise<void> {
+    const activeSession = session;
+    if (pendingDeviceAction !== 'reboot' || !activeSession || busy) {
+      pendingDeviceAction = undefined;
+      return;
+    }
+    busy = true;
+    try {
+      await activeSession.reboot();
+      appendLog('info', 'RNODE_MAINTENANCE_REBOOT_SENT');
+      toast.success('provisioning.reboot.sent');
+      await closeProtocolSession(false);
+      await releaseClaim();
+      selectedDevice = undefined;
+      deviceInfo = undefined;
+      deviceTelemetry = {};
+      loaded = undefined;
+      activeTab = 'device';
+      status = 'rnodeMaintenance.status.disconnected';
+    } catch (error) {
+      appendLog('error', 'RNODE_MAINTENANCE_REBOOT_FAILED', { message: errorMessage(error) });
+      toast.error('provisioning.reboot.failed');
+    } finally {
+      busy = false;
+      pendingDeviceAction = undefined;
+    }
+  }
+
+  async function factoryResetDevice(): Promise<void> {
+    const provisioningClient = client;
+    if (pendingDeviceAction !== 'factoryReset' || !provisioningClient || !loaded || busy) {
+      pendingDeviceAction = undefined;
+      return;
+    }
+    busy = true;
+    try {
+      await provisioningClient.factoryReset();
+      appendLog('warning', 'RNODE_LOCAL_PROVISIONING_FACTORY_RESET_SENT');
+      toast.success('provisioning.factoryReset.sent');
+      await loadProvisioning();
+    } catch (error) {
+      appendLog('error', 'RNODE_LOCAL_PROVISIONING_FACTORY_RESET_FAILED', { message: errorMessage(error) });
+      toast.error('provisioning.factoryReset.failed');
+    } finally {
+      busy = false;
+      pendingDeviceAction = undefined;
+    }
+  }
+
   function errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
 </script>
 
-<div bind:this={page} class="page rnode-maintenance-page">
+<div class="page rnode-maintenance-page">
   <header class="page-header provisioning-header">
     <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('rnodeMaintenance.back')}
@@ -476,8 +580,8 @@
         {/each}
       </div>
       <div class="rnode-maintenance-actions">
-        {#if availableConnections.includes('serial')}<button class="button primary" type="button" disabled={busy} onclick={() => void chooseNewDevice('serial')}><Icon name="plus" size={16} />{$t('rnodeMaintenance.device.chooseSerial')}</button>{/if}
-        {#if availableConnections.includes('ble')}<button class="button primary" type="button" disabled={busy} onclick={() => void chooseNewDevice('ble')}><Icon name="plus" size={16} />{$t('rnodeMaintenance.device.chooseBle')}</button>{/if}
+        {#if availableConnections.includes('serial')}<button class="button primary" type="button" disabled={busy} onclick={() => void chooseNewDevice('serial')}><Icon name="interface" size={16} />{$t('rnodeMaintenance.device.chooseSerial')}</button>{/if}
+        {#if availableConnections.includes('ble')}<button class="button primary" type="button" disabled={busy} onclick={() => void chooseNewDevice('ble')}><Icon name="bluetooth" size={16} />{$t('rnodeMaintenance.device.chooseBle')}</button>{/if}
         {#if selectedDevice}<button class="button secondary" type="button" disabled={busy} onclick={() => void disconnect()}>{$t('rnodeMaintenance.device.disconnect')}</button>{/if}
       </div>
       {#if deviceInfo}
@@ -491,7 +595,18 @@
               <div><dt>{$t('rnodeMaintenance.info.platform')}</dt><dd>{codedName(deviceInfo.platform, platformNames)}</dd></div>
               <div><dt>{$t('rnodeMaintenance.info.mcu')}</dt><dd>{codedName(deviceInfo.mcu, mcuNames)}</dd></div>
               <div><dt>{$t('rnodeMaintenance.info.eeprom')}</dt><dd>{deviceInfo.eepromBytes ?? '—'}</dd></div>
-              <div><dt>{$t('rnodeMaintenance.provisioning.rebootRequired')}</dt><dd>{loaded ? $t(loaded.info.needsReboot ? 'provisioning.info.yes' : 'provisioning.info.no') : '—'}</dd></div>
+              <div>
+                <dt>{$t('rnodeMaintenance.provisioning.rebootRequired')}</dt>
+                <dd>
+                  {#if loaded?.info.needsReboot === true}
+                    <span class="badge experimental">{$t('provisioning.info.yes')}</span>
+                  {:else if loaded?.info.needsReboot === false}
+                    <span class="badge success">{$t('provisioning.info.no')}</span>
+                  {:else}
+                    —
+                  {/if}
+                </dd>
+              </div>
               {#if deviceTelemetry.batteryPercent !== undefined}<div><dt>{$t('status.metric.battery')}</dt><dd>{battery(deviceTelemetry.batteryState, deviceTelemetry.batteryPercent)}</dd></div>{/if}
               {#if deviceTelemetry.temperatureCelsius !== undefined}<div><dt>{$t('rnodeMaintenance.info.temperature')}</dt><dd>{deviceTelemetry.temperatureCelsius} °C</dd></div>{/if}
             </dl>
@@ -517,6 +632,14 @@
               {#if deviceTelemetry.channelLoadLongPercent !== undefined}<div><dt>{$t('rnodeMaintenance.info.utilizationLong')}</dt><dd>{percent(deviceTelemetry.channelLoadLongPercent)}</dd></div>{/if}
             </dl>
           </section>{/if}
+          <section class="rnode-device-danger-zone">
+            <h3>{$t('rnodeMaintenance.device.dangerZone')}</h3>
+            <p class="rnode-maintenance-help">{$t('rnodeMaintenance.device.dangerDescription')}</p>
+            <div class="rnode-maintenance-actions">
+              <button class="button secondary" type="button" disabled={busy} onclick={() => { pendingDeviceAction = 'reboot'; }}><Icon name="sync" size={16} />{$t('provisioning.reboot')}</button>
+              {#if loaded}<button class="button danger" type="button" disabled={busy} onclick={() => { pendingDeviceAction = 'factoryReset'; }}><Icon name="trash" size={16} />{$t('provisioning.factoryReset')}</button>{/if}
+            </div>
+          </section>
         </div>
       {/if}
       <aside class="rnode-maintenance-notice"><Icon name="info" size={18} /><p>{$t('rnodeMaintenance.device.claimNotice')}</p></aside>
@@ -535,7 +658,7 @@
     <section class="rnode-maintenance-panel">
       <div class="rnode-maintenance-section-heading">
         <div><h2>{$t('rnodeMaintenance.provisioning.title')}</h2><p>{$t('rnodeMaintenance.provisioning.description')}</p></div>
-        {#if client}<button class="button secondary" type="button" disabled={busy} onclick={() => void loadProvisioning()}><Icon name="sync" size={16} />{$t('rnodeMaintenance.provisioning.reload')}</button>{/if}
+        {#if client}<button class="button secondary" type="button" disabled={busy} onclick={() => void loadProvisioning(true)}><Icon name="sync" size={16} />{$t('rnodeMaintenance.provisioning.reload')}</button>{/if}
       </div>
       {#if !connected}
         <p class="rnode-maintenance-empty">{$t('rnodeMaintenance.provisioning.connectFirst')}</p>
@@ -543,58 +666,54 @@
         <p class="rnode-maintenance-empty">{$t('rnodeMaintenance.provisioning.unavailable')}</p>
       {:else}
         <dl class="rnode-device-info compact">
+          <div><dt>{$t('rnodeMaintenance.info.board')}</dt><dd>{codedName(deviceInfo?.board, boardNames)}</dd></div>
           <div><dt>{$t('rnodeMaintenance.info.firmware')}</dt><dd>{loaded.info.firmwareVersion ?? '—'}</dd></div>
           <div><dt>{$t('rnodeMaintenance.provisioning.schema')}</dt><dd>{loaded.info.schemaVersion ?? '—'}</dd></div>
-          <div><dt>{$t('rnodeMaintenance.provisioning.rebootRequired')}</dt><dd>{loaded.info.needsReboot ? $t('provisioning.info.yes') : $t('provisioning.info.no')}</dd></div>
+          <div>
+            <dt>{$t('rnodeMaintenance.provisioning.rebootRequired')}</dt>
+            <dd>
+              {#if loaded.info.needsReboot}
+                <span class="badge experimental">{$t('provisioning.info.yes')}</span>
+              {:else}
+                <span class="badge success">{$t('provisioning.info.no')}</span>
+              {/if}
+            </dd>
+          </div>
         </dl>
-        <div class="rnode-provisioning-sections">
-          {#each rootNamespaces as root (root.id)}
-            <section>
-              <h3>{root.name}</h3>
-              {#each namespaceTree(root) as namespace (namespace.id)}
-                {#if namespace.id !== root.id}<h4>{namespace.name}</h4>{/if}
-                <div class="rnode-provisioning-fields">
-                  {#each namespace.fields as field (field.id)}
-                    <label class="field" class:readonly={(field.flags & provisioningFieldFlags.readOnly) !== 0}>
-                      <span>{field.name}</span>
-                      {#if (field.flags & provisioningFieldFlags.readOnly) !== 0}
-                        <output>{String(inputValue(fieldValue(namespace.id, field.id)) || '—')}</output>
-                      {:else if (field.flags & provisioningFieldFlags.writeOnly) !== 0}
-                        <div class="rnode-command-controls">
-                          {#if field.type !== provisioningFieldTypes.void}
-                            <input
-                              type={(field.flags & provisioningFieldFlags.secret) !== 0 ? 'password' : field.type === provisioningFieldTypes.integer || field.type === provisioningFieldTypes.float ? 'number' : 'text'}
-                              value={inputValue(fieldValue(namespace.id, field.id))}
-                              onchange={(event) => updateTextField(namespace.id, field, event.currentTarget.value)}
-                            />
-                          {/if}
-                          <button class="button secondary" type="button" disabled={busy} onclick={() => { pendingCommand = { namespaceId: namespace.id, field }; }}>{$t('provisioning.command.send')}</button>
-                        </div>
-                      {:else if field.type === provisioningFieldTypes.boolean}
-                        <input type="checkbox" role="switch" checked={fieldValue(namespace.id, field.id) === true} onchange={(event) => updateField(namespace.id, field, event.currentTarget.checked)} />
-                      {:else if field.type === provisioningFieldTypes.enumeration}
-                        <select value={String(field.enumValues?.findIndex((value) => Object.is(value, fieldValue(namespace.id, field.id))) ?? -1)} onchange={(event) => { const value = field.enumValues?.[Number(event.currentTarget.value)]; if (value !== undefined) updateField(namespace.id, field, value); }}>
-                          {#each field.enumValues ?? [] as _value, index}<option value={index}>{field.enumLabels?.[index] ?? String(inputValue(_value))}</option>{/each}
-                        </select>
-                      {:else}
-                        <input
-                          type={(field.flags & provisioningFieldFlags.secret) !== 0 ? 'password' : field.type === provisioningFieldTypes.integer || field.type === provisioningFieldTypes.float ? 'number' : 'text'}
-                          value={inputValue(fieldValue(namespace.id, field.id))}
-                          min={field.minInteger ?? field.minFloat}
-                          max={field.maxInteger ?? field.maxFloat}
-                          maxlength={field.maxLength}
-                          onchange={(event) => updateTextField(namespace.id, field, event.currentTarget.value)}
-                        />
-                      {/if}
-                    </label>
-                  {/each}
+        <div class="provisioning-editor-content">
+          <div
+            class="provisioning-namespace-list local-provisioning-namespace-list"
+            class:has-save-bar={dirtyFields.length > 0}
+          >
+            <div class="provisioning-namespace-content">
+              {#each rootNamespaces as root (root.id)}
+                <div class="provisioning-namespace-card">
+                  <ProvisioningNamespaceEditor
+                    namespaces={loaded.schema.namespaces}
+                    rootId={root.id}
+                    showRootHeading
+                    idPrefix="local-provisioning"
+                    getvalue={editableFieldValue}
+                    getvalidation={fieldValidationError}
+                    onupdate={updateEditableField}
+                    onvalidation={setFieldValidationError}
+                    oncommand={requestProvisioningCommand}
+                  />
                 </div>
               {/each}
-            </section>
-          {/each}
-        </div>
-        <div class="rnode-maintenance-actions sticky-actions">
-          <button class="button primary" type="button" disabled={dirtyFields.length === 0 || busy} onclick={() => void saveProvisioning()}>{$t('rnodeMaintenance.provisioning.save', { count: dirtyFields.length })}</button>
+            </div>
+            {#if dirtyFields.length > 0}
+              <ProvisioningSaveBar
+                sticky
+                revertLabel={$t('provisioning.namespace.revert')}
+                saveLabel={$t('rnodeMaintenance.provisioning.save', { count: dirtyFields.length })}
+                revertDisabled={busy}
+                saveDisabled={validationErrorCount > 0 || busy}
+                onrevert={revertProvisioning}
+                onsave={() => saveProvisioning()}
+              />
+            {/if}
+          </div>
         </div>
       {/if}
     </section>
@@ -604,19 +723,14 @@
       <DeviceLogViewer lines={deviceLogs} onclear={() => { deviceLogs = []; }} />
     </section>
   {/if}
-  {#if scrollToTopVisible}
-    <button
-      class="icon-button message-scroll-latest rnode-maintenance-scroll-top"
-      type="button"
-      title={$t('rnodeMaintenance.scrollToTop')}
-      aria-label={$t('rnodeMaintenance.scrollToTop')}
-      onclick={scrollPageToTop}
-    ><Icon name="chevron-up" size={20} /></button>
-  {/if}
 </div>
 
 {#if wipeEepromPending}
   <ConfirmationDialog titleId="rnode-wipe-eeprom" title={$t('rnodeMaintenance.confirm.wipe.title')} description={$t('rnodeMaintenance.confirm.wipe.description')} icon="trash" tone="danger" confirmLabel={$t('rnodeMaintenance.confirm.wipe.action')} oncancel={() => { wipeEepromPending = false; }} onconfirm={wipeEeprom} />
+{:else if pendingDeviceAction === 'reboot'}
+  <ConfirmationDialog titleId="rnode-local-reboot" title={$t('provisioning.reboot')} description={$t('provisioning.reboot.confirm')} icon="sync" confirmLabel={$t('provisioning.reboot')} oncancel={() => { pendingDeviceAction = undefined; }} onconfirm={rebootDevice} />
+{:else if pendingDeviceAction === 'factoryReset'}
+  <ConfirmationDialog titleId="rnode-local-factory-reset" title={$t('provisioning.factoryReset')} description={$t('provisioning.factoryReset.confirm')} icon="trash" tone="danger" confirmLabel={$t('provisioning.factoryReset')} oncancel={() => { pendingDeviceAction = undefined; }} onconfirm={factoryResetDevice} />
 {:else if pendingCommand}
   <ConfirmationDialog titleId="rnode-local-command" title={$t('provisioning.command.dialog.title')} description={$t('provisioning.command.confirm', { name: pendingCommand.field.name })} icon="send" confirmLabel={$t('provisioning.command.send')} oncancel={() => { pendingCommand = undefined; }} onconfirm={sendProvisioningCommand} />
 {/if}

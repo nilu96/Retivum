@@ -11,7 +11,6 @@
   } from '../../domain/provisioning';
   import {
     ProvisioningProtocolError,
-    provisioningFieldFlags,
     provisioningFieldTypes,
   } from '../../domain/provisioning';
   import {
@@ -46,6 +45,18 @@
   import PathStatus from '../../lib/components/PathStatus.svelte';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { toast } from '../../lib/notifications/toasts';
+  import ProvisioningNamespaceEditor from './ProvisioningNamespaceEditor.svelte';
+  import ProvisioningSaveBar from './ProvisioningSaveBar.svelte';
+  import {
+    provisioningFieldIsWriteOnly,
+    provisioningFieldKey,
+    provisioningEditableState,
+    provisioningNamespaceIsReadOnly,
+    provisioningNamespaceTree,
+    provisioningStateFieldKeys,
+    provisioningStateWithDrafts,
+    provisioningValuesEqual,
+  } from './provisioning-editor';
 
   let selectedNodeId = $state<string>();
   let client = $state<ProvisioningClient>();
@@ -395,42 +406,17 @@
   }
 
   function namespaceTree(namespaces: ProvisioningNamespace[], rootId: number): ProvisioningNamespace[] {
-    const result: ProvisioningNamespace[] = [];
-    const seen = new Set<number>();
-    const visit = (namespaceId: number): void => {
-      if (seen.has(namespaceId)) return;
-      const namespace = namespaces.find((candidate) => candidate.id === namespaceId);
-      if (!namespace) return;
-      seen.add(namespaceId);
-      result.push(namespace);
-      for (const child of namespaces) if (child.parentId === namespaceId) visit(child.id);
-    };
-    visit(rootId);
-    return result;
-  }
-
-  function namespaceDepth(namespaceId: number): number {
-    if (!loaded || activeNamespaceId === undefined || namespaceId === activeNamespaceId) return 0;
-    let current = loaded.schema.namespaces.find((namespace) => namespace.id === namespaceId);
-    let depth = 0;
-    const visited = new Set<number>();
-    while (current && current.id !== activeNamespaceId && !visited.has(current.id)) {
-      visited.add(current.id);
-      depth += 1;
-      current = loaded.schema.namespaces.find((namespace) => namespace.id === current?.parentId);
-    }
-    return current?.id === activeNamespaceId ? depth : 0;
+    return provisioningNamespaceTree(namespaces, rootId);
   }
 
   function namespaceIsReadOnly(namespaceId: number): boolean {
-    if (!loaded) return false;
-    const fields = namespaceTree(loaded.schema.namespaces, namespaceId)
-      .flatMap((namespace) => namespace.fields);
-    return fields.length > 0 && fields.every((field) => fieldIsReadOnly(field));
+    return loaded
+      ? provisioningNamespaceIsReadOnly(loaded.schema.namespaces, namespaceId)
+      : false;
   }
 
   function fieldKey(namespaceId: number, fieldId: number): string {
-    return `${namespaceId}:${fieldId}`;
+    return provisioningFieldKey(namespaceId, fieldId);
   }
 
   function selectSection(section: string): void {
@@ -452,75 +438,6 @@
       fieldValidationErrors = Object.fromEntries(Object.entries(fieldValidationErrors)
         .filter(([candidate]) => candidate !== key));
     }
-  }
-
-  function numericInputError(field: ProvisioningField, rawValue: string): string | undefined {
-    if (rawValue.trim() === '') return $t('provisioning.field.validation.number');
-    const value = Number(rawValue);
-    if (!Number.isFinite(value)) return $t('provisioning.field.validation.number');
-    if (field.type === provisioningFieldTypes.integer && !Number.isInteger(value)) {
-      return $t('provisioning.field.validation.integer');
-    }
-    const minimum = field.type === provisioningFieldTypes.integer ? field.minInteger : field.minFloat;
-    const maximum = field.type === provisioningFieldTypes.integer ? field.maxInteger : field.maxFloat;
-    if (minimum !== undefined && value < minimum) {
-      return $t('provisioning.field.validation.minimum', { minimum });
-    }
-    if (maximum !== undefined && value > maximum) {
-      return $t('provisioning.field.validation.maximum', { maximum });
-    }
-    return undefined;
-  }
-
-  function numericInputStep(field: ProvisioningField): number | 'any' {
-    if (field.type === provisioningFieldTypes.integer) return 1;
-    return field.minFloat !== undefined
-      && field.maxFloat !== undefined
-      && field.minFloat >= 0
-      && field.maxFloat <= 1
-      ? 0.1
-      : 'any';
-  }
-
-  function normalizedHexInput(rawValue: string): string | undefined {
-    const normalized = rawValue.replace(/[\s,:-]/g, '');
-    return /^[0-9a-f]*$/i.test(normalized) ? normalized : undefined;
-  }
-
-  function bytesInputError(field: ProvisioningField, rawValue: string): string | undefined {
-    const normalized = normalizedHexInput(rawValue);
-    if (normalized === undefined || normalized.length % 2 !== 0) {
-      return $t('provisioning.field.bytesInvalid');
-    }
-    const byteLength = normalized.length / 2;
-    if (field.maxLength !== undefined && byteLength > field.maxLength) {
-      return $t('provisioning.field.validation.maxBytes', { maximum: field.maxLength });
-    }
-    return undefined;
-  }
-
-  function stringInputError(field: ProvisioningField, value: string): string | undefined {
-    return field.maxLength !== undefined && field.maxLength > 0 && value.length > field.maxLength
-      ? $t('provisioning.field.validation.maxCharacters', { maximum: field.maxLength })
-      : undefined;
-  }
-
-  function bytesListInputError(field: ProvisioningField, rawValue: string): string | undefined {
-    const entries = rawValue.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
-    if (field.maxCount !== undefined && field.maxCount > 0 && entries.length > field.maxCount) {
-      return $t('provisioning.field.validation.maxEntries', { maximum: field.maxCount });
-    }
-    for (const entry of entries) {
-      const normalized = normalizedHexInput(entry);
-      if (normalized === undefined || normalized.length % 2 !== 0) {
-        return $t('provisioning.field.bytesInvalid');
-      }
-      if (field.elementSize !== undefined && field.elementSize > 0
-        && normalized.length / 2 !== field.elementSize) {
-        return $t('provisioning.field.validation.elementBytes', { count: field.elementSize });
-      }
-    }
-    return undefined;
   }
 
   function fieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
@@ -550,49 +467,6 @@
     return field.defaultValue;
   }
 
-  function provisioningValuesEqual(
-    left: ProvisioningValue | undefined,
-    right: ProvisioningValue | undefined,
-  ): boolean {
-    if (Object.is(left, right)) return true;
-    const leftBytes = byteArrayValue(left);
-    const rightBytes = byteArrayValue(right);
-    if (leftBytes && rightBytes) {
-      return leftBytes.length === rightBytes.length
-        && leftBytes.every((byte, index) => byte === rightBytes[index]);
-    }
-    if (Array.isArray(left) && Array.isArray(right)) {
-      return left.length === right.length && left.every((value, index) => (
-        provisioningValuesEqual(value, right[index])
-      ));
-    }
-    if (left instanceof Map && right instanceof Map) {
-      if (left.size !== right.size) return false;
-      return Array.from(left).every(([leftKey, leftValue]) => Array.from(right).some(
-        ([rightKey, rightValue]) => provisioningValuesEqual(leftKey, rightKey)
-          && provisioningValuesEqual(leftValue, rightValue),
-      ));
-    }
-    return false;
-  }
-
-  function byteArrayValue(value: ProvisioningValue | undefined): readonly number[] | undefined {
-    if (value instanceof Uint8Array) return Array.from(value);
-    if (Array.isArray(value) && value.every((byte) => (
-      typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255
-    ))) return value as number[];
-    if (value && typeof value === 'object' && !(value instanceof Map)) {
-      const indexedBytes = Object.entries(value)
-        .filter(([key]) => /^\d+$/.test(key))
-        .sort(([left], [right]) => Number(left) - Number(right))
-        .map(([, byte]) => byte);
-      if (indexedBytes.length > 0 && indexedBytes.every((byte) => (
-        typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255
-      ))) return indexedBytes as number[];
-    }
-    return undefined;
-  }
-
   function editableFieldValue(namespaceId: number, field: ProvisioningField): ProvisioningValue | undefined {
     return fieldIsWriteOnly(field)
       ? commandValues[fieldKey(namespaceId, field.id)] ?? field.defaultValue
@@ -605,28 +479,12 @@
     } else updateField(namespaceId, field, value);
   }
 
-  function fieldIsReadOnly(field: ProvisioningField): boolean {
-    return !fieldIsWriteOnly(field) && (field.flags & provisioningFieldFlags.readOnly) !== 0;
-  }
-
   function fieldIsWriteOnly(field: ProvisioningField): boolean {
-    return (field.flags & provisioningFieldFlags.writeOnly) !== 0;
-  }
-
-  function fieldIsSecret(field: ProvisioningField): boolean {
-    return (field.flags & provisioningFieldFlags.secret) !== 0;
+    return provisioningFieldIsWriteOnly(field);
   }
 
   function editableState(namespaceIds: ReadonlySet<number>): ProvisioningState {
-    const result: ProvisioningState = {};
-    for (const key of dirtyFields) {
-      const [namespaceId, fieldId] = key.split(':').map(Number);
-      if (!namespaceIds.has(namespaceId)) continue;
-      const value = draft[namespaceId]?.[fieldId];
-      if (value === undefined) continue;
-      result[namespaceId] = { ...(result[namespaceId] ?? {}), [fieldId]: value };
-    }
-    return result;
+    return provisioningEditableState(dirtyFields, draft, namespaceIds);
   }
 
   function refreshedNamespaceState(
@@ -637,26 +495,6 @@
       namespaceId,
       structuredClone(nextState[namespaceId] ?? {}),
     ]));
-  }
-
-  function provisioningStateWithDrafts(
-    state: ProvisioningState,
-    drafts: ProvisioningState = {},
-  ): ProvisioningState {
-    const result = structuredClone(state);
-    for (const [namespaceId, fields] of Object.entries(drafts)) {
-      result[Number(namespaceId)] = {
-        ...(result[Number(namespaceId)] ?? {}),
-        ...structuredClone(fields),
-      };
-    }
-    return result;
-  }
-
-  function provisioningStateFieldKeys(state: ProvisioningState = {}): string[] {
-    return Object.entries(state).flatMap(([namespaceId, fields]) => (
-      Object.keys(fields).map((fieldId) => fieldKey(Number(namespaceId), Number(fieldId)))
-    ));
   }
 
   function remoteErrorCodeMessage(code: number): string {
@@ -902,37 +740,6 @@
     else if (pending.kind === 'reboot') await reboot();
     else await factoryReset();
     confirmation = undefined;
-  }
-
-  function displayValue(value: ProvisioningValue | undefined): string {
-    if (value === undefined || value === null) return '—';
-    if (value instanceof Uint8Array) return bytesToHex(value);
-    if (Array.isArray(value)) return value.map((item) => displayValue(item)).join(', ');
-    if (value instanceof Map) return '—';
-    return String(value);
-  }
-
-  function displayListValue(value: ProvisioningValue | undefined): string {
-    return Array.isArray(value)
-      ? value.map((item) => {
-        const bytes = byteArrayValue(item);
-        return bytes ? bytesToHex(Uint8Array.from(bytes)) : displayValue(item);
-      }).join('\n')
-      : displayValue(value);
-  }
-
-  function parseBytes(value: string): Uint8Array {
-    const normalized = value.replace(/[^0-9a-f]/gi, '');
-    if (normalized.length % 2 !== 0) throw new Error('PROVISIONING_BYTES_INVALID');
-    return Uint8Array.from({ length: normalized.length / 2 }, (_, index) => Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16));
-  }
-
-  function parseBytesList(value: string): ProvisioningValue[] {
-    return value.split(/[,\n]/).map((item) => item.trim()).filter(Boolean).map(parseBytes);
-  }
-
-  function bytesToHex(value: Uint8Array): string {
-    return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('');
   }
 
   function stageLabel(): string {
@@ -1186,7 +993,7 @@
           </div>
         </nav>
       {/if}
-      <section class:device-loaded={Boolean(loaded) && !busy} class="provisioning-editor-card">
+      <section class:device-loaded={Boolean(loaded) && !busy} class="provisioning-editor-card provisioning-editor-content">
       <div class="provisioning-grid" aria-hidden="true"></div>
       {#if busy}
         <div class="provisioning-loading">
@@ -1199,9 +1006,8 @@
         </div>
       {:else if loaded}
         {#if activeSection === 'status'}
-          <div class="provisioning-namespace-list provisioning-status-list">
+          <div class="provisioning-namespace-list">
             <section class="provisioning-status-section">
-              <h3>{$t('provisioning.section.status')}</h3>
               <dl class="provisioning-status-grid">
                 <div>
                   <dt>{$t('provisioning.info.destination')}</dt>
@@ -1252,152 +1058,34 @@
             </section>
           </div>
         {:else}
-        <div class="provisioning-namespace-list">
-          {#each visibleNamespaces as namespace (namespace.id)}
-            {@const depth = Math.min(namespaceDepth(namespace.id), 3)}
-            <section
-              class="provisioning-namespace-section"
-              class:depth-0={depth === 0}
-              class:depth-1={depth === 1}
-              class:depth-2={depth === 2}
-              class:depth-3={depth >= 3}
-            >
-              {#if depth === 1}
-                <h2 id={`provisioning-namespace-${namespace.id}`}>{namespace.name}</h2>
-              {:else if depth === 2}
-                <h3 id={`provisioning-namespace-${namespace.id}`}>{namespace.name}</h3>
-              {:else if depth >= 3}
-                <h4 id={`provisioning-namespace-${namespace.id}`}>{namespace.name}</h4>
-              {/if}
-              {#if namespace.fields.length > 0}
-              <div
-                class="provisioning-namespace-fields"
-                role="group"
-                aria-label={depth === 0 ? namespace.name : undefined}
-                aria-labelledby={depth === 0 ? undefined : `provisioning-namespace-${namespace.id}`}
-              >
-                <div class="provisioning-field-grid">
-                {#each namespace.fields as field (field.id)}
-                  {@const validationError = fieldValidationError(namespace.id, field)}
-                  {@const validationId = `provisioning-field-error-${namespace.id}-${field.id}`}
-                  <label
-                    class="field provisioning-field"
-                    class:read-only={fieldIsReadOnly(field)}
-                    class:invalid={Boolean(validationError)}
-                  >
-                    <span>
-                      {field.name}
-                      {#if (field.flags & provisioningFieldFlags.rebootRequired) !== 0}<small>{$t('provisioning.field.reboot')}</small>{/if}
-                    </span>
-                    {#if fieldIsReadOnly(field)}
-                      <output>{displayValue(fieldValue(namespace.id, field))}</output>
-                    {:else if field.type === provisioningFieldTypes.boolean}
-                      <span class="toggle-row compact-toggle">
-                        <span><small>{editableFieldValue(namespace.id, field) === true ? $t('provisioning.value.enabled') : $t('provisioning.value.disabled')}</small></span>
-                        <input type="checkbox" role="switch" checked={editableFieldValue(namespace.id, field) === true} onchange={(event) => updateEditableField(namespace.id, field, event.currentTarget.checked)} />
-                      </span>
-                    {:else if field.type === provisioningFieldTypes.enumeration}
-                      <select value={displayValue(editableFieldValue(namespace.id, field))} onchange={(event) => {
-                        const index = field.enumValues?.findIndex((value) => displayValue(value) === event.currentTarget.value) ?? -1;
-                        if (index >= 0) updateEditableField(namespace.id, field, field.enumValues![index]);
-                      }}>
-                        {#each field.enumValues ?? [] as value, index}
-                          <option value={displayValue(value)}>{field.enumLabels?.[index] ?? displayValue(value)}</option>
-                        {/each}
-                      </select>
-                    {:else if field.type === provisioningFieldTypes.integer || field.type === provisioningFieldTypes.float}
-                      <input
-                        type="number"
-                        min={field.type === provisioningFieldTypes.integer ? field.minInteger : field.minFloat}
-                        max={field.type === provisioningFieldTypes.integer ? field.maxInteger : field.maxFloat}
-                        step={numericInputStep(field)}
-                        value={Number(editableFieldValue(namespace.id, field) ?? 0)}
-                        aria-invalid={validationError ? 'true' : undefined}
-                        aria-describedby={validationError ? validationId : undefined}
-                        oninput={(event) => {
-                          const error = numericInputError(field, event.currentTarget.value);
-                          setFieldValidationError(namespace.id, field, error);
-                          if (!error && Number.isFinite(event.currentTarget.valueAsNumber)) {
-                            updateEditableField(namespace.id, field, event.currentTarget.valueAsNumber);
-                          }
-                        }}
-                      />
-                    {:else if field.type === provisioningFieldTypes.bytes}
-                      <input
-                        value={displayValue(editableFieldValue(namespace.id, field))}
-                        aria-invalid={validationError ? 'true' : undefined}
-                        aria-describedby={validationError ? validationId : undefined}
-                        oninput={(event) => {
-                          const error = bytesInputError(field, event.currentTarget.value);
-                          setFieldValidationError(namespace.id, field, error);
-                          if (!error) updateEditableField(namespace.id, field, parseBytes(event.currentTarget.value));
-                        }}
-                      />
-                    {:else if field.type === provisioningFieldTypes.bytesList}
-                      <textarea
-                        rows="3"
-                        value={displayListValue(editableFieldValue(namespace.id, field))}
-                        aria-invalid={validationError ? 'true' : undefined}
-                        aria-describedby={validationError ? validationId : undefined}
-                        oninput={(event) => {
-                          const error = bytesListInputError(field, event.currentTarget.value);
-                          setFieldValidationError(namespace.id, field, error);
-                          if (!error) updateEditableField(namespace.id, field, parseBytesList(event.currentTarget.value));
-                        }}
-                      ></textarea>
-                    {:else if field.type === provisioningFieldTypes.void}
-                      <button class="button secondary compact" type="button" onclick={() => fieldIsWriteOnly(field)
-                        ? requestCommand(namespace.id, field)
-                        : updateField(namespace.id, field, null)}>{$t('provisioning.field.trigger')}</button>
-                    {:else}
-                      <input
-                        type={fieldIsSecret(field) ? 'password' : 'text'}
-                        maxlength={field.maxLength}
-                        value={typeof editableFieldValue(namespace.id, field) === 'string' ? editableFieldValue(namespace.id, field) as string : ''}
-                        placeholder={fieldIsSecret(field) ? $t('provisioning.field.secretPlaceholder') : undefined}
-                        aria-invalid={validationError ? 'true' : undefined}
-                        aria-describedby={validationError ? validationId : undefined}
-                        oninput={(event) => {
-                          const error = stringInputError(field, event.currentTarget.value);
-                          setFieldValidationError(namespace.id, field, error);
-                          if (!error) updateEditableField(namespace.id, field, event.currentTarget.value);
-                        }}
-                      />
-                    {/if}
-                    {#if fieldIsWriteOnly(field) && field.type !== provisioningFieldTypes.void}
-                      <button
-                        class="button secondary compact provisioning-command-button"
-                        type="button"
-                        disabled={Boolean(validationError)}
-                        onclick={() => requestCommand(namespace.id, field)}
-                      >
-                        {$t('provisioning.command.send')}
-                      </button>
-                    {/if}
-                    {#if validationError}
-                      <small class="field-error" id={validationId} role="alert">{validationError}</small>
-                    {/if}
-                  </label>
-                {/each}
-                </div>
-              </div>
-              {/if}
-            </section>
-          {/each}
-          <div class="provisioning-status-actions provisioning-namespace-actions">
-            <button
-              class="button secondary compact"
-              type="button"
-              disabled={activeDirtyFieldCount === 0 && activeFirmwareDraftCount === 0}
-              onclick={() => void revertNamespace()}
-            >{$t('provisioning.namespace.revert')}</button>
-            <button
-              class="button primary compact"
-              type="button"
-              disabled={activeDirtyFieldCount === 0 || activeValidationErrorCount > 0}
-              onclick={() => void saveNamespace()}
-            >{$t('provisioning.namespace.save')}</button>
+        <div
+          class="provisioning-namespace-list remote-provisioning-namespace-list"
+          class:has-save-bar={activeDirtyFieldCount > 0 || activeFirmwareDraftCount > 0}
+        >
+          <div class="provisioning-namespace-content">
+            {#if activeNamespaceId !== undefined}
+              <ProvisioningNamespaceEditor
+                namespaces={loaded.schema.namespaces}
+                rootId={activeNamespaceId}
+                getvalue={editableFieldValue}
+                getvalidation={fieldValidationError}
+                onupdate={updateEditableField}
+                onvalidation={setFieldValidationError}
+                oncommand={requestCommand}
+              />
+            {/if}
           </div>
+          {#if activeDirtyFieldCount > 0 || activeFirmwareDraftCount > 0}
+            <ProvisioningSaveBar
+              sticky
+              revertLabel={$t('provisioning.namespace.revert')}
+              saveLabel={$t('provisioning.namespace.save')}
+              revertDisabled={activeDirtyFieldCount === 0 && activeFirmwareDraftCount === 0}
+              saveDisabled={activeDirtyFieldCount === 0 || activeValidationErrorCount > 0}
+              onrevert={() => revertNamespace()}
+              onsave={() => saveNamespace()}
+            />
+          {/if}
         </div>
         {/if}
 

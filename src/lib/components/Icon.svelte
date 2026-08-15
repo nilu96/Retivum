@@ -19,6 +19,7 @@
     | 'route-off'
     | 'block'
     | 'interface'
+    | 'bluetooth'
     | 'radio'
     | 'probe'
     | 'send'
@@ -128,6 +129,8 @@
     <path d="m5.6 5.6 12.8 12.8" />
   {:else if name === 'interface'}
     <path d="M8 4v5m8-5v5M6 9h12v3a6 6 0 0 1-6 6v3m0-3a6 6 0 0 1-6-6V9Z" />
+  {:else if name === 'bluetooth'}
+    <path d="m7 7 10 10-5 4V3l5 4L7 17" />
   {:else if name === 'radio'}
     <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
     <path d="M12 13.5V21m-3 0h6" />

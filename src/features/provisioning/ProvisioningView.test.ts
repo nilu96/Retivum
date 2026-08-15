@@ -20,7 +20,7 @@ import {
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import ToastViewport from '../../lib/components/ToastViewport.svelte';
-import { clearToasts } from '../../lib/notifications/toasts';
+import { clearToasts, toasts } from '../../lib/notifications/toasts';
 import ProvisioningView from './ProvisioningView.svelte';
 
 const announcedNode: ProvisioningNode = {
@@ -237,8 +237,8 @@ describe('ProvisioningView', () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
     expect(close).toHaveBeenCalledWith(announcedNode.destinationHash, true);
     expect(clients[1]).not.toBe(clients[0]);
-    expect(await screen.findByRole('heading', { name: 'Node status' })).toBeInTheDocument();
-    expect(screen.getByText('2.0.0')).toBeInTheDocument();
+    expect(await screen.findByText('2.0.0')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Node status' })).not.toBeInTheDocument();
   });
 
   it('disconnects a loaded destination and restores the unlocked overview', async () => {
@@ -403,7 +403,7 @@ describe('ProvisioningView', () => {
       'RNode General Config',
       'RNode General Metrics',
     ]);
-    expect(screen.getByRole('heading', { name: 'Node status' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Node status' })).not.toBeInTheDocument();
     expect(screen.getByText('1.2.3')).toBeInTheDocument();
     expect(screen.queryByText('Device name')).not.toBeInTheDocument();
 
@@ -511,7 +511,7 @@ describe('ProvisioningView', () => {
     });
     const commit = vi.spyOn(ProvisioningClient.prototype, 'commit').mockResolvedValue({
       applied: 1,
-      needsReboot: false,
+      needsReboot: true,
     });
     const getState = vi.spyOn(ProvisioningClient.prototype, 'getState').mockResolvedValue({
       10: { 1: 'Pending name' },
@@ -524,22 +524,14 @@ describe('ProvisioningView', () => {
     const sectionSelect = await screen.findByRole('combobox', { name: 'Provisioning section' });
     await fireEvent.change(sectionSelect, { target: { value: 'namespace:10' } });
 
-    const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
-    const revert = screen.getByRole('button', { name: 'Revert' });
     const sectionNavigation = screen.getByRole('navigation', { name: 'Provisioning section' });
     const namespaceNavigationItem = within(sectionNavigation).getByRole('button', {
       name: 'RNode General Config',
     });
     const namespaceOption = Array.from((sectionSelect as HTMLSelectElement).options)
       .find((option) => option.value === 'namespace:10');
-    const namespaceActions = saveNamespace.parentElement;
-    expect(namespaceActions).toHaveClass('provisioning-status-actions', 'provisioning-namespace-actions');
-    expect(Array.from(namespaceActions?.children ?? [])).toEqual([revert, saveNamespace]);
-    expect(namespaceActions?.previousElementSibling).toContainElement(screen.getByRole('group', {
-      name: 'RNode General Config',
-    }));
-    expect(saveNamespace).toBeDisabled();
-    expect(revert).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save namespace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revert' })).not.toBeInTheDocument();
     expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
       .not.toBeInTheDocument();
     expect(namespaceOption).toHaveTextContent('RNode General Config');
@@ -552,6 +544,20 @@ describe('ProvisioningView', () => {
       target: { value: 'Pending name' },
     });
 
+    const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
+    const revert = screen.getByRole('button', { name: 'Revert' });
+    const namespaceActions = saveNamespace.parentElement;
+    expect(namespaceActions?.parentElement).toHaveClass('provisioning-save-anchor');
+    expect(namespaceActions?.parentElement?.parentElement).toHaveClass('remote-provisioning-namespace-list');
+    expect(namespaceActions).toHaveClass(
+      'provisioning-status-actions',
+      'provisioning-namespace-actions',
+      'provisioning-save-actions',
+    );
+    expect(Array.from(namespaceActions?.children ?? [])).toEqual([revert, saveNamespace]);
+    expect(namespaceActions?.parentElement?.previousElementSibling).toContainElement(screen.getByRole('group', {
+      name: 'RNode General Config',
+    }));
     expect(document.activeElement).toBe(deviceName);
     expect(saveNamespace).toBeEnabled();
     expect(revert).toBeEnabled();
@@ -562,15 +568,16 @@ describe('ProvisioningView', () => {
     expect(screen.getByText('A dot marks sections with changes that have not been committed.'))
       .toHaveClass('sr-only');
     await fireEvent.input(deviceName, { target: { value: 'Original name' } });
-    expect(saveNamespace).toBeDisabled();
-    expect(revert).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Save namespace' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Revert' })).not.toBeInTheDocument();
     expect(namespaceNavigationItem.querySelector('.provisioning-section-change-indicator'))
       .not.toBeInTheDocument();
     expect(namespaceOption).not.toHaveTextContent('•');
     await fireEvent.input(deviceName, { target: { value: 'Pending name' } });
-    await fireEvent.click(saveNamespace);
+    await fireEvent.click(screen.getByRole('button', { name: 'Save namespace' }));
 
     await waitFor(() => expect(stage).toHaveBeenCalledWith({ 10: { 1: 'Pending name' } }));
+    expect(get(toasts).some((entry) => entry.messageKey === 'provisioning.commitAll.rebootRequired')).toBe(false);
     expect(load).toHaveBeenCalledTimes(1);
     expect(screen.getByRole('button', { name: 'Save namespace' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Revert' })).toBeEnabled();
@@ -588,6 +595,10 @@ describe('ProvisioningView', () => {
     await fireEvent.click(within(dialog).getByRole('button', { name: 'Commit all' }));
 
     await waitFor(() => expect(commit).toHaveBeenCalledWith());
+    expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'provisioning.commitAll.rebootRequired',
+    }));
     expect(nativeConfirm).not.toHaveBeenCalled();
     expect(getState).toHaveBeenCalledWith([10]);
     expect(screen.queryByRole('button', { name: 'Commit all' })).not.toBeInTheDocument();
@@ -632,12 +643,12 @@ describe('ProvisioningView', () => {
     });
 
     const airtime = screen.getByRole('spinbutton', { name: 'LT Airtime' });
-    const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
     expect(airtime).toHaveAttribute('min', '0');
     expect(airtime).toHaveAttribute('max', '1');
     expect(airtime).toHaveAttribute('step', '0.1');
 
     await fireEvent.input(airtime, { target: { value: '0.5' } });
+    const saveNamespace = screen.getByRole('button', { name: 'Save namespace' });
     expect(saveNamespace).toBeEnabled();
 
     await fireEvent.input(airtime, { target: { value: '1.1' } });
