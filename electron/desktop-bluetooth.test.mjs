@@ -334,6 +334,9 @@ describe('native Noble RNode backend', () => {
 
   it('silently resolves a saved identifier, subscribes, and chunks RNode writes', async () => {
     const transport = fakeTransport();
+    transport.noble.startScanningAsync.mockImplementation(async () => {
+      queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+    });
     const backend = await createNobleBackend('darwin', { noble: transport.noble });
     const onData = vi.fn();
     const onClosed = vi.fn();
@@ -348,5 +351,39 @@ describe('native Noble RNode backend', () => {
     transport.peripheral.emit('disconnect');
     expect(onClosed).toHaveBeenCalledTimes(1);
     await backend.dispose();
+  });
+
+  it('rediscovers a macOS RNode when the saved native peripheral becomes stale', async () => {
+    const transport = fakeTransport();
+    transport.noble.startScanningAsync.mockImplementation(async () => {
+      queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+    });
+    const backend = await createNobleBackend('darwin', { noble: transport.noble });
+    try {
+      const firstClosed = vi.fn();
+      await backend.open('rnode-one', transport.peripheral.id, {
+        onData: vi.fn(),
+        onClosed: firstClosed,
+      });
+      transport.peripheral.state = 'disconnected';
+      transport.peripheral.emit('disconnect');
+      expect(firstClosed).toHaveBeenCalledOnce();
+
+      await backend.open('rnode-one', transport.peripheral.id, {
+        onData: vi.fn(),
+        onClosed: vi.fn(),
+      });
+
+      expect(transport.noble.startScanningAsync).toHaveBeenCalledTimes(2);
+      expect(transport.noble.startScanningAsync).toHaveBeenLastCalledWith(
+        ['6e400001b5a3f393e0a9e50e24dcca9e'],
+        true,
+      );
+      expect(transport.noble.connectAsync).not.toHaveBeenCalled();
+      expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
+      expect(transport.notify.subscribeAsync).toHaveBeenCalledTimes(2);
+    } finally {
+      await backend.dispose();
+    }
   });
 });

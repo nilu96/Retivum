@@ -34,6 +34,7 @@ interface SerialPortInfo {
 }
 
 interface SerialPort {
+  readonly connected?: boolean;
   readonly readable: ReadableStream<Uint8Array> | null;
   readonly writable: WritableStream<Uint8Array> | null;
   getInfo(): SerialPortInfo;

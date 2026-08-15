@@ -40,7 +40,7 @@
 
   function navigationItemIsActive(item: (typeof navigation)[number]): boolean {
     return current === item.route
-      || ((current === 'logs' || current === 'path-management' || current === 'provisioning' || current === 'probe' || current === 'status')
+      || ((current === 'logs' || current === 'path-management' || current === 'provisioning' || current === 'rnode-maintenance' || current === 'probe' || current === 'status')
         && item.route === 'tools');
   }
 
@@ -131,6 +131,7 @@
     let disposed = false;
     let disposeListener: (() => Promise<void>) | undefined;
     void listenForAppResume(() => {
+      void reticulumRuntime.resumePlatformInterfaces();
       if ($appPreferences.lxmf.propagationSyncOnResume && !$propagationSyncActive) {
         resumePropagationSyncPending = true;
       }

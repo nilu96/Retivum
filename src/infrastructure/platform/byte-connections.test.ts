@@ -4,6 +4,7 @@ import type { RNodeInterfaceConfig } from '../../domain/settings';
 const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
   getDevices: vi.fn(),
+  getConnectedDevices: vi.fn(),
   isBonded: vi.fn(),
   createBond: vi.fn(),
   connect: vi.fn(),
@@ -83,6 +84,7 @@ describe('native BLE byte connection', () => {
     for (const mock of Object.values(mocks)) mock.mockReset();
     mocks.initialize.mockResolvedValue(undefined);
     mocks.getDevices.mockResolvedValue([{ deviceId: 'AA:BB:CC:DD:EE:FF', name: 'RNode' }]);
+    mocks.getConnectedDevices.mockResolvedValue([{ deviceId: 'AA:BB:CC:DD:EE:FF', name: 'RNode' }]);
     mocks.isBonded.mockResolvedValue(false);
     mocks.createBond.mockResolvedValue(undefined);
     mocks.connect.mockResolvedValue(undefined);
@@ -151,6 +153,22 @@ describe('native BLE byte connection', () => {
       '6e400003-b5a3-f393-e0a9-e50e24dcca9e',
     );
     expect(mocks.disconnect).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
+  });
+
+  it('checks the operating-system connection inventory after a mobile resume', async () => {
+    const connection = createRNodeByteConnection(config);
+    const opening = connection.open(vi.fn(), vi.fn());
+    await vi.advanceTimersByTimeAsync(4_250);
+    await opening;
+
+    await expect(connection.isConnected?.()).resolves.toBe(true);
+    expect(mocks.getConnectedDevices).toHaveBeenCalledWith([
+      '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+    ]);
+
+    mocks.getConnectedDevices.mockResolvedValue([]);
+    await expect(connection.isConnected?.()).resolves.toBe(false);
+    await connection.close();
   });
 
   it('disconnects the peripheral before notification cleanup during explicit close', async () => {

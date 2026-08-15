@@ -147,7 +147,7 @@ export class ProvisioningRequestFailure extends Error {
   }
 }
 
-function appendLocalLog(
+export function appendLocalLog(
   level: ReticulumLogEntry['level'],
   source: ReticulumLogEntry['source'],
   code: string,
@@ -175,6 +175,7 @@ class ReticulumRuntimeController {
   private readonly provisioningRepository = new BrowserProvisioningRepository();
   private readonly knownDestinationRepository = new BrowserKnownDestinationRepository();
   private readonly interfaceAnnounceHistoryRepository = new BrowserInterfaceAnnounceHistoryRepository();
+  private readonly rnodeMaintenanceClaims = new Set<string>();
   private interfaceAnnounceHistoryPersistenceQueue = Promise.resolve();
   private knownDestinationPersistenceQueue = Promise.resolve();
   private expectedKnownIdentityInventoryStartupId?: string;
@@ -339,6 +340,30 @@ class ReticulumRuntimeController {
 
   closeAllLinks(): void {
     this.post({ type: 'closeAllLinks' });
+  }
+
+  async claimRNodeInterfaceForMaintenance(interfaceId: string): Promise<boolean> {
+    const config = get(interfaceConfigurations).find((candidate) => candidate.id === interfaceId);
+    if (!config || config.type !== 'rnode') return false;
+    await this.platformInterfaceHost.claimForMaintenance(interfaceId);
+    this.rnodeMaintenanceClaims.add(interfaceId);
+    this.post({ type: 'platformInterfaceState', id: interfaceId, state: 'offline' });
+    appendLocalLog('info', 'runtime', 'RNODE_MAINTENANCE_CLAIMED', { interfaceId });
+    return true;
+  }
+
+  async releaseRNodeInterfaceFromMaintenance(interfaceId: string): Promise<void> {
+    const config = get(interfaceConfigurations).find((candidate) => candidate.id === interfaceId);
+    if (!this.rnodeMaintenanceClaims.delete(interfaceId)) return;
+    appendLocalLog('info', 'runtime', 'RNODE_MAINTENANCE_RELEASED', { interfaceId });
+    await this.platformInterfaceHost.releaseFromMaintenance(
+      interfaceId,
+      config?.type === 'rnode' ? config : undefined,
+    );
+  }
+
+  async resumePlatformInterfaces(): Promise<void> {
+    await this.platformInterfaceHost.resume();
   }
 
   async announceLxmf(): Promise<boolean> {

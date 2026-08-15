@@ -16,12 +16,14 @@ const BLE_WRITE_CHUNK_SIZE = 20;
 const MAX_WRITE_BYTES = 4 * 1024;
 const STAGE_TIMEOUT_MS = 20_000;
 const PAIRING_TIMEOUT_MS = 60_000;
-const WINDOWS_REDISCOVERY_TIMEOUT_MS = 8_000;
+const BLE_REDISCOVERY_TIMEOUT_MS = 8_000;
 const WINDOWS_SCAN_STOP_TIMEOUT_MS = 5_000;
+const DISCONNECT_TIMEOUT_MS = 5_000;
 const POST_CONNECT_SETTLE_MS = 750;
 const PAIRING_RECONNECT_ATTEMPTS = 5;
 const PAIRING_RECONNECT_DELAY_MS = 3_500;
 const WINDOWS_OPEN_ATTEMPTS = 5;
+const OTHER_OPEN_ATTEMPTS = 3;
 
 export function registerDesktopBluetooth(
   ipcMain,
@@ -154,6 +156,36 @@ export async function createNobleBackend(platform = process.platform, dependenci
   const connections = new Map();
   let scanListener;
   let nativeScanActive = false;
+  const adapterStateListener = (state) => {
+    if (state !== 'poweredOn') discovered.clear();
+  };
+  noble.on('stateChange', adapterStateListener);
+
+  function rememberPeripheral(peripheral, requestedId) {
+    discovered.set(peripheral.id, peripheral);
+    discovered.set(normalizeDeviceId(peripheral.id), peripheral);
+    const address = normalizeDeviceId(peripheral.address);
+    if (address && address !== 'unknown') discovered.set(address, peripheral);
+    if (requestedId) discovered.set(requestedId, peripheral);
+  }
+
+  function forgetPeripheral(peripheral, requestedId) {
+    for (const [key, candidate] of discovered) {
+      if (candidate === peripheral || key === requestedId || normalizeDeviceId(key) === normalizeDeviceId(requestedId)) {
+        discovered.delete(key);
+      }
+    }
+  }
+
+  function findPeripheral(deviceId) {
+    const normalizedId = normalizeDeviceId(deviceId);
+    return discovered.get(deviceId)
+      ?? discovered.get(normalizedId)
+      ?? Array.from(new Set(discovered.values())).find((peripheral) => (
+        normalizeDeviceId(peripheral.id) === normalizedId
+          || normalizeDeviceId(peripheral.address) === normalizedId
+      ));
+  }
 
   function logReconnectStage(deviceId, stageName) {
     if (platform === 'win32' && windowsDeviceAddress(deviceId)) {
@@ -172,7 +204,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
     scanListener = (peripheral) => {
       const services = peripheral.advertisement?.serviceUuids?.map(normalizeUuid) ?? [];
       if (services.length > 0 && !services.includes(RNODE_NUS_SERVICE)) return;
-      discovered.set(peripheral.id, peripheral);
+      rememberPeripheral(peripheral);
       onDevice({
         id: peripheral.id,
         name: peripheral.advertisement?.localName || 'RNode',
@@ -208,15 +240,17 @@ export async function createNobleBackend(platform = process.platform, dependenci
     ).catch(() => undefined);
   }
 
-  async function rediscoverWindowsPeripheral(deviceId) {
-    if (platform !== 'win32') return undefined;
+  async function rediscoverPeripheral(deviceId) {
     let resolveMatch;
     const match = new Promise((resolve) => { resolveMatch = resolve; });
     const listener = (peripheral) => {
       const services = peripheral.advertisement?.serviceUuids?.map(normalizeUuid) ?? [];
       if (services.length > 0 && !services.includes(RNODE_NUS_SERVICE)) return;
-      discovered.set(peripheral.id, peripheral);
-      if (normalizeDeviceId(peripheral.id) === normalizeDeviceId(deviceId)) resolveMatch(peripheral);
+      rememberPeripheral(peripheral);
+      if (
+        normalizeDeviceId(peripheral.id) === normalizeDeviceId(deviceId)
+        || normalizeDeviceId(peripheral.address) === normalizeDeviceId(deviceId)
+      ) resolveMatch(peripheral);
     };
     noble.on('discover', listener);
     try {
@@ -225,7 +259,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
       return await stage(
         'rediscover paired RNode',
         () => match,
-        WINDOWS_REDISCOVERY_TIMEOUT_MS,
+        BLE_REDISCOVERY_TIMEOUT_MS,
       ).catch(() => undefined);
     } finally {
       noble.removeListener('discover', listener);
@@ -233,27 +267,35 @@ export async function createNobleBackend(platform = process.platform, dependenci
     }
   }
 
-  async function resolveAndConnect(deviceId) {
+  async function resolveAndConnect(deviceId, forceRediscovery = false) {
     logReconnectStage(deviceId, 'adapter');
     await ready();
     logReconnectStage(deviceId, 'stop-scan');
     await stopScan();
     const savedAddress = windowsDeviceAddress(deviceId);
     logReconnectStage(deviceId, 'rediscover');
-    const known = discovered.get(deviceId)
-      ?? (savedAddress ? discovered.get(savedAddress) : undefined)
-      ?? await rediscoverWindowsPeripheral(savedAddress ?? deviceId);
+    const known = forceRediscovery
+      ? await rediscoverPeripheral(savedAddress ?? deviceId)
+      : findPeripheral(deviceId) ?? (savedAddress ? findPeripheral(savedAddress) : undefined);
     if (known) {
       logReconnectStage(deviceId, 'connect-scanned-device');
       if (known.state !== 'connected') await stage('connect', () => known.connectAsync());
-      discovered.set(deviceId, known);
+      rememberPeripheral(known, deviceId);
       return known;
     }
     logReconnectStage(deviceId, 'connect-saved-device');
     const peripheral = await stage('connect', () => noble.connectAsync(savedAddress ?? deviceId));
     if (!peripheral) throw new Error('RNODE_BLE_DEVICE_NOT_FOUND');
-    discovered.set(deviceId, peripheral);
+    rememberPeripheral(peripheral, deviceId);
     return peripheral;
+  }
+
+  async function disconnectPeripheral(peripheral) {
+    if (peripheral?.state === 'connected' || peripheral?.state === 'disconnecting') {
+      await stage('disconnect', () => peripheral.disconnectAsync(), DISCONNECT_TIMEOUT_MS).catch(() => undefined);
+    } else if (peripheral?.state === 'connecting') {
+      peripheral.cancelConnect?.();
+    }
   }
 
   async function discoverNus(peripheral, onData) {
@@ -321,25 +363,30 @@ export async function createNobleBackend(platform = process.platform, dependenci
       return persistentDeviceId;
     } finally {
       const current = discovered.get(deviceId);
-      if (current?.state === 'connected') await current.disconnectAsync().catch(() => undefined);
+      await disconnectPeripheral(current);
+      if (current) forgetPeripheral(current, deviceId);
     }
   }
 
   async function open(id, deviceId, hooks) {
     await close(id);
     const durableWindowsDevice = platform === 'win32' && windowsDeviceAddress(deviceId) !== undefined;
-    const attempts = durableWindowsDevice ? WINDOWS_OPEN_ATTEMPTS : 1;
+    const attempts = durableWindowsDevice ? WINDOWS_OPEN_ATTEMPTS : OTHER_OPEN_ATTEMPTS;
     let lastError;
     if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_START');
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
       let peripheral;
       let disconnected;
       try {
-        peripheral = await resolveAndConnect(deviceId);
+        // Always obtain a current Noble Peripheral before opening GATT. Noble
+        // can discard its internal peripheral while our durable device ID and
+        // cached wrapper survive an adapter reset or unexpected disconnect.
+        peripheral = await resolveAndConnect(deviceId, true);
         disconnected = () => {
           const entry = connections.get(id);
           if (!entry || entry.peripheral !== peripheral || entry.closing) return;
           connections.delete(id);
+          forgetPeripheral(peripheral, deviceId);
           hooks.onClosed();
         };
         peripheral.on('disconnect', disconnected);
@@ -351,16 +398,15 @@ export async function createNobleBackend(platform = process.platform, dependenci
       } catch (error) {
         lastError = error;
         if (peripheral && disconnected) peripheral.removeListener('disconnect', disconnected);
-        if (peripheral?.state === 'connected') {
-          await peripheral.disconnectAsync().catch(() => undefined);
-        } else if (peripheral?.state === 'connecting') {
-          peripheral.cancelConnect?.();
+        if (peripheral?.state === 'connected' || peripheral?.state === 'disconnecting' || peripheral?.state === 'connecting') {
+          await disconnectPeripheral(peripheral);
         } else {
           try { noble.cancelConnect?.(windowsDeviceAddress(deviceId) ?? deviceId); } catch { /* no pending native connection */ }
         }
-        discovered.delete(deviceId);
-        if (!durableWindowsDevice || attempt >= attempts) break;
-        console.warn('RETIVUM_BLE_RECONNECT_RETRY', {
+        if (peripheral) forgetPeripheral(peripheral, deviceId);
+        else discovered.delete(deviceId);
+        if (attempt >= attempts) break;
+        if (durableWindowsDevice) console.warn('RETIVUM_BLE_RECONNECT_RETRY', {
           attempt,
           message: error instanceof Error ? error.message : String(error),
         });
@@ -387,11 +433,14 @@ export async function createNobleBackend(platform = process.platform, dependenci
     entry.notify.removeListener('data', entry.listener);
     entry.peripheral.removeListener('disconnect', entry.disconnected);
     await entry.notify.unsubscribeAsync().catch(() => undefined);
-    if (entry.peripheral.state === 'connected') await entry.peripheral.disconnectAsync().catch(() => undefined);
+    await disconnectPeripheral(entry.peripheral);
+    forgetPeripheral(entry.peripheral);
   }
 
   async function dispose() {
     await stopScan();
+    noble.removeListener('stateChange', adapterStateListener);
+    discovered.clear();
     noble.stop();
   }
 

@@ -1,5 +1,6 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { createRNodeInterfaceDraft } from '../../domain/settings';
 import {
   blockedChatDestinations,
   chatMessages,
@@ -9,6 +10,7 @@ import {
 import {
   activeIdentity,
   chatInboundTransfers,
+  interfaceConfigurations,
   knownDestinations,
   localDestinationInventory,
   nomadBookmarks,
@@ -29,6 +31,11 @@ type RuntimeInternals = {
   expectedKnownIdentityInventoryStartupId?: string;
   knownDestinationPersistenceQueue: Promise<void>;
   worker?: { postMessage(command: unknown): void };
+  platformInterfaceHost: {
+    claimForMaintenance(interfaceId: string): Promise<void>;
+    releaseFromMaintenance(interfaceId: string, config?: unknown): Promise<void>;
+    resume(): Promise<void>;
+  };
   provisioningRepository: {
     saveBookmark(bookmark: unknown): Promise<void>;
   };
@@ -60,6 +67,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     });
     chatMessages.set([]);
     chatInboundTransfers.set([]);
+    interfaceConfigurations.set([]);
     blockedChatDestinations.set([]);
     provisioningBookmarks.set([]);
     nomadBookmarks.set([]);
@@ -75,6 +83,31 @@ describe('ReticulumRuntimeController chat deletion', () => {
     internals.worker = undefined;
     internals.expectedKnownIdentityInventoryStartupId = undefined;
     internals.knownDestinationPersistenceQueue = Promise.resolve();
+  });
+
+  it('claims and restores configured BLE RNode interfaces for local maintenance', async () => {
+    const config = createRNodeInterfaceDraft('ble', 'ble-maintenance-interface');
+    config.enabled = true;
+    config.connection = { type: 'ble', deviceId: 'ble-device-1', deviceName: 'Pocket RNode' };
+    interfaceConfigurations.set([config]);
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const claim = vi.spyOn(internals.platformInterfaceHost, 'claimForMaintenance').mockResolvedValue();
+    const release = vi.spyOn(internals.platformInterfaceHost, 'releaseFromMaintenance').mockResolvedValue();
+
+    await expect(reticulumRuntime.claimRNodeInterfaceForMaintenance(config.id)).resolves.toBe(true);
+    expect(claim).toHaveBeenCalledWith(config.id);
+
+    await expect(reticulumRuntime.releaseRNodeInterfaceFromMaintenance(config.id)).resolves.toBeUndefined();
+    expect(release).toHaveBeenCalledWith(config.id, config);
+  });
+
+  it('forwards app resume to platform interface health checks', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const resume = vi.spyOn(internals.platformInterfaceHost, 'resume').mockResolvedValue();
+
+    await reticulumRuntime.resumePlatformInterfaces();
+
+    expect(resume).toHaveBeenCalledOnce();
   });
 
   it('publishes successful automatic propagation sync results without publishing failures', async () => {

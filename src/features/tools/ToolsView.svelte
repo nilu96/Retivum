@@ -1,14 +1,16 @@
 <script lang="ts">
   import { navigate, type AppRoute } from '../../app/router';
   import { t, type MessageKey } from '../../i18n';
+  import { detectInterfaceCapabilities } from '../../infrastructure/platform/interface-capabilities';
   import Icon, { type IconName } from '../../lib/components/Icon.svelte';
 
   interface ToolDefinition {
-    id: 'provisioning' | 'logs' | 'pathTable' | 'probe' | 'status';
+    id: 'provisioning' | 'rnodeMaintenance' | 'logs' | 'pathTable' | 'probe' | 'status';
     title: MessageKey;
     description: MessageKey;
     icon: IconName;
     available: boolean;
+    hiddenWhenUnavailable?: boolean;
     route?: AppRoute;
   }
 
@@ -46,6 +48,15 @@
       route: 'provisioning',
     },
     {
+      id: 'rnodeMaintenance',
+      title: 'tools.rnodeMaintenance.title',
+      description: 'tools.rnodeMaintenance.description',
+      icon: 'radio',
+      available: detectInterfaceCapabilities().rnodeConnections.length > 0,
+      hiddenWhenUnavailable: true,
+      route: 'rnode-maintenance',
+    },
+    {
       id: 'logs',
       title: 'tools.logs.title',
       description: 'tools.logs.description',
@@ -76,7 +87,7 @@
           </span>
           <span class="tool-action">{$t('tools.open')}<Icon name="arrow-right" size={17} /></span>
         </button>
-      {:else}
+      {:else if !tool.hiddenWhenUnavailable}
         <article class="tool-card unavailable">
           <span class="tool-icon"><Icon name={tool.icon} size={24} /></span>
           <span class="tool-copy">

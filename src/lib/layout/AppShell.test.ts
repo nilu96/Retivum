@@ -424,6 +424,8 @@ describe('AppShell Chat unread indicator', () => {
     appPreferences.set(preferences);
     const requestSync = vi.spyOn(reticulumRuntime, 'requestAutomaticLxmfPropagationSync')
       .mockReturnValue(true);
+    const resumeInterfaces = vi.spyOn(reticulumRuntime, 'resumePlatformInterfaces')
+      .mockResolvedValue();
     render(AppShell, { current: 'tools', children: emptyChildren });
 
     visibility = 'hidden';
@@ -431,6 +433,7 @@ describe('AppShell Chat unread indicator', () => {
     visibility = 'visible';
     document.dispatchEvent(new Event('visibilitychange'));
 
+    expect(resumeInterfaces).toHaveBeenCalledOnce();
     expect(requestSync).not.toHaveBeenCalled();
     runtimeStatus.set('online');
     await waitFor(() => expect(requestSync).toHaveBeenCalledOnce());

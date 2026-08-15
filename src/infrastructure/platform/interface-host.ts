@@ -11,10 +11,12 @@ interface HostedInterface {
   open(): Promise<void>;
   write(data: Uint8Array, highPriority?: boolean): void | Promise<void>;
   close(): Promise<void>;
+  resume?(): Promise<void>;
 }
 
 export class PlatformInterfaceHost {
   private readonly hosts = new Map<string, { host: HostedInterface; config: InterfaceConfig }>();
+  private readonly maintenanceClaims = new Set<string>();
   private readonly writeQueues = new Map<string, Promise<void>>();
   private openQueue: Promise<void> = Promise.resolve();
 
@@ -31,6 +33,7 @@ export class PlatformInterfaceHost {
 
   private async openNow(config: InterfaceConfig): Promise<void> {
     await this.closeNow(config.id);
+    if (this.maintenanceClaims.has(config.id)) return;
     if (config.type === 'websocket') return;
     if (!interfaceIsSupported(config)) {
       this.post({ type: 'platformInterfaceState', id: config.id, state: 'error', errorCode: 'INTERFACE_PLATFORM_UNSUPPORTED' });
@@ -103,6 +106,20 @@ export class PlatformInterfaceHost {
 
   async closeAll(): Promise<void> {
     for (const id of Array.from(this.hosts.keys())) await this.close(id);
+  }
+
+  async resume(): Promise<void> {
+    await Promise.all(Array.from(this.hosts.values(), ({ host }) => host.resume?.()));
+  }
+
+  async claimForMaintenance(id: string): Promise<void> {
+    this.maintenanceClaims.add(id);
+    await this.close(id);
+  }
+
+  async releaseFromMaintenance(id: string, config?: InterfaceConfig): Promise<void> {
+    this.maintenanceClaims.delete(id);
+    if (config?.enabled) await this.open(config);
   }
 }
 

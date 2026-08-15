@@ -23,6 +23,7 @@ const CMD_STAT_RSSI = 0x23;
 const CMD_STAT_SNR = 0x24;
 const CMD_STAT_CHTM = 0x25;
 const CMD_STAT_BAT = 0x27;
+const CMD_STAT_TEMP = 0x29;
 const CMD_FW_VERSION = 0x50;
 const CMD_RESET = 0x55;
 const CMD_ERROR = 0x90;
@@ -140,6 +141,34 @@ export class RNodeHost {
 
   write(packet: Uint8Array, highPriority = false): void {
     this.send(packet, highPriority);
+  }
+
+  async resume(): Promise<void> {
+    const validateConnection = this.connection.isConnected;
+    if (!validateConnection || this.closing || this.opening || this.recovering) return;
+    if (!this.online) {
+      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+      this.hooks.log('RNODE_BLE_RESUME_RECONNECT', { interfaceId: this.config.id });
+      void this.connect();
+      return;
+    }
+    let connected = false;
+    try {
+      connected = await validateConnection.call(this.connection);
+    } catch (error) {
+      this.hooks.log('RNODE_BLE_RESUME_CHECK_FAILED', {
+        interfaceId: this.config.id,
+        message: errorMessage(error),
+      });
+    }
+    if (this.closing || !this.online) return;
+    if (connected) {
+      this.hooks.log('RNODE_BLE_RESUME_CONNECTED', { interfaceId: this.config.id });
+      return;
+    }
+    this.hooks.log('RNODE_BLE_RESUME_STALE', { interfaceId: this.config.id });
+    this.recoverConnection('RNODE_BLE_CONNECTION_LOST');
   }
 
   async close(): Promise<void> {
@@ -427,6 +456,10 @@ export function parseRNodeTelemetry(command: number, payload: Uint8Array): RNode
   }
   if (command === CMD_STAT_BAT && payload.length >= 2) {
     return { batteryState: batteryState(payload[0]), batteryPercent: Math.min(100, payload[1]) };
+  }
+  if (command === CMD_STAT_TEMP && payload.length) {
+    const temperatureCelsius = payload[0] - 120;
+    return temperatureCelsius >= -30 && temperatureCelsius <= 90 ? { temperatureCelsius } : undefined;
   }
   return undefined;
 }

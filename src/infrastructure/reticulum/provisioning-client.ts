@@ -47,7 +47,7 @@ export class ProvisioningFieldFailure extends Error {
 }
 
 export class ProvisioningClient {
-  private sequence = 1;
+  protected sequence = 1;
   private structuredStateProtocol = false;
   private readonly repository = new BrowserProvisioningRepository();
 
@@ -151,7 +151,7 @@ export class ProvisioningClient {
     reticulumRuntime.cancelProvisioning(this.provisioningNode.destinationHash, true);
   }
 
-  private async request(
+  protected async request(
     operation: number,
     payload?: ProvisioningValue,
     safeToRetry = true,

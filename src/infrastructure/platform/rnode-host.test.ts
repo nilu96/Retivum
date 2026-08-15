@@ -13,6 +13,7 @@ const DETECT_RESP = 0x46;
 class FakeRNodeConnection implements ByteConnection {
   openCount = 0;
   closeCount = 0;
+  connected = true;
   finalCloseData?: Uint8Array;
   failNextDataWrite = false;
   closeWithFailedWrite = false;
@@ -21,6 +22,7 @@ class FakeRNodeConnection implements ByteConnection {
 
   async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
     this.openCount += 1;
+    this.connected = true;
     this.onData = onData;
     this.onClosed = onClosed;
   }
@@ -41,6 +43,10 @@ class FakeRNodeConnection implements ByteConnection {
   async close(finalData?: Uint8Array): Promise<void> {
     this.closeCount += 1;
     this.finalCloseData = finalData;
+  }
+
+  async isConnected(): Promise<boolean> {
+    return this.connected;
   }
 
   private emit(...chunks: Uint8Array[]): void {
@@ -88,6 +94,8 @@ describe('RNode telemetry', () => {
       batteryState: 'charging',
       batteryPercent: 84,
     });
+    expect(parseRNodeTelemetry(0x29, new Uint8Array([145]))).toEqual({ temperatureCelsius: 25 });
+    expect(parseRNodeTelemetry(0x29, new Uint8Array([250]))).toBeUndefined();
   });
 
   it('decodes packet counters and signed signal reports', () => {
@@ -98,6 +106,54 @@ describe('RNode telemetry', () => {
 });
 
 describe('RNode connection recovery', () => {
+  it('keeps a healthy native BLE connection intact after resume', async () => {
+    vi.useFakeTimers();
+    const connection = new FakeRNodeConnection();
+    const logs: string[] = [];
+    const host = new RNodeHost(createRNodeInterfaceDraft('ble', 'healthy-resume-rnode'), {
+      onPacket: () => undefined,
+      onState: () => undefined,
+      log: (code) => logs.push(code),
+    }, connection);
+
+    const opening = host.open();
+    await vi.advanceTimersByTimeAsync(3_300);
+    await opening;
+    await host.resume();
+
+    expect(connection.openCount).toBe(1);
+    expect(connection.closeCount).toBe(0);
+    expect(logs).toContain('RNODE_BLE_RESUME_CONNECTED');
+    await host.close();
+  });
+
+  it('recovers a stale native BLE connection after resume', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+    const connection = new FakeRNodeConnection();
+    const states: Array<{ state: string; code?: string }> = [];
+    const host = new RNodeHost(createRNodeInterfaceDraft('ble', 'stale-resume-rnode'), {
+      onPacket: () => undefined,
+      onState: (state, code) => states.push({ state, code }),
+      log: () => undefined,
+    }, connection);
+
+    const opening = host.open();
+    await vi.advanceTimersByTimeAsync(3_300);
+    await opening;
+    connection.connected = false;
+    await host.resume();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(states.at(-1)).toEqual({ state: 'offline', code: 'RNODE_BLE_CONNECTION_LOST' });
+    expect(connection.closeCount).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(6_800);
+    expect(connection.openCount).toBe(2);
+    expect(states.at(-1)).toEqual({ state: 'online', code: undefined });
+    await host.close();
+  });
+
   it('delegates the final radio-off and leave frames to transport close', async () => {
     const connection = new FakeRNodeConnection();
     const host = new RNodeHost(createRNodeInterfaceDraft('ble', 'closed-rnode'), {

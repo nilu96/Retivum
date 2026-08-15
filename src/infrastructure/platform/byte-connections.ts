@@ -26,6 +26,7 @@ export interface ByteConnection {
   open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void>;
   write(data: Uint8Array): Promise<void>;
   close(finalData?: Uint8Array): Promise<void>;
+  isConnected?(): Promise<boolean>;
 }
 
 export function createRNodeByteConnection(
@@ -37,6 +38,10 @@ export function createRNodeByteConnection(
   return Capacitor.isNativePlatform()
     ? new NativeBluetoothByteConnection(config, log)
     : new BluetoothByteConnection(config, log);
+}
+
+export function createSerialPortByteConnection(port: SerialPort): ByteConnection {
+  return new SerialByteConnection(undefined, port);
 }
 
 /**
@@ -86,15 +91,18 @@ class SerialByteConnection implements ByteConnection {
   private writer?: WritableStreamDefaultWriter<Uint8Array>;
   private closing = false;
 
-  constructor(private readonly config: RNodeInterfaceConfig) {}
+  constructor(
+    private readonly config?: RNodeInterfaceConfig,
+    private readonly selectedPort?: SerialPort,
+  ) {}
 
   async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
-    if (!navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
-    const ports = await navigator.serial.getPorts();
-    this.port = ports.find((port) => {
+    if (!this.selectedPort && !navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
+    const ports = this.selectedPort ? [] : await navigator.serial!.getPorts();
+    this.port = this.selectedPort ?? ports.find((port) => {
       const info = port.getInfo();
-      return (this.config.connection.usbVendorId === undefined || info.usbVendorId === this.config.connection.usbVendorId)
-        && (this.config.connection.usbProductId === undefined || info.usbProductId === this.config.connection.usbProductId);
+      return (this.config?.connection.usbVendorId === undefined || info.usbVendorId === this.config.connection.usbVendorId)
+        && (this.config?.connection.usbProductId === undefined || info.usbProductId === this.config.connection.usbProductId);
     });
     if (!this.port) throw new Error('RNODE_SERIAL_NOT_AUTHORIZED');
     await this.port.open({ baudRate: 115_200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
@@ -277,6 +285,16 @@ class NativeBluetoothByteConnection implements ByteConnection {
 
   async write(data: Uint8Array): Promise<void> {
     await this.writeChunks(data);
+  }
+
+  async isConnected(): Promise<boolean> {
+    const deviceId = this.config.connection.deviceId;
+    if (!deviceId || !this.connected) return false;
+    const devices = await bleStage(
+      'check connection',
+      () => BleClient.getConnectedDevices([RNODE_NUS_SERVICE]),
+    );
+    return devices.some((device) => device.deviceId === deviceId);
   }
 
   private async writeChunks(data: Uint8Array, timeoutMs?: number): Promise<void> {

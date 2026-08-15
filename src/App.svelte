@@ -9,6 +9,7 @@
   import ReticulumLogsView from './features/settings/ReticulumLogsView.svelte';
   import ProvisioningView from './features/provisioning/ProvisioningView.svelte';
   import StatusDetailsView from './features/tools/StatusDetailsView.svelte';
+  import RNodeMaintenanceView from './features/tools/RNodeMaintenanceView.svelte';
   import OnboardingView from './features/onboarding/OnboardingView.svelte';
   import {
     determineOnboardingPlan,
@@ -102,6 +103,8 @@
       <ToolsView />
     {:else if $route === 'provisioning'}
       <ProvisioningView />
+    {:else if $route === 'rnode-maintenance'}
+      <RNodeMaintenanceView />
     {:else if $route === 'probe'}
       <ProbeView />
     {:else if $route === 'path-management'}

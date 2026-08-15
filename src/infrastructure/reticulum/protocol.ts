@@ -33,6 +33,7 @@ export interface RNodeInterfaceTelemetry {
   interferenceDbm?: number;
   batteryPercent?: number;
   batteryState?: RNodeBatteryState;
+  temperatureCelsius?: number;
   airtimeShortPercent?: number;
   airtimeLongPercent?: number;
   channelLoadShortPercent?: number;

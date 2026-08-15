@@ -12,11 +12,12 @@ The initial application foundation includes:
 
 - a Svelte 5, TypeScript, and Vite client-only application;
 - adaptive desktop sidebar and mobile bottom-tab navigation;
-- Chat, NomadNet, Tools, and Settings views with Reticulum logs, Path management, Remote provisioning, live status, and raw destination probing available from the Tools directory;
+- Chat, NomadNet, Tools, and Settings views with Reticulum logs, Path management, Remote provisioning, local serial/BLE RNode configuration, live status, and raw destination probing available from the Tools directory;
 - a bundled typed English localization catalog used by all GUI components;
 - IndexedDB-backed application preferences, NomadNet directories, and persistent heterogeneous interface definitions;
 - a capability-filtered interface registry with editable WebSocket, RNode LoRa (BLE/Web Serial), native TCP, and native UDP configurations, including per-interface IFAC network-name, passphrase, and optional size controls with media-appropriate Leviculum defaults;
 - one shared RNode KISS implementation with firmware/radio negotiation, flow control, MTU enforcement, heartbeat, and platform byte-stream adapters;
+- a capability-gated local RNode configuration tool that reuses authorized/configured Web Serial or BLE devices across browser, Capacitor, and Electron transports, temporarily claims live interfaces, exposes the standard RNode KISS node configuration (device, radio/boot mode, Bluetooth, Wi-Fi, display, and EEPROM), optionally consumes microReticulum-compatible local schema provisioning, and restores the interface on exit;
 - Capacitor BLE, TCP, and UDP adapters for iOS/Android plus a minimal sandboxed Electron shell with native BLE, Web Serial, `node:net`, and `node:dgram` main/preload bridges;
 - the bundled Leviculum/LXMF WASM running in a dedicated module worker;
 - first-run Reticulum identity generation plus AES-GCM-encrypted private-key and runtime-snapshot persistence;
