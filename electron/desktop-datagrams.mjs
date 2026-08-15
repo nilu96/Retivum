@@ -7,6 +7,25 @@ const EVENT_CHANNEL = 'retivum:udp:event';
 
 export function registerDesktopDatagrams(ipcMain, isTrustedSender) {
   const sockets = new Map();
+  let resourceOwner;
+
+  const ownerDestroyed = () => {
+    const ownerId = resourceOwner?.id;
+    resourceOwner = undefined;
+    for (const [id, entry] of sockets) {
+      if (entry.ownerId === ownerId) close(id);
+    }
+  };
+
+  function rememberOwner(owner) {
+    if (resourceOwner === owner) return;
+    if (resourceOwner && !resourceOwner.isDestroyed()) {
+      resourceOwner.removeListener('destroyed', ownerDestroyed);
+    }
+    for (const id of Array.from(sockets.keys())) close(id);
+    resourceOwner = owner;
+    resourceOwner.once('destroyed', ownerDestroyed);
+  }
 
   function assertTrusted(event) {
     if (!isTrustedSender(event.senderFrame)) throw new Error('UNTRUSTED_IPC_SENDER');
@@ -16,7 +35,6 @@ export function registerDesktopDatagrams(ipcMain, isTrustedSender) {
     const entry = sockets.get(id);
     sockets.delete(id);
     if (!entry) return;
-    if (entry.owner && !entry.owner.isDestroyed()) entry.owner.removeListener('destroyed', entry.ownerDestroyed);
     try { entry.socket.close(); } catch { /* already closed */ }
   }
 
@@ -24,16 +42,13 @@ export function registerDesktopDatagrams(ipcMain, isTrustedSender) {
     assertTrusted(event);
     const endpoint = validateEndpoint(options);
     close(endpoint.id);
+    rememberOwner(event.sender);
     await new Promise((resolve, reject) => {
       const type = endpoint.listenHost.includes(':') || endpoint.forwardHost.includes(':') ? 'udp6' : 'udp4';
       const socket = dgram.createSocket({ type, reuseAddr: true });
       const owner = event.sender;
       let opened = false;
-      const ownerDestroyed = () => {
-        if (sockets.get(endpoint.id)?.socket === socket) close(endpoint.id);
-      };
-      sockets.set(endpoint.id, { socket, owner, ownerId: owner.id, ownerDestroyed, endpoint });
-      owner.once('destroyed', ownerDestroyed);
+      sockets.set(endpoint.id, { socket, ownerId: owner.id, endpoint });
       socket.on('message', (message) => {
         if (!owner.isDestroyed()) owner.send(EVENT_CHANNEL, {
           id: endpoint.id,
@@ -92,6 +107,10 @@ export function registerDesktopDatagrams(ipcMain, isTrustedSender) {
     ipcMain.removeHandler(OPEN_CHANNEL);
     ipcMain.removeHandler(SEND_CHANNEL);
     ipcMain.removeHandler(CLOSE_CHANNEL);
+    if (resourceOwner && !resourceOwner.isDestroyed()) {
+      resourceOwner.removeListener('destroyed', ownerDestroyed);
+    }
+    resourceOwner = undefined;
     for (const id of Array.from(sockets.keys())) close(id);
   };
 }

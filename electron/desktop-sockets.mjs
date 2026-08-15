@@ -11,6 +11,25 @@ const EVENT_CHANNEL = 'retivum:tcp:event';
  */
 export function registerDesktopSockets(ipcMain, isTrustedSender) {
   const sockets = new Map();
+  let resourceOwner;
+
+  const ownerDestroyed = () => {
+    const ownerId = resourceOwner?.id;
+    resourceOwner = undefined;
+    for (const [id, entry] of sockets) {
+      if (entry.ownerId === ownerId) close(id);
+    }
+  };
+
+  function rememberOwner(owner) {
+    if (resourceOwner === owner) return;
+    if (resourceOwner && !resourceOwner.isDestroyed()) {
+      resourceOwner.removeListener('destroyed', ownerDestroyed);
+    }
+    for (const id of Array.from(sockets.keys())) close(id);
+    resourceOwner = owner;
+    resourceOwner.once('destroyed', ownerDestroyed);
+  }
 
   function assertTrusted(event) {
     if (!isTrustedSender(event.senderFrame)) throw new Error('UNTRUSTED_IPC_SENDER');
@@ -19,7 +38,6 @@ export function registerDesktopSockets(ipcMain, isTrustedSender) {
   function close(id) {
     const entry = sockets.get(id);
     sockets.delete(id);
-    if (entry?.owner && !entry.owner.isDestroyed()) entry.owner.removeListener('destroyed', entry.ownerDestroyed);
     entry?.socket.destroy();
   }
 
@@ -27,15 +45,12 @@ export function registerDesktopSockets(ipcMain, isTrustedSender) {
     assertTrusted(event);
     const { id, host, port } = validateEndpoint(options);
     close(id);
+    rememberOwner(event.sender);
     await new Promise((resolve, reject) => {
       const socket = net.createConnection({ host, port });
       const owner = event.sender;
-      const ownerDestroyed = () => {
-        if (sockets.get(id)?.socket === socket) close(id);
-      };
-      const entry = { socket, owner, ownerId: owner.id, ownerDestroyed };
+      const entry = { socket, ownerId: owner.id };
       sockets.set(id, entry);
-      owner.once('destroyed', ownerDestroyed);
       socket.setNoDelay(true);
       socket.once('connect', resolve);
       socket.once('error', (error) => {
@@ -77,7 +92,11 @@ export function registerDesktopSockets(ipcMain, isTrustedSender) {
     ipcMain.removeHandler(OPEN_CHANNEL);
     ipcMain.removeHandler(WRITE_CHANNEL);
     ipcMain.removeHandler(CLOSE_CHANNEL);
-    for (const id of sockets.keys()) close(id);
+    if (resourceOwner && !resourceOwner.isDestroyed()) {
+      resourceOwner.removeListener('destroyed', ownerDestroyed);
+    }
+    resourceOwner = undefined;
+    for (const id of Array.from(sockets.keys())) close(id);
   };
 }
 
