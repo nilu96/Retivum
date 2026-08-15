@@ -384,8 +384,17 @@ export async function createNobleBackend(platform = process.platform, dependenci
         peripheral = await resolveAndConnect(deviceId, true);
         disconnected = () => {
           const entry = connections.get(id);
-          if (!entry || entry.peripheral !== peripheral || entry.closing) return;
+          if (!entry
+            || entry.peripheral !== peripheral
+            || entry.disconnected !== disconnected
+            || entry.closing) return;
           connections.delete(id);
+          // Noble can reuse a Peripheral wrapper after reconnecting. Remove
+          // every listener owned by this generation before notifying the
+          // renderer so a later disconnect cannot be handled by the obsolete
+          // session and close its replacement.
+          peripheral.removeListener('disconnect', disconnected);
+          entry.notify.removeListener('data', entry.listener);
           forgetPeripheral(peripheral, deviceId);
           hooks.onClosed();
         };

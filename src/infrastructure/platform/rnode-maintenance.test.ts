@@ -110,6 +110,7 @@ class FakeBleConnection implements ByteConnection {
 }
 
 afterEach(() => {
+  window.retivumDesktopBluetooth = undefined;
   vi.unstubAllGlobals();
 });
 
@@ -159,6 +160,25 @@ describe('RNode maintenance serial directory', () => {
       connectionConfig: {
         connection: { type: 'ble', deviceId: 'ble-device-1', deviceName: 'RNode BLE' },
       },
+    });
+  });
+
+  it('does not query Chromium Bluetooth while Electron owns the BLE device', async () => {
+    const config = createRNodeInterfaceDraft('ble', 'electron-ble-interface');
+    config.name = 'Electron RNode';
+    config.connection = { type: 'ble', deviceId: 'native-device-1', deviceName: 'RNode BLE' };
+    const getDevices = vi.fn().mockResolvedValue([]);
+    vi.stubGlobal('navigator', { bluetooth: { getDevices } });
+    window.retivumDesktopBluetooth = {} as RetivumDesktopBluetoothBridge;
+
+    const devices = await listAuthorizedRNodes([config]);
+
+    expect(getDevices).not.toHaveBeenCalled();
+    expect(devices).toHaveLength(1);
+    expect(devices[0]).toMatchObject({
+      id: 'ble-native-device-1',
+      label: 'Electron RNode',
+      configuredInterface: config,
     });
   });
 });

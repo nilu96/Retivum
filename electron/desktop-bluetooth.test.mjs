@@ -386,4 +386,44 @@ describe('native Noble RNode backend', () => {
       await backend.dispose();
     }
   });
+
+  it('removes stale generation listeners before reconnecting the same macOS peripheral', async () => {
+    const transport = fakeTransport();
+    transport.noble.startScanningAsync.mockImplementation(async () => {
+      queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+    });
+    const backend = await createNobleBackend('darwin', { noble: transport.noble });
+    try {
+      const firstClosed = vi.fn();
+      const secondClosed = vi.fn();
+      await backend.open('rnode-one', transport.peripheral.id, {
+        onData: vi.fn(),
+        onClosed: firstClosed,
+      });
+      expect(transport.peripheral.listenerCount('disconnect')).toBe(1);
+      expect(transport.notify.listenerCount('data')).toBe(1);
+
+      transport.peripheral.state = 'disconnected';
+      transport.peripheral.emit('disconnect');
+      expect(firstClosed).toHaveBeenCalledOnce();
+      expect(transport.peripheral.listenerCount('disconnect')).toBe(0);
+      expect(transport.notify.listenerCount('data')).toBe(0);
+
+      await backend.open('rnode-one', transport.peripheral.id, {
+        onData: vi.fn(),
+        onClosed: secondClosed,
+      });
+      expect(transport.peripheral.listenerCount('disconnect')).toBe(1);
+      expect(transport.notify.listenerCount('data')).toBe(1);
+
+      transport.peripheral.state = 'disconnected';
+      transport.peripheral.emit('disconnect');
+      expect(firstClosed).toHaveBeenCalledOnce();
+      expect(secondClosed).toHaveBeenCalledOnce();
+      expect(transport.peripheral.listenerCount('disconnect')).toBe(0);
+      expect(transport.notify.listenerCount('data')).toBe(0);
+    } finally {
+      await backend.dispose();
+    }
+  });
 });

@@ -236,11 +236,18 @@ export async function listAuthorizedBleRNodes(
     const { deviceId, deviceName } = configuredInterface.connection;
     devices.set(deviceId, bleMaintenanceDevice(deviceId, deviceName, configuredInterface));
   }
-  const authorized = await navigator.bluetooth?.getDevices?.() ?? [];
-  for (const device of authorized) {
-    rememberBluetoothDevice(device);
-    const configuredInterface = matchingBleInterface(device.id, interfaces);
-    devices.set(device.id, bleMaintenanceDevice(device.id, device.name, configuredInterface));
+  // Electron owns BLE through the native Noble bridge. Calling Chromium's
+  // getDevices() from the one-second maintenance refresh would make a second
+  // CoreBluetooth client repeatedly resolve the same saved peripheral and can
+  // invalidate an otherwise healthy native session. Browser-authorized device
+  // handles are relevant only when no desktop bridge is present.
+  if (!window.retivumDesktopBluetooth) {
+    const authorized = await navigator.bluetooth?.getDevices?.() ?? [];
+    for (const device of authorized) {
+      rememberBluetoothDevice(device);
+      const configuredInterface = matchingBleInterface(device.id, interfaces);
+      devices.set(device.id, bleMaintenanceDevice(device.id, device.name, configuredInterface));
+    }
   }
   return Array.from(devices.values());
 }
