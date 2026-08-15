@@ -76,6 +76,36 @@ describe('Electron native Bluetooth bridge', () => {
     await context.dispose();
   });
 
+  it('ends the pairing attempt when the PIN dialog is cancelled', async () => {
+    const context = harness();
+    context.requestPairing.mockResolvedValue({ confirmed: false });
+
+    await expect(context.handlers.get('retivum:ble:pair')(
+      context.event,
+      { deviceId: 'aabbccddeeff' },
+    )).rejects.toThrow('RNODE_BLE_PAIRING_FAILED');
+
+    expect(context.requestPairing).toHaveBeenCalledTimes(1);
+    expect(context.backend.pair).toHaveBeenCalledTimes(1);
+    await context.dispose();
+  });
+
+  it.each([
+    'Authentication failed',
+    'The displayed passkey did not match',
+  ])('reports a rejected PIN as a completed pairing failure', async (message) => {
+    const context = harness();
+    context.backend.pair.mockRejectedValueOnce(new Error(message));
+
+    await expect(context.handlers.get('retivum:ble:pair')(
+      context.event,
+      { deviceId: 'aabbccddeeff' },
+    )).rejects.toThrow('RNODE_BLE_PAIRING_FAILED');
+
+    expect(context.backend.pair).toHaveBeenCalledTimes(1);
+    await context.dispose();
+  });
+
   it('owns connections by renderer and forwards bounded data in both directions', async () => {
     const context = harness();
     const open = context.handlers.get('retivum:ble:open');
@@ -207,6 +237,21 @@ describe('native Noble RNode backend', () => {
     expect(transport.peripheral.disconnectAsync).toHaveBeenCalled();
     expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(2);
     expect(transport.notify.subscribeAsync).toHaveBeenCalled();
+    await backend.dispose();
+  }, 10_000);
+
+  it('does not retry native service authorization after pairing is rejected', async () => {
+    const transport = fakeTransport();
+    transport.notify.subscribeAsync.mockRejectedValue(new Error('Encryption is insufficient'));
+    const backend = await createNobleBackend('darwin', { noble: transport.noble });
+    await backend.startScan(() => undefined);
+    transport.noble.emit('discover', transport.peripheral);
+
+    await expect(backend.pair(transport.peripheral.id, vi.fn()))
+      .rejects.toThrow('Encryption is insufficient');
+
+    expect(transport.notify.subscribeAsync).toHaveBeenCalledTimes(1);
+    expect(transport.peripheral.connectAsync).toHaveBeenCalledTimes(1);
     await backend.dispose();
   }, 10_000);
 
@@ -351,6 +396,42 @@ describe('native Noble RNode backend', () => {
     transport.peripheral.emit('disconnect');
     expect(onClosed).toHaveBeenCalledTimes(1);
     await backend.dispose();
+  });
+
+  it('cancels a pending protected service open without starting another attempt', async () => {
+    vi.useFakeTimers();
+    try {
+      const transport = fakeTransport();
+      let rejectSubscription;
+      transport.notify.subscribeAsync.mockReturnValue(new Promise((_resolve, reject) => {
+        rejectSubscription = reject;
+      }));
+      transport.peripheral.disconnectAsync.mockImplementation(async () => {
+        transport.peripheral.state = 'disconnected';
+        rejectSubscription?.(new Error('Peripheral disconnected'));
+      });
+      transport.noble.startScanningAsync.mockImplementation(async () => {
+        queueMicrotask(() => transport.noble.emit('discover', transport.peripheral));
+      });
+      const backend = await createNobleBackend('darwin', { noble: transport.noble });
+
+      const opening = backend.open('rnode-one', transport.peripheral.id, {
+        onData: vi.fn(),
+        onClosed: vi.fn(),
+      });
+      await vi.advanceTimersByTimeAsync(750);
+      expect(transport.notify.subscribeAsync).toHaveBeenCalledTimes(1);
+
+      await backend.close('rnode-one');
+      await expect(opening).rejects.toThrow('Peripheral disconnected');
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(transport.notify.subscribeAsync).toHaveBeenCalledTimes(1);
+      expect(transport.peripheral.disconnectAsync).toHaveBeenCalled();
+      await backend.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rediscovers a macOS RNode when the saved native peripheral becomes stale', async () => {

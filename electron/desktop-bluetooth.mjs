@@ -71,15 +71,19 @@ export function registerDesktopBluetooth(
   ipcMain.handle(PAIR_CHANNEL, async (event, options) => {
     assertTrusted(event);
     const deviceId = validDeviceId(options?.deviceId);
-    const persistentDeviceId = await (await getBackend()).pair(deviceId, async () => {
-      const response = await requestPairing({
-        deviceId,
-        pairingKind: 'providePin',
+    try {
+      const persistentDeviceId = await (await getBackend()).pair(deviceId, async () => {
+        const response = await requestPairing({
+          deviceId,
+          pairingKind: 'providePin',
+        });
+        if (!response.confirmed || !validPin(response.pin)) throw new Error('RNODE_BLE_PAIRING_CANCELLED');
+        return response.pin;
       });
-      if (!response.confirmed || !validPin(response.pin)) throw new Error('RNODE_BLE_PAIRING_CANCELLED');
-      return response.pin;
-    });
-    return { deviceId: validDeviceId(persistentDeviceId ?? deviceId) };
+      return { deviceId: validDeviceId(persistentDeviceId ?? deviceId) };
+    } catch (error) {
+      throw stablePairingError(error);
+    }
   });
 
   ipcMain.handle(OPEN_CHANNEL, async (event, options) => {
@@ -154,6 +158,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
   const linuxPair = dependencies.pairLinuxBluetoothDevice ?? pairLinuxBluetoothDevice;
   const discovered = new Map();
   const connections = new Map();
+  const openings = new Map();
   let scanListener;
   let nativeScanActive = false;
   const adapterStateListener = (state) => {
@@ -350,6 +355,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
           lastError = error;
           const current = discovered.get(deviceId);
           if (current?.state === 'connected') await current.disconnectAsync().catch(() => undefined);
+          if (isTerminalPairingError(error)) break;
           if (attempt < PAIRING_RECONNECT_ATTEMPTS) await sleep(PAIRING_RECONNECT_DELAY_MS);
         }
       }
@@ -370,59 +376,75 @@ export async function createNobleBackend(platform = process.platform, dependenci
 
   async function open(id, deviceId, hooks) {
     await close(id);
+    const opening = { deviceId, peripheral: undefined, cancelled: false };
+    openings.set(id, opening);
     const durableWindowsDevice = platform === 'win32' && windowsDeviceAddress(deviceId) !== undefined;
     const attempts = durableWindowsDevice ? WINDOWS_OPEN_ATTEMPTS : OTHER_OPEN_ATTEMPTS;
     let lastError;
     if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_START');
-    for (let attempt = 1; attempt <= attempts; attempt += 1) {
-      let peripheral;
-      let disconnected;
-      try {
-        // Always obtain a current Noble Peripheral before opening GATT. Noble
-        // can discard its internal peripheral while our durable device ID and
-        // cached wrapper survive an adapter reset or unexpected disconnect.
-        peripheral = await resolveAndConnect(deviceId, true);
-        disconnected = () => {
-          const entry = connections.get(id);
-          if (!entry
-            || entry.peripheral !== peripheral
-            || entry.disconnected !== disconnected
-            || entry.closing) return;
-          connections.delete(id);
-          // Noble can reuse a Peripheral wrapper after reconnecting. Remove
-          // every listener owned by this generation before notifying the
-          // renderer so a later disconnect cannot be handled by the obsolete
-          // session and close its replacement.
-          peripheral.removeListener('disconnect', disconnected);
-          entry.notify.removeListener('data', entry.listener);
-          forgetPeripheral(peripheral, deviceId);
-          hooks.onClosed();
-        };
-        peripheral.on('disconnect', disconnected);
-        if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_STAGE', { stage: 'discover-nus' });
-        const nus = await discoverNus(peripheral, hooks.onData);
-        connections.set(id, { peripheral, disconnected, ...nus, closing: false });
-        if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_READY', { attempt });
-        return;
-      } catch (error) {
-        lastError = error;
-        if (peripheral && disconnected) peripheral.removeListener('disconnect', disconnected);
-        if (peripheral?.state === 'connected' || peripheral?.state === 'disconnecting' || peripheral?.state === 'connecting') {
-          await disconnectPeripheral(peripheral);
-        } else {
-          try { noble.cancelConnect?.(windowsDeviceAddress(deviceId) ?? deviceId); } catch { /* no pending native connection */ }
+    try {
+      for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        if (opening.cancelled) throw new Error('RNODE_BLE_CONNECTION_CANCELLED');
+        let peripheral;
+        let disconnected;
+        try {
+          // Always obtain a current Noble Peripheral before opening GATT. Noble
+          // can discard its internal peripheral while our durable device ID and
+          // cached wrapper survive an adapter reset or unexpected disconnect.
+          peripheral = await resolveAndConnect(deviceId, true);
+          opening.peripheral = peripheral;
+          if (opening.cancelled) throw new Error('RNODE_BLE_CONNECTION_CANCELLED');
+          disconnected = () => {
+            const entry = connections.get(id);
+            if (!entry
+              || entry.peripheral !== peripheral
+              || entry.disconnected !== disconnected
+              || entry.closing) return;
+            connections.delete(id);
+            // Noble can reuse a Peripheral wrapper after reconnecting. Remove
+            // every listener owned by this generation before notifying the
+            // renderer so a later disconnect cannot be handled by the obsolete
+            // session and close its replacement.
+            peripheral.removeListener('disconnect', disconnected);
+            entry.notify.removeListener('data', entry.listener);
+            forgetPeripheral(peripheral, deviceId);
+            hooks.onClosed();
+          };
+          peripheral.on('disconnect', disconnected);
+          if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_STAGE', { stage: 'discover-nus' });
+          const nus = await discoverNus(peripheral, hooks.onData);
+          if (opening.cancelled) {
+            nus.notify.removeListener('data', nus.listener);
+            await nus.notify.unsubscribeAsync().catch(() => undefined);
+            throw new Error('RNODE_BLE_CONNECTION_CANCELLED');
+          }
+          connections.set(id, { peripheral, disconnected, ...nus, closing: false });
+          if (durableWindowsDevice) console.info('RETIVUM_BLE_RECONNECT_READY', { attempt });
+          return;
+        } catch (error) {
+          lastError = error;
+          if (peripheral && disconnected) peripheral.removeListener('disconnect', disconnected);
+          if (peripheral?.state === 'connected' || peripheral?.state === 'disconnecting' || peripheral?.state === 'connecting') {
+            await disconnectPeripheral(peripheral);
+          } else {
+            try { noble.cancelConnect?.(windowsDeviceAddress(deviceId) ?? deviceId); } catch { /* no pending native connection */ }
+          }
+          if (peripheral) forgetPeripheral(peripheral, deviceId);
+          else discovered.delete(deviceId);
+          if (opening.cancelled || attempt >= attempts) break;
+          if (durableWindowsDevice) console.warn('RETIVUM_BLE_RECONNECT_RETRY', {
+            attempt,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          await sleep(PAIRING_RECONNECT_DELAY_MS);
+        } finally {
+          opening.peripheral = undefined;
         }
-        if (peripheral) forgetPeripheral(peripheral, deviceId);
-        else discovered.delete(deviceId);
-        if (attempt >= attempts) break;
-        if (durableWindowsDevice) console.warn('RETIVUM_BLE_RECONNECT_RETRY', {
-          attempt,
-          message: error instanceof Error ? error.message : String(error),
-        });
-        await sleep(PAIRING_RECONNECT_DELAY_MS);
       }
+      throw lastError instanceof Error ? lastError : new Error('RNODE_BLE_CONNECTION_FAILED');
+    } finally {
+      if (openings.get(id) === opening) openings.delete(id);
     }
-    throw lastError instanceof Error ? lastError : new Error('RNODE_BLE_CONNECTION_FAILED');
   }
 
   async function write(id, data) {
@@ -435,6 +457,16 @@ export async function createNobleBackend(platform = process.platform, dependenci
   }
 
   async function close(id) {
+    const opening = openings.get(id);
+    if (opening) {
+      opening.cancelled = true;
+      openings.delete(id);
+      const peripheral = opening.peripheral ?? findPeripheral(opening.deviceId);
+      if (peripheral) await disconnectPeripheral(peripheral);
+      else {
+        try { noble.cancelConnect?.(windowsDeviceAddress(opening.deviceId) ?? opening.deviceId); } catch { /* no pending native connection */ }
+      }
+    }
     const entry = connections.get(id);
     if (!entry) return;
     connections.delete(id);
@@ -448,6 +480,7 @@ export async function createNobleBackend(platform = process.platform, dependenci
 
   async function dispose() {
     await stopScan();
+    for (const id of Array.from(openings.keys())) await close(id);
     noble.removeListener('stateChange', adapterStateListener);
     discovered.clear();
     noble.stop();
@@ -517,6 +550,16 @@ function stableBluetoothError(error) {
   if (/auth|encrypt|pair|permission|denied/i.test(message)) return new Error('RNODE_BLE_PAIRING_REQUIRED');
   if (/NUS|UART service|characteristic/i.test(message)) return new Error('RNODE_BLE_NUS_UNAVAILABLE');
   return new Error('RNODE_BLE_CONNECTION_FAILED');
+}
+
+function stablePairingError(error) {
+  if (isTerminalPairingError(error)) return new Error('RNODE_BLE_PAIRING_FAILED');
+  return stableBluetoothError(error);
+}
+
+function isTerminalPairingError(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /RNODE_BLE_PAIRING_CANCELLED|cancel(?:led|ed)|(?:wrong|incorrect)\s*(?:pin|passkey)|(?:pin|passkey).*(?:did not match|mismatch|failed|rejected)|auth(?:entication)?.*(?:failed|rejected|cancel)|(?:pairing|bonding) failed|encryption is insufficient|insufficient (?:authentication|encryption)|pin or key missing|permission denied/i.test(message);
 }
 
 function sleep(milliseconds) {

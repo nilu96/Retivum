@@ -47,4 +47,21 @@ describe('DesktopBluetoothPairing', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
     expect(onrespond).toHaveBeenCalledWith(true, undefined);
   });
+
+  it('ends the current pairing request when the user cancels', async () => {
+    const onrespond = vi.fn();
+    render(DesktopBluetoothPairing, {
+      request: {
+        requestId: 'pair-cancelled',
+        deviceId: 'native-rnode',
+        pairingKind: 'providePin',
+      },
+      onrespond,
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(onrespond).toHaveBeenCalledOnce();
+    expect(onrespond).toHaveBeenCalledWith(false);
+  });
 });

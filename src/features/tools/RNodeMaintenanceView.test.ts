@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/provisioning';
 import { createRNodeInterfaceDraft } from '../../domain/settings';
 import { LocalProvisioningClient, RNodeMaintenanceSession } from '../../infrastructure/platform/rnode-maintenance';
+import { answerDesktopBluetoothSelection } from '../../infrastructure/platform/desktop-bluetooth-selection';
 import { interfaceConfigurations, interfaceStatuses, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
 import { clearToasts, toasts } from '../../lib/notifications/toasts';
 import RNodeMaintenanceView from './RNodeMaintenanceView.svelte';
@@ -34,6 +35,7 @@ describe('RNodeMaintenanceView', () => {
     clearToasts();
     delete (navigator as Navigator & { serial?: Serial }).serial;
     delete (navigator as Navigator & { bluetooth?: Bluetooth }).bluetooth;
+    window.retivumDesktopBluetooth = undefined;
     interfaceConfigurations.set([]);
     interfaceStatuses.set({});
     vi.restoreAllMocks();
@@ -179,6 +181,42 @@ describe('RNodeMaintenanceView', () => {
     expect(screen.getByText('New BLE RNode')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     await vi.waitFor(() => expect(screen.queryByText('New BLE RNode')).not.toBeInTheDocument());
+  });
+
+  it('reports a failed native Bluetooth pairing and allows the device picker to be opened again', async () => {
+    let listener: ((event: DesktopBluetoothEvent) => void) | undefined;
+    const startScan = vi.fn().mockResolvedValue(undefined);
+    window.retivumDesktopBluetooth = {
+      startScan,
+      stopScan: vi.fn().mockResolvedValue(undefined),
+      pair: vi.fn().mockRejectedValue(new Error('RNODE_BLE_PAIRING_FAILED')),
+      open: vi.fn(),
+      write: vi.fn(),
+      close: vi.fn(),
+      onEvent: vi.fn((next) => {
+        listener = next;
+        return () => { listener = undefined; };
+      }),
+    };
+    render(RNodeMaintenanceView);
+
+    const chooseBluetooth = await screen.findByRole('button', { name: 'Choose Bluetooth device' });
+    await fireEvent.click(chooseBluetooth);
+    listener?.({
+      type: 'device',
+      device: { id: 'native-rnode', name: 'Pocket RNode' },
+    });
+    await answerDesktopBluetoothSelection('native-rnode');
+
+    await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'error',
+      messageKey: 'rnodeMaintenance.device.pairingError',
+    })));
+    expect(chooseBluetooth).toBeEnabled();
+
+    await fireEvent.click(chooseBluetooth);
+    await vi.waitFor(() => expect(startScan).toHaveBeenCalledTimes(2));
+    await answerDesktopBluetoothSelection();
   });
 
   it('shows a success toast after connecting to a local serial RNode', async () => {

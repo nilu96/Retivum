@@ -15,7 +15,8 @@ interface HostedInterface {
 }
 
 export class PlatformInterfaceHost {
-  private readonly hosts = new Map<string, { host: HostedInterface; config: InterfaceConfig }>();
+  private readonly hosts = new Map<string, { host: HostedInterface; config: InterfaceConfig; generation: number }>();
+  private readonly lifecycleGenerations = new Map<string, number>();
   private readonly maintenanceClaims = new Set<string>();
   private readonly writeQueues = new Map<string, Promise<void>>();
   private openQueue: Promise<void> = Promise.resolve();
@@ -26,13 +27,16 @@ export class PlatformInterfaceHost {
   ) {}
 
   async open(config: InterfaceConfig): Promise<void> {
-    const operation = this.openQueue.then(() => this.openNow(config));
+    const generation = this.advanceLifecycle(config.id);
+    const operation = this.openQueue.then(() => this.openNow(config, generation));
     this.openQueue = operation.catch(() => undefined);
     return operation;
   }
 
-  private async openNow(config: InterfaceConfig): Promise<void> {
+  private async openNow(config: InterfaceConfig, generation: number): Promise<void> {
+    if (!this.isCurrentLifecycle(config.id, generation)) return;
     await this.closeNow(config.id);
+    if (!this.isCurrentLifecycle(config.id, generation)) return;
     if (this.maintenanceClaims.has(config.id)) return;
     if (config.type === 'websocket') return;
     if (!interfaceIsSupported(config)) {
@@ -68,17 +72,32 @@ export class PlatformInterfaceHost {
     } else {
       host = new UdpHost(config, this.post, this.log);
     }
-    this.hosts.set(config.id, { host, config });
+    if (!this.isCurrentLifecycle(config.id, generation)) {
+      await host.close().catch(() => undefined);
+      return;
+    }
+    this.hosts.set(config.id, { host, config, generation });
     await host.open();
+    if (
+      !this.isCurrentLifecycle(config.id, generation)
+      || this.hosts.get(config.id)?.host !== host
+    ) {
+      if (this.hosts.get(config.id)?.host === host) {
+        this.hosts.delete(config.id);
+        await host.close().catch(() => undefined);
+      }
+    }
   }
 
   async write(id: string, data: Uint8Array, highPriority = false): Promise<void> {
-    const host = this.hosts.get(id)?.host;
+    const entry = this.hosts.get(id);
+    const host = entry?.host;
     if (host?.managesWriteQueue) {
       await host.write(data, highPriority);
       return;
     }
     const operation = (this.writeQueues.get(id) ?? Promise.resolve()).then(async () => {
+      if (!entry || this.hosts.get(id) !== entry) return;
       await host?.write(data, highPriority);
     });
     const settled = operation.catch(() => undefined);
@@ -91,13 +110,11 @@ export class PlatformInterfaceHost {
   }
 
   async close(id: string): Promise<void> {
-    const operation = this.openQueue.then(() => this.closeNow(id));
-    this.openQueue = operation.catch(() => undefined);
-    return operation;
+    this.advanceLifecycle(id);
+    await this.closeNow(id);
   }
 
   private async closeNow(id: string): Promise<void> {
-    await this.writeQueues.get(id);
     this.writeQueues.delete(id);
     const entry = this.hosts.get(id);
     this.hosts.delete(id);
@@ -105,7 +122,8 @@ export class PlatformInterfaceHost {
   }
 
   async closeAll(): Promise<void> {
-    for (const id of Array.from(this.hosts.keys())) await this.close(id);
+    const ids = new Set([...this.lifecycleGenerations.keys(), ...this.hosts.keys()]);
+    await Promise.all(Array.from(ids, (id) => this.close(id)));
   }
 
   async resume(): Promise<void> {
@@ -120,6 +138,16 @@ export class PlatformInterfaceHost {
   async releaseFromMaintenance(id: string, config?: InterfaceConfig): Promise<void> {
     this.maintenanceClaims.delete(id);
     if (config?.enabled) await this.open(config);
+  }
+
+  private advanceLifecycle(id: string): number {
+    const generation = (this.lifecycleGenerations.get(id) ?? 0) + 1;
+    this.lifecycleGenerations.set(id, generation);
+    return generation;
+  }
+
+  private isCurrentLifecycle(id: string, generation: number): boolean {
+    return this.lifecycleGenerations.get(id) === generation;
   }
 }
 

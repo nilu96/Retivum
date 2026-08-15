@@ -35,7 +35,11 @@ vi.mock('@devioarts/capacitor-tcpclient', () => ({
   TCPClient: {},
 }));
 
-import { createRNodeByteConnection, isRetryableBleError } from './byte-connections';
+import {
+  authorizeNativeRNodeDevice,
+  createRNodeByteConnection,
+  isRetryableBleError,
+} from './byte-connections';
 
 const config: RNodeInterfaceConfig = {
   id: 'native-rnode',
@@ -155,6 +159,32 @@ describe('native BLE byte connection', () => {
     expect(mocks.disconnect).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
   });
 
+  it('ends an Android authorization attempt when the system bond prompt is rejected', async () => {
+    mocks.createBond.mockRejectedValue(new Error('Creating bond failed.'));
+
+    const authorization = authorizeNativeRNodeDevice('AA:BB:CC:DD:EE:FF');
+
+    await expect(authorization).rejects.toThrow('RNODE_BLE_PAIRING_FAILED');
+    expect(mocks.createBond).toHaveBeenCalledTimes(1);
+    expect(mocks.connect).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new Error('Pairing request was cancelled by the user.'),
+    new Error('Encryption is insufficient.'),
+  ])('does not reopen the iOS PIN prompt after protected access fails', async (error) => {
+    capacitorPlatform.name = 'ios';
+    mocks.startNotifications.mockRejectedValue(error);
+
+    const authorization = authorizeNativeRNodeDevice('AA:BB:CC:DD:EE:FF');
+    const rejected = expect(authorization).rejects.toThrow('RNODE_BLE_PAIRING_FAILED');
+    await vi.advanceTimersByTimeAsync(750);
+
+    await rejected;
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(mocks.startNotifications).toHaveBeenCalledTimes(1);
+  });
+
   it('checks the operating-system connection inventory after a mobile resume', async () => {
     const connection = createRNodeByteConnection(config);
     const opening = connection.open(vi.fn(), vi.fn());
@@ -197,6 +227,24 @@ describe('native BLE byte connection', () => {
       mocks.stopNotifications.mock.invocationCallOrder[0],
     );
     expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it('stops native BLE retries when an interface is closed during protected access', async () => {
+    mocks.isBonded.mockResolvedValue(true);
+    mocks.startNotifications.mockReturnValue(new Promise(() => undefined));
+    const connection = createRNodeByteConnection(config);
+
+    const opening = connection.open(vi.fn(), vi.fn());
+    await vi.advanceTimersByTimeAsync(750);
+    expect(mocks.startNotifications).toHaveBeenCalledTimes(1);
+
+    await connection.close();
+    await expect(opening).rejects.toThrow('disconnected while establishing');
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(mocks.connect).toHaveBeenCalledTimes(1);
+    expect(mocks.startNotifications).toHaveBeenCalledTimes(1);
+    expect(mocks.disconnect).toHaveBeenCalledWith('AA:BB:CC:DD:EE:FF');
   });
 
   it('gives the RNode time to process final shutdown frames before native BLE disconnect', async () => {

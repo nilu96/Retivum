@@ -40,7 +40,10 @@ const transport = vi.hoisted(() => {
           }
           transport.events.push(`write:${number}:end`);
         },
-        async close() { transport.events.push(`close:${number}`); },
+        async close() {
+          transport.events.push(`close:${number}`);
+          if (number === 1) releaseFirstOpen?.();
+        },
       };
     },
   };
@@ -88,7 +91,7 @@ describe('platform interface lifecycle', () => {
     datagram.reset();
   });
 
-  it('serializes a retry close and open behind an in-flight native connection', async () => {
+  it('interrupts an in-flight native connection before opening its replacement', async () => {
     const config = createTcpInterfaceDraft('tcp-ios');
     const host = new PlatformInterfaceHost(() => undefined, () => undefined);
 
@@ -96,20 +99,36 @@ describe('platform interface lifecycle', () => {
     await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
 
     const close = host.close(config.id);
-    const retryOpen = host.open(config);
-    await Promise.resolve();
-    expect(transport.events).toEqual(['open:1:start']);
+    await close;
+    expect(transport.events).toEqual(['open:1:start', 'close:1', 'open:1:end']);
 
-    transport.releaseFirst();
+    const retryOpen = host.open(config);
     await Promise.all([firstOpen, close, retryOpen]);
 
     expect(transport.events).toEqual([
       'open:1:start',
-      'open:1:end',
       'close:1',
+      'open:1:end',
       'open:2:start',
       'open:2:end',
     ]);
+  });
+
+  it('cancels a queued open when an interface is disabled before it starts', async () => {
+    const first = createTcpInterfaceDraft('tcp-one');
+    const disabledBeforeOpen = createTcpInterfaceDraft('tcp-two');
+    const host = new PlatformInterfaceHost(() => undefined, () => undefined);
+
+    const firstOpen = host.open(first);
+    await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
+    const obsoleteOpen = host.open(disabledBeforeOpen);
+    await host.close(disabledBeforeOpen.id);
+
+    transport.releaseFirst();
+    await Promise.all([firstOpen, obsoleteOpen]);
+
+    expect(transport.connectionCount).toBe(1);
+    expect(transport.events).not.toContain('open:2:start');
   });
 
   it('passes UDP datagrams without TCP HDLC framing', async () => {

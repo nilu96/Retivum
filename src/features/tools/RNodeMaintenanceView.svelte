@@ -199,9 +199,11 @@
       await connect(device);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'NotFoundError') return;
-      if (error instanceof Error && ['RNODE_BLE_SELECTION_CANCELLED', 'RNODE_BLE_PAIRING_CANCELLED'].some((code) => error.message.includes(code))) return;
+      if (error instanceof Error && error.message.includes('RNODE_BLE_SELECTION_CANCELLED')) return;
       appendLog('error', 'RNODE_MAINTENANCE_SELECTION_FAILED', { transport, message: errorMessage(error) });
-      toast.error('rnodeMaintenance.device.selectionError');
+      toast.error(error instanceof Error && error.message.includes('RNODE_BLE_PAIRING_FAILED')
+        ? 'rnodeMaintenance.device.pairingError'
+        : 'rnodeMaintenance.device.selectionError');
     }
   }
 

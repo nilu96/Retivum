@@ -235,8 +235,10 @@ class NativeBluetoothByteConnection implements ByteConnection {
     try {
       await prepareNativeBluetoothDevice(deviceId);
       await this.ensureAndroidBond(deviceId);
+      if (this.closing) throw new Error('RNODE_BLE_CONNECTION_CANCELLED');
       let lastError: unknown;
       for (let attempt = 1; attempt <= BLE_CONNECT_ATTEMPTS; attempt += 1) {
+        if (this.closing) throw new Error('RNODE_BLE_CONNECTION_CANCELLED');
         try {
           this.securedAccessStarted = false;
           const disconnected = new Promise<false>((resolve) => {
@@ -262,8 +264,12 @@ class NativeBluetoothByteConnection implements ByteConnection {
           this.log('RNODE_BLE_GATT_READY', { interfaceId: this.config.id, attempt, transport: Capacitor.getPlatform() });
           return;
         } catch (error) {
-          lastError = error;
-          const retry = attempt < BLE_CONNECT_ATTEMPTS && isRetryableBleError(error);
+          const pairingFailed = this.acceptPairingDisconnect && this.securedAccessStarted;
+          lastError = pairingFailed ? new Error('RNODE_BLE_PAIRING_FAILED') : error;
+          const retry = !pairingFailed
+            && !this.closing
+            && attempt < BLE_CONNECT_ATTEMPTS
+            && isRetryableBleError(error);
           this.log('RNODE_BLE_GATT_INTERRUPTED', {
             interfaceId: this.config.id,
             attempt,
@@ -314,6 +320,7 @@ class NativeBluetoothByteConnection implements ByteConnection {
 
   async close(finalData?: Uint8Array): Promise<void> {
     this.closing = true;
+    this.resolveOpeningDisconnect?.();
     this.opening = false;
     const deviceId = this.config.connection.deviceId;
     if (!deviceId) return;
@@ -328,7 +335,11 @@ class NativeBluetoothByteConnection implements ByteConnection {
   private async ensureAndroidBond(deviceId: string): Promise<void> {
     if (Capacitor.getPlatform() !== 'android') return;
     if (await BleClient.isBonded(deviceId)) return;
-    await BleClient.createBond(deviceId, { timeout: BLE_PAIRING_TIMEOUT_MS });
+    try {
+      await BleClient.createBond(deviceId, { timeout: BLE_PAIRING_TIMEOUT_MS });
+    } catch {
+      throw new Error('RNODE_BLE_PAIRING_FAILED');
+    }
     await sleep(BLE_POST_PAIRING_GRACE_MS);
   }
 
@@ -437,6 +448,7 @@ class BluetoothByteConnection implements ByteConnection {
     try {
       let lastError: unknown;
       for (let attempt = 1; attempt <= BLE_CONNECT_ATTEMPTS; attempt += 1) {
+        if (this.closing) throw new Error('RNODE_BLE_CONNECTION_CANCELLED');
         try {
           await this.openGatt(onData);
           this.opening = false;
@@ -444,7 +456,9 @@ class BluetoothByteConnection implements ByteConnection {
           return;
         } catch (error) {
           lastError = error;
-          const retry = attempt < BLE_CONNECT_ATTEMPTS && isRetryableBleError(error);
+          const retry = !this.closing
+            && attempt < BLE_CONNECT_ATTEMPTS
+            && isRetryableBleError(error);
           this.log('RNODE_BLE_GATT_INTERRUPTED', {
             interfaceId: this.config.id,
             attempt,
