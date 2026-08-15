@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { reticulumLogs } from '../../infrastructure/reticulum/runtime';
 import ReticulumLogsView from './ReticulumLogsView.svelte';
 
@@ -47,6 +47,18 @@ describe('ReticulumLogsView', () => {
 
     expect(document.documentElement.scrollTop).toBe(0);
     expect(document.body.scrollTop).toBe(0);
+  });
+
+  it('offers to scroll the logs page back to the top', async () => {
+    const main = document.createElement('main');
+    Object.defineProperty(main, 'scrollTo', { configurable: true, value: vi.fn() });
+    document.body.append(main);
+    render(ReticulumLogsView, { target: main });
+
+    main.scrollTop = 120;
+    await fireEvent.scroll(main);
+    expect(await screen.findByRole('button', { name: 'Scroll to top' })).toHaveClass('page-scroll-top');
+    main.remove();
   });
 
   it('returns to the tools directory', async () => {

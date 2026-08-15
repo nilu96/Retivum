@@ -6,6 +6,7 @@
   import { t, type MessageKey } from '../../i18n';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import PageScrollToTop from '../../lib/components/PageScrollToTop.svelte';
 
   let page: HTMLDivElement;
   let expandedInterfaceIds = $state<Set<string>>(new Set());
@@ -211,4 +212,5 @@
   {:else}
     <EmptyState icon="interface" title={$t('status.loading.title')} body={$t('status.loading.body')} />
   {/if}
+  <PageScrollToTop />
 </div>

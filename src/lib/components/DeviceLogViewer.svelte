@@ -3,6 +3,7 @@
   import { t, type MessageKey } from '../../i18n';
   import EmptyState from './EmptyState.svelte';
   import Icon from './Icon.svelte';
+  import PageScrollToTop from './PageScrollToTop.svelte';
 
   type LogThreshold = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
   interface DeviceLogLine {
@@ -16,7 +17,6 @@
   let viewer: HTMLElement;
   let list = $state<HTMLOListElement>();
   let scrollContainer: HTMLElement | undefined;
-  let scrollToTopVisible = $state(false);
   let mounted = false;
   let previousLatestLineId: number | undefined;
   let preservationSequence = 0;
@@ -51,17 +51,9 @@
   onMount(() => {
     mounted = true;
     scrollContainer = viewer.closest<HTMLElement>('main') ?? undefined;
-    const updateScrollState = (): void => {
-      scrollToTopVisible = currentPageScrollTop() > 0;
-    };
-    scrollContainer?.addEventListener('scroll', updateScrollState, { passive: true });
-    window.addEventListener('scroll', updateScrollState, { passive: true });
-    updateScrollState();
     return () => {
       mounted = false;
       preservationSequence += 1;
-      scrollContainer?.removeEventListener('scroll', updateScrollState);
-      window.removeEventListener('scroll', updateScrollState);
       scrollContainer = undefined;
     };
   });
@@ -79,23 +71,6 @@
   function lineLevel(line: string): LogThreshold {
     const marker = line.match(/\[(!!!|ERR|WRN|NOT|INF|VRB|DBG|---|\.\.\.)\]/)?.[1];
     return marker ? levelByMarker[marker] : 5;
-  }
-
-  function currentPageScrollTop(): number {
-    return Math.max(
-      scrollContainer?.scrollTop ?? 0,
-      window.scrollY,
-      document.documentElement.scrollTop,
-      document.body.scrollTop,
-    );
-  }
-
-  function scrollPageToTop(): void {
-    scrollToTopVisible = false;
-    scrollContainer?.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    if (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0) {
-      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    }
   }
 
   function preserveVisibleLogPosition(): void {
@@ -178,12 +153,4 @@
   {/if}
 </section>
 
-{#if scrollToTopVisible}
-  <button
-    class="icon-button message-scroll-latest path-management-scroll-top"
-    type="button"
-    title={$t('rnodeMaintenance.logs.scrollToTop')}
-    aria-label={$t('rnodeMaintenance.logs.scrollToTop')}
-    onclick={scrollPageToTop}
-  ><Icon name="chevron-up" size={20} /></button>
-{/if}
+<PageScrollToTop />

@@ -141,4 +141,16 @@ describe('StatusDetailsView', () => {
     expect(screen.getByRole('heading', { name: 'No enabled interfaces' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Close all links' })).toBeDisabled();
   });
+
+  it('offers to scroll the status page back to the top', async () => {
+    const main = document.createElement('main');
+    Object.defineProperty(main, 'scrollTo', { configurable: true, value: vi.fn() });
+    document.body.append(main);
+    render(StatusDetailsView, { target: main });
+
+    main.scrollTop = 120;
+    await fireEvent.scroll(main);
+    expect(await screen.findByRole('button', { name: 'Scroll to top' })).toHaveClass('page-scroll-top');
+    main.remove();
+  });
 });

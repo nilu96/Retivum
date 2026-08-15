@@ -26,6 +26,18 @@ describe('ProbeView', () => {
     ]);
   });
 
+  it('offers to scroll the probe page back to the top', async () => {
+    const main = document.createElement('main');
+    Object.defineProperty(main, 'scrollTo', { configurable: true, value: vi.fn() });
+    document.body.append(main);
+    render(ProbeView, { target: main });
+
+    main.scrollTop = 120;
+    await fireEvent.scroll(main);
+    expect(await screen.findByRole('button', { name: 'Scroll to top' })).toHaveClass('page-scroll-top');
+    main.remove();
+  });
+
   it('shows the configured defaults and every known destination while a hash is entered', async () => {
     render(ProbeView);
 

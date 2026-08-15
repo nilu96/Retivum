@@ -27,6 +27,7 @@
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import PageScrollToTop from '../../lib/components/PageScrollToTop.svelte';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { toast } from '../../lib/notifications/toasts';
 
@@ -426,6 +427,7 @@
       </ol>
     {/if}
   </section>
+  <PageScrollToTop />
 </div>
 
 {#if historyActions}

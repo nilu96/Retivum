@@ -29,6 +29,7 @@
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
+  import PageScrollToTop from '../../lib/components/PageScrollToTop.svelte';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
   import { liveActivity, toast } from '../../lib/notifications/toasts';
   import {
@@ -90,8 +91,6 @@
   let confirmation = $state<Confirmation>();
   let entryActions = $state<EntryActions>();
   let highlightedDestination = $state<string>();
-  let scrollContainer: HTMLElement | undefined;
-  let scrollToTopVisible = $state(false);
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
   const pathRequestCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const dateFormatter = $derived(createDateFormatter($locale));
@@ -189,43 +188,16 @@
     const updateBulkClearLayout = (): void => {
       bulkClearFullWidth = bulkClearLayoutQuery?.matches === true;
     };
-    scrollContainer = page.closest<HTMLElement>('main') ?? undefined;
-    scrollContainer?.scrollTo({ top: 0, left: 0 });
-    const updateScrollState = () => {
-      scrollToTopVisible = currentPageScrollTop() > 0;
-    };
-    scrollContainer?.addEventListener('scroll', updateScrollState, { passive: true });
-    window.addEventListener('scroll', updateScrollState, { passive: true });
+    page.closest<HTMLElement>('main')?.scrollTo({ top: 0, left: 0 });
     bulkClearLayoutQuery?.addEventListener('change', updateBulkClearLayout);
     updateBulkClearLayout();
-    updateScrollState();
     return () => {
       if (highlightTimer !== undefined) clearTimeout(highlightTimer);
       for (const timer of pathRequestCooldownTimers.values()) clearTimeout(timer);
       pathRequestCooldownTimers.clear();
-      scrollContainer?.removeEventListener('scroll', updateScrollState);
-      window.removeEventListener('scroll', updateScrollState);
       bulkClearLayoutQuery?.removeEventListener('change', updateBulkClearLayout);
-      scrollContainer = undefined;
     };
   });
-
-  function currentPageScrollTop(): number {
-    return Math.max(
-      scrollContainer?.scrollTop ?? 0,
-      window.scrollY,
-      document.documentElement.scrollTop,
-      document.body.scrollTop,
-    );
-  }
-
-  function scrollPageToTop(): void {
-    scrollToTopVisible = false;
-    scrollContainer?.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    if (window.scrollY > 0 || document.documentElement.scrollTop > 0 || document.body.scrollTop > 0) {
-      window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
-    }
-  }
 
   function operationIsBusy(key: string): boolean {
     return busyOperations.includes(key);
@@ -898,15 +870,7 @@
       </div>
     {/if}
   </section>
-  {#if scrollToTopVisible}
-    <button
-      class="icon-button message-scroll-latest path-management-scroll-top"
-      type="button"
-      title={$t('pathManagement.scrollToTop')}
-      aria-label={$t('pathManagement.scrollToTop')}
-      onclick={scrollPageToTop}
-    ><Icon name="chevron-up" size={20} /></button>
-  {/if}
+  <PageScrollToTop />
 </div>
 
 {#if entryActions}

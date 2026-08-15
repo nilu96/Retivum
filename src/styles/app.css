@@ -1092,7 +1092,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .status-interface-section > .empty-state { margin-block-start: 28px; }
 .path-management-page { display: grid; max-width: 1100px; min-width: 0; align-content: start; gap: 26px; }
 .path-management-header { margin-block-end: -3px; }
-.message-scroll-latest.path-management-scroll-top { position: fixed; z-index: 10; inset-inline-end: 24px; inset-block-end: 24px; }
+.message-scroll-latest.page-scroll-top { position: fixed; z-index: 10; inset-inline-end: 24px; inset-block-end: 24px; }
 .path-request-form { padding: 2px 20px 20px 70px; }
 .path-request-controls { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; gap: 12px; }
 .path-request-controls > .button { min-height: 42px; }
@@ -1254,9 +1254,9 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 
 @media (max-width: 699px) {
   .path-management-toolbar { align-items: stretch; }
-  .message-scroll-latest.path-management-scroll-top { inset-inline-end: calc(14px + env(safe-area-inset-right, 0px)); inset-block-end: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 14px); }
-  .app-shell.mobile-actions-right .message-scroll-latest.path-management-scroll-top { inset-inline-start: calc(14px + env(safe-area-inset-left, 0px)); inset-inline-end: auto; }
-  .app-shell.mobile-actions-left .message-scroll-latest.path-management-scroll-top { inset-inline-start: auto; inset-inline-end: calc(14px + env(safe-area-inset-right, 0px)); }
+  .message-scroll-latest.page-scroll-top { inset-inline-end: calc(14px + env(safe-area-inset-right, 0px)); inset-block-end: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 14px); }
+  .app-shell.mobile-actions-right .message-scroll-latest.page-scroll-top { inset-inline-start: calc(14px + env(safe-area-inset-left, 0px)); inset-inline-end: auto; }
+  .app-shell.mobile-actions-left .message-scroll-latest.page-scroll-top { inset-inline-start: auto; inset-inline-end: calc(14px + env(safe-area-inset-right, 0px)); }
   .scope-tabs.path-management-tabs { width: 100%; }
   .path-management-filters-toggle { display: flex; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; margin: 0 0 12px; padding: 6px 12px; border: 0; color: var(--text-muted); background: transparent; font-size: .73rem; font-weight: 650; text-align: center; }
   .path-management-filters-toggle svg { flex: none; transition: rotate .15s ease; }

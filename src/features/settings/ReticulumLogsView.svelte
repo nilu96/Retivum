@@ -5,6 +5,7 @@
   import { clearReticulumLogs, reticulumLogs } from '../../infrastructure/reticulum/runtime';
   import Icon from '../../lib/components/Icon.svelte';
   import LogViewer from '../../lib/components/LogViewer.svelte';
+  import PageScrollToTop from '../../lib/components/PageScrollToTop.svelte';
 
   let page: HTMLDivElement;
 
@@ -37,4 +38,5 @@
     emptyBody="logs.empty.body"
     onclear={clearReticulumLogs}
   />
+  <PageScrollToTop />
 </div>
