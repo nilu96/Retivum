@@ -1336,7 +1336,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .rnode-device-details section { min-width: 0; }
 .rnode-device-details h3 { margin: 0; color: var(--text-subtle); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; }
 .rnode-device-details .rnode-device-info { margin-block-start: 8px; }
-.rnode-maintenance-notice { display: flex; align-items: flex-start; gap: 10px; margin-block-start: 18px; padding-block: 12px; padding-inline: 0; border-radius: 9px; color: var(--text-muted); background: var(--surface-2); }
+.rnode-maintenance-notice { display: flex; align-items: flex-start; gap: 10px; margin-block-start: 18px; padding-block: 12px; padding-inline: 0; border-radius: 9px; color: var(--text-muted); }
 .rnode-maintenance-notice svg { flex: none; color: var(--accent-strong); }
 .rnode-maintenance-notice p { margin: 0; font-size: .72rem; line-height: 1.55; }
 .rnode-maintenance-help { margin-block-start: 14px; }
