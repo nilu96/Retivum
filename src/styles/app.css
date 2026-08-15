@@ -1098,7 +1098,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .path-request-controls > .button { min-height: 42px; }
 .path-management-lists { min-width: 0; }
 .path-management-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block-end: 12px; }
-.scope-tabs.path-management-tabs { width: min(470px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
+.scope-tabs.path-management-tabs { width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .path-management-tabs button { display: flex; align-items: center; justify-content: center; gap: 7px; }
 .path-management-tabs button span { display: inline-grid; min-width: 20px; height: 20px; place-items: center; padding-inline: 5px; border-radius: 999px; color: var(--text-subtle); background: var(--surface-1); font-size: .62rem; font-variant-numeric: tabular-nums; }
 .path-management-tabs button.active span { color: var(--accent-strong); background: var(--accent-soft); }
@@ -1257,7 +1257,6 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .message-scroll-latest.page-scroll-top { inset-inline-end: calc(14px + env(safe-area-inset-right, 0px)); inset-block-end: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0px) + 14px); }
   .app-shell.mobile-actions-right .message-scroll-latest.page-scroll-top { inset-inline-start: calc(14px + env(safe-area-inset-left, 0px)); inset-inline-end: auto; }
   .app-shell.mobile-actions-left .message-scroll-latest.page-scroll-top { inset-inline-start: auto; inset-inline-end: calc(14px + env(safe-area-inset-right, 0px)); }
-  .scope-tabs.path-management-tabs { width: 100%; }
   .path-management-filters-toggle { display: flex; width: 100%; flex-direction: column; align-items: center; justify-content: center; gap: 4px; margin: 0 0 12px; padding: 6px 12px; border: 0; color: var(--text-muted); background: transparent; font-size: .73rem; font-weight: 650; text-align: center; }
   .path-management-filters-toggle svg { flex: none; transition: rotate .15s ease; }
   .path-management-filters-toggle[aria-expanded='true'] svg { rotate: 180deg; }
