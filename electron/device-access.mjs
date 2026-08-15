@@ -5,9 +5,11 @@ import {
   permissionRequestDecision,
   requestedMediaTypes,
 } from './permission-policy.mjs';
+import { enumerateConnectedUsbDevices } from './serial-device-enumeration.mjs';
 
 const REQUEST_CHANNEL = 'retivum:device:selection-request';
 const RESPONSE_CHANNEL = 'retivum:device:selection-response';
+const SERIAL_DEVICES_CHANNEL = 'retivum:device:serial-devices';
 const PAIRING_REQUEST_CHANNEL = 'retivum:device:pairing-request';
 const PAIRING_RESPONSE_CHANNEL = 'retivum:device:pairing-response';
 const PAIRING_KINDS = new Set(['confirm', 'confirmPin', 'providePin']);
@@ -40,9 +42,21 @@ export function installDeviceAccess(window, ipcMain) {
   const { session } = rendererWebContents;
   const pending = new Map();
   const pendingPairing = new Map();
+  const serialDevices = new Map();
   let bluetoothTimeout;
   let bluetoothCallback;
   let bluetoothSelectionPending = false;
+
+  function rememberSerialDevice(port) {
+    if (!port || typeof port.portId !== 'string') return;
+    const name = typeof port.displayName === 'string' ? port.displayName.trim() : '';
+    serialDevices.set(port.portId, {
+      id: port.portId,
+      ...(name ? { name } : {}),
+      ...(typeof port.vendorId === 'string' ? { vendorId: port.vendorId } : {}),
+      ...(typeof port.productId === 'string' ? { productId: port.productId } : {}),
+    });
+  }
 
   function requestSelection(type, devices, callback) {
     const requestId = randomUUID();
@@ -95,6 +109,7 @@ export function installDeviceAccess(window, ipcMain) {
   const selectSerial = (event, ports, serialWebContents, callback) => {
     if (serialWebContents.id !== rendererWebContents.id) return;
     event.preventDefault();
+    for (const port of ports) rememberSerialDevice(port);
     if (ports.length === 0) {
       callback('');
       return;
@@ -115,6 +130,26 @@ export function installDeviceAccess(window, ipcMain) {
       ? response.deviceId
       : '';
     selection.callback(deviceId);
+  });
+
+  ipcMain.handle(SERIAL_DEVICES_CHANNEL, async (event) => {
+    if (event.sender.id !== rendererWebContents.id) return [];
+    const connectedDevices = await enumerateConnectedUsbDevices();
+    const merged = new Map(connectedDevices.map((device) => (
+      [`${device.vendorId}:${device.productId}`, device]
+    )));
+    for (const device of serialDevices.values()) {
+      const vendorId = typeof device.vendorId === 'string' ? device.vendorId.toLowerCase().padStart(4, '0') : '';
+      const productId = typeof device.productId === 'string' ? device.productId.toLowerCase().padStart(4, '0') : '';
+      const key = vendorId && productId ? `${vendorId}:${productId}` : device.id;
+      const connectedDevice = merged.get(key);
+      merged.set(key, {
+        ...connectedDevice,
+        ...device,
+        ...(device.name ? { name: device.name } : connectedDevice?.name ? { name: connectedDevice.name } : {}),
+      });
+    }
+    return Array.from(merged.values());
   });
 
   ipcMain.handle(PAIRING_RESPONSE_CHANNEL, (event, response) => {
@@ -144,7 +179,11 @@ export function installDeviceAccess(window, ipcMain) {
 
   rendererWebContents.on('select-bluetooth-device', selectBluetooth);
   session.on('select-serial-port', selectSerial);
-  session.setDevicePermissionHandler((details) => details.deviceType === 'serial' && details.origin.startsWith('file://'));
+  session.setDevicePermissionHandler((details) => {
+    const allowed = details.deviceType === 'serial' && details.origin.startsWith('file://');
+    if (allowed) rememberSerialDevice(details.device);
+    return allowed;
+  });
   session.setPermissionCheckHandler((requestingWebContents, permission, _origin, details) => (
     permissionCheckAllowed(
       isTrustedWebContents(rendererWebContents, requestingWebContents),
@@ -191,6 +230,7 @@ export function installDeviceAccess(window, ipcMain) {
       session.setBluetoothPairingHandler(null);
     }
     ipcMain.removeHandler(RESPONSE_CHANNEL);
+    ipcMain.removeHandler(SERIAL_DEVICES_CHANNEL);
     ipcMain.removeHandler(PAIRING_RESPONSE_CHANNEL);
   };
   return { dispose, requestBluetoothPairing };

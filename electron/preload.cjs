@@ -44,6 +44,7 @@ contextBridge.exposeInMainWorld('retivumDesktopBluetooth', Object.freeze({
 }));
 
 contextBridge.exposeInMainWorld('retivumDesktopDevices', Object.freeze({
+  serialDevices: () => ipcRenderer.invoke('retivum:device:serial-devices'),
   respond: (response) => ipcRenderer.invoke('retivum:device:selection-response', response),
   respondPairing: (response) => ipcRenderer.invoke('retivum:device:pairing-response', response),
   onSelectionRequest: (listener) => {

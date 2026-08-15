@@ -16,6 +16,7 @@ import {
   type ByteConnection,
 } from './byte-connections';
 import { rememberBluetoothDevice } from './bluetooth-devices';
+import { takeDesktopDeviceSelection } from './desktop-device-selection';
 import { authorizeRNodeDevice, selectRNodeDevice } from './interface-capabilities';
 import { KissDeframer, frame, parseRNodeTelemetry } from './rnode-host';
 
@@ -68,7 +69,8 @@ const MAX_MAINTENANCE_FRAME_BYTES = 1_100_000;
 export interface AuthorizedSerialRNode {
   id: string;
   transport: 'serial';
-  label: string;
+  label?: string;
+  deviceName?: string;
   detail: string;
   port: SerialPort;
   configuredInterface?: RNodeInterfaceConfig;
@@ -154,6 +156,8 @@ function assertIntegerRange(value: number, min: number, max: number): void {
 }
 
 const serialPortIds = new WeakMap<SerialPort, string>();
+const serialPortNames = new WeakMap<SerialPort, string>();
+const serialUsbNames = new Map<string, string>();
 let serialPortSequence = 1;
 
 function portId(port: SerialPort): string {
@@ -166,6 +170,47 @@ function portId(port: SerialPort): string {
 
 function hexId(value: number | undefined): string {
   return value === undefined ? '----' : value.toString(16).padStart(4, '0');
+}
+
+function serialUsbKey(info: SerialPortInfo): string | undefined {
+  return info.usbVendorId !== undefined && info.usbProductId !== undefined
+    ? `${info.usbVendorId}:${info.usbProductId}`
+    : undefined;
+}
+
+function rememberSerialPortName(port: SerialPort, value: string | undefined): void {
+  const name = value?.trim();
+  if (!name) return;
+  serialPortNames.set(port, name);
+  const key = serialUsbKey(port.getInfo());
+  if (key) serialUsbNames.set(key, name);
+}
+
+function knownSerialPortName(port: SerialPort): string | undefined {
+  const key = serialUsbKey(port.getInfo());
+  return serialPortNames.get(port) ?? (key ? serialUsbNames.get(key) : undefined);
+}
+
+function electronUsbId(value: string | undefined): number | undefined {
+  if (!value || !/^[0-9a-f]+$/i.test(value)) return undefined;
+  return Number.parseInt(value, 16);
+}
+
+async function refreshDesktopSerialPortNames(ports: readonly SerialPort[]): Promise<void> {
+  const bridge = window.retivumDesktopDevices;
+  if (!bridge) return;
+  let devices: DesktopSerialDeviceMetadata[];
+  try {
+    devices = await bridge.serialDevices();
+  } catch {
+    return;
+  }
+  for (const port of ports) {
+    const info = port.getInfo();
+    const match = devices.find((device) => electronUsbId(device.vendorId) === info.usbVendorId
+      && electronUsbId(device.productId) === info.usbProductId);
+    rememberSerialPortName(port, match?.name);
+  }
 }
 
 function matchingInterface(
@@ -213,15 +258,18 @@ export async function listAuthorizedSerialRNodes(
 ): Promise<AuthorizedSerialRNode[]> {
   if (!navigator.serial) return [];
   const ports = await navigator.serial.getPorts();
-  return ports.filter((port) => port.connected !== false).map((port, index) => {
+  await refreshDesktopSerialPortNames(ports);
+  return ports.filter((port) => port.connected !== false).map((port) => {
     const info = port.getInfo();
     const configuredInterface = matchingInterface(port, interfaces);
+    const deviceName = configuredInterface?.connection.deviceName?.trim() || knownSerialPortName(port);
     return {
       id: portId(port),
       transport: 'serial' as const,
       port,
       configuredInterface,
-      label: configuredInterface?.name.trim() || `Serial device ${index + 1}`,
+      label: configuredInterface?.name.trim() || deviceName || undefined,
+      ...(deviceName ? { deviceName } : {}),
       detail: `USB ${hexId(info.usbVendorId)}:${hexId(info.usbProductId)}`,
     };
   });
@@ -267,14 +315,18 @@ export async function requestSerialRNode(
 ): Promise<AuthorizedSerialRNode> {
   if (!navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
   const port = await navigator.serial.requestPort();
+  const selectedDevice = takeDesktopDeviceSelection('serial');
+  rememberSerialPortName(port, selectedDevice?.name);
   const info = port.getInfo();
   const configuredInterface = matchingInterface(port, interfaces);
+  const deviceName = configuredInterface?.connection.deviceName?.trim() || knownSerialPortName(port);
   return {
     id: portId(port),
     transport: 'serial',
     port,
     configuredInterface,
-    label: configuredInterface?.name.trim() || 'Selected serial device',
+    label: configuredInterface?.name.trim() || deviceName || undefined,
+    ...(deviceName ? { deviceName } : {}),
     detail: `USB ${hexId(info.usbVendorId)}:${hexId(info.usbProductId)}`,
   };
 }

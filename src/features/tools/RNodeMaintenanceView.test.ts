@@ -87,6 +87,15 @@ describe('RNodeMaintenanceView', () => {
     })));
   });
 
+  it('uses a generic serial label when no device name is available', async () => {
+    interfaceConfigurations.set([]);
+    render(RNodeMaintenanceView);
+
+    expect(await screen.findByText('Serial device')).toBeInTheDocument();
+    expect(screen.queryByText('Serial device 1')).not.toBeInTheDocument();
+    expect(screen.getByText('USB 10c4:ea60')).toBeInTheDocument();
+  });
+
   it('lists and claims a configured Bluetooth RNode for local maintenance', async () => {
     const config = createRNodeInterfaceDraft('ble', 'configured-ble-rnode');
     config.name = 'Pocket RNode';
@@ -122,6 +131,40 @@ describe('RNodeMaintenanceView', () => {
       messageKey: 'rnodeMaintenance.connect.success',
       parameters: { name: 'Pocket RNode' },
     })));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Connected' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Connection details' });
+    expect(within(dialog).getByText('Bluetooth LE')).toBeInTheDocument();
+    expect(within(dialog).getByText('ble-device-1')).toBeInTheDocument();
+    expect(within(dialog).getAllByText('Pocket RNode')).toHaveLength(2);
+  });
+
+  it('shows serial connection details and disconnects from the connected badge', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    const release = vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({ firmwareVersion: '1.73' });
+    const close = vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unsupported'));
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    const connectedBadge = await screen.findByRole('button', { name: 'Connected' });
+    expect(connectedBadge).toHaveAttribute('title', 'Show connection details');
+    await fireEvent.click(connectedBadge);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Connection details' });
+    expect(within(dialog).getByText('Serial')).toBeInTheDocument();
+    expect(within(dialog).getByText('USB 10c4:ea60')).toBeInTheDocument();
+    expect(within(dialog).getByText('Desk RNode')).toBeInTheDocument();
+    expect(within(dialog).queryByText('Device name')).not.toBeInTheDocument();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Disconnect' }));
+
+    await vi.waitFor(() => {
+      expect(close).toHaveBeenCalled();
+      expect(release).toHaveBeenCalledWith('configured-rnode');
+      expect(screen.queryByRole('dialog', { name: 'Connection details' })).not.toBeInTheDocument();
+      expect(screen.getByText('Disconnected')).toBeInTheDocument();
+    });
   });
 
   it('hides an authorized Bluetooth RNode that is not currently connected', async () => {

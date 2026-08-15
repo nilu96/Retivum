@@ -1321,6 +1321,17 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .rnode-maintenance-page > .provisioning-header { margin-block-end: 0; }
 .rnode-maintenance-status { align-self: center; padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-subtle); background: var(--surface-2); font-size: .7rem; font-weight: 700; white-space: nowrap; }
 .rnode-maintenance-status.connected { color: var(--success); border-color: color-mix(in srgb, var(--success) 38%, var(--border)); background: color-mix(in srgb, var(--success) 10%, var(--surface-2)); }
+.rnode-maintenance-status-button { font-family: inherit; cursor: pointer; transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease; }
+.rnode-maintenance-status-button:hover { border-color: color-mix(in srgb, var(--success) 62%, var(--border)); background: color-mix(in srgb, var(--success) 15%, var(--surface-2)); }
+.rnode-maintenance-status-button:focus-visible { outline: 2px solid var(--success); outline-offset: 3px; }
+.rnode-maintenance-status-button:disabled { cursor: default; opacity: .65; }
+.rnode-connection-dialog { width: min(520px, 100%); }
+.rnode-connection-dialog-content { padding: 7px 22px 18px; }
+.rnode-connection-details { display: grid; gap: 1px; margin: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--border); }
+.rnode-connection-details > div { min-width: 0; padding: 12px 13px; background: var(--surface-2); }
+.rnode-connection-details dt { margin-block-end: 4px; color: var(--text-subtle); font-size: .62rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+.rnode-connection-details dd { min-width: 0; margin: 0; color: var(--text); font: .73rem "SFMono-Regular", Consolas, monospace; overflow-wrap: anywhere; user-select: text; }
+.interface-editor.rnode-connection-dialog > footer { padding: 0 22px 22px; }
 .scope-tabs.rnode-maintenance-tabs { width: 100%; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
 .scope-tabs.rnode-maintenance-tabs[data-tab-count='1'] { grid-template-columns: minmax(0, 1fr); }
 .scope-tabs.rnode-maintenance-tabs[data-tab-count='2'] { grid-template-columns: repeat(2, minmax(0, 1fr)); }

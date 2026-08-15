@@ -110,6 +110,13 @@ interface DesktopDeviceSelectionRequest {
   devices: Array<{ id: string; name: string; detail?: string }>;
 }
 
+interface DesktopSerialDeviceMetadata {
+  id?: string;
+  name?: string;
+  vendorId?: string;
+  productId?: string;
+}
+
 type DesktopBluetoothPairingKind = 'confirm' | 'confirmPin' | 'providePin';
 
 interface DesktopBluetoothPairingRequest {
@@ -120,6 +127,7 @@ interface DesktopBluetoothPairingRequest {
 }
 
 interface RetivumDesktopDeviceBridge {
+  serialDevices(): Promise<DesktopSerialDeviceMetadata[]>;
   respond(response: { requestId: string; deviceId?: string }): Promise<void>;
   respondPairing(response: { requestId: string; confirmed: boolean; pin?: string }): Promise<void>;
   onSelectionRequest(listener: (request: DesktopDeviceSelectionRequest) => void): () => void;

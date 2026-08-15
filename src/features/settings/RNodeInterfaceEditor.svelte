@@ -105,6 +105,9 @@
     if (draft.connection.deviceId === AUTHORIZED_SERIAL_PORT_ID) {
       return $t('interface.editor.rnode.device.authorizedSerial');
     }
+    if (draft.connection.type === 'serial' && draft.connection.deviceId) {
+      return draft.connection.deviceName ?? `USB ${draft.connection.deviceId}`;
+    }
     return draft.connection.deviceName ?? $t('interface.editor.rnode.device.none');
   }
 </script>

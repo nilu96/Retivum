@@ -29,6 +29,7 @@
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import Icon from '../../lib/components/Icon.svelte';
   import DeviceLogViewer from '../../lib/components/DeviceLogViewer.svelte';
+  import ModalDialog from '../../lib/components/ModalDialog.svelte';
   import { toast } from '../../lib/notifications/toasts';
   import ProvisioningNamespaceEditor from '../provisioning/ProvisioningNamespaceEditor.svelte';
   import ProvisioningSaveBar from '../provisioning/ProvisioningSaveBar.svelte';
@@ -68,6 +69,7 @@
   let pendingDeviceAction = $state<'reboot' | 'factoryReset'>();
   let pendingCommand = $state<{ namespaceId: number; field: ProvisioningField }>();
   let bluetoothPin = $state('');
+  let connectionDetailsOpen = $state(false);
   let deviceRefresh: Promise<{ ok: boolean; count: number }> | undefined;
   const disconnectedTabs: MaintenanceTab[] = ['device'];
   const standardTabs: MaintenanceTab[] = ['device', 'nodeConfig'];
@@ -159,6 +161,23 @@
     return `${value}% (${$t(`status.battery.${state ?? 'unknown'}`)})`;
   }
 
+  function deviceLabel(device: AuthorizedRNode): string {
+    return device.label?.trim() || $t('rnodeMaintenance.device.serialFallbackName');
+  }
+
+  function connectionDeviceName(device: AuthorizedRNode): string | undefined {
+    if (device.transport === 'ble') {
+      return device.connectionConfig.connection.deviceName?.trim() || device.label;
+    }
+    return device.deviceName?.trim() || undefined;
+  }
+
+  function connectionIdentifier(device: AuthorizedRNode): string {
+    return device.transport === 'serial'
+      ? device.detail
+      : device.connectionConfig.connection.deviceId ?? device.id;
+  }
+
   function connectedMaintenanceDevices(candidates: AuthorizedRNode[]): AuthorizedRNode[] {
     const activeBleDeviceId = session && selectedDevice?.transport === 'ble'
       ? selectedDevice.id
@@ -217,6 +236,7 @@
   async function connect(device: AuthorizedRNode): Promise<void> {
     if (busy) return;
     busy = true;
+    connectionDetailsOpen = false;
     status = 'rnodeMaintenance.status.connecting';
     await closeProtocolSession(false);
     selectedDevice = device;
@@ -236,6 +256,7 @@
             loaded = undefined;
             activeTab = 'device';
             status = 'rnodeMaintenance.status.disconnected';
+            connectionDetailsOpen = false;
             if (nextSession.device.transport === 'ble') {
               devices = devices.filter((candidate) => candidate.id !== nextSession.device.id);
               selectedDevice = undefined;
@@ -257,14 +278,14 @@
       fieldValidationErrors = {};
       status = 'rnodeMaintenance.status.connected';
       appendLog('info', 'RNODE_MAINTENANCE_CONNECTED', {
-        device: device.label,
+        device: deviceLabel(device),
         ...(info.firmwareVersion ? { firmware: info.firmwareVersion } : {}),
       });
-      toast.success('rnodeMaintenance.connect.success', { name: device.label });
+      toast.success('rnodeMaintenance.connect.success', { name: deviceLabel(device) });
       void loadProvisioning();
     } catch (error) {
       appendLog('error', 'RNODE_MAINTENANCE_CONNECT_FAILED', { message: errorMessage(error) });
-      toast.error('rnodeMaintenance.connect.error', { name: device.label });
+      toast.error('rnodeMaintenance.connect.error', { name: deviceLabel(device) });
       status = 'rnodeMaintenance.status.disconnected';
       selectedDevice = undefined;
       if (device.transport === 'ble') devices = devices.filter((candidate) => candidate.id !== device.id);
@@ -280,8 +301,9 @@
 
   async function disconnect(): Promise<void> {
     if (busy) return;
+    connectionDetailsOpen = false;
     const disconnectedDevice = selectedDevice;
-    const deviceName = selectedDevice?.label ?? $t('rnodeMaintenance.device.fallbackName');
+    const deviceName = selectedDevice ? deviceLabel(selectedDevice) : $t('rnodeMaintenance.device.fallbackName');
     busy = true;
     try {
       await closeProtocolSession(false);
@@ -508,6 +530,7 @@
       loaded = undefined;
       activeTab = 'device';
       status = 'rnodeMaintenance.status.disconnected';
+      connectionDetailsOpen = false;
     } catch (error) {
       appendLog('error', 'RNODE_MAINTENANCE_REBOOT_FAILED', { message: errorMessage(error) });
       toast.error('provisioning.reboot.failed');
@@ -553,7 +576,19 @@
       <h1>{$t('rnodeMaintenance.title')}</h1>
       <p>{$t('rnodeMaintenance.description')}</p>
     </div>
-    <span class="rnode-maintenance-status" class:connected>{$t(status)}</span>
+    {#if connected}
+      <button
+        class="rnode-maintenance-status connected rnode-maintenance-status-button"
+        type="button"
+        title={$t('rnodeMaintenance.connection.open')}
+        aria-haspopup="dialog"
+        aria-expanded={connectionDetailsOpen}
+        disabled={busy}
+        onclick={() => { connectionDetailsOpen = true; }}
+      >{$t(status)}</button>
+    {:else}
+      <span class="rnode-maintenance-status">{$t(status)}</span>
+    {/if}
   </header>
 
   <nav class="scope-tabs rnode-maintenance-tabs" data-tab-count={maintenanceTabs.length} aria-label={$t('rnodeMaintenance.tabs.label')}>
@@ -574,7 +609,7 @@
         {#each devices as device (device.id)}
           <button class:selected={selectedDevice?.id === device.id} disabled={busy} onclick={() => void connect(device)}>
             <span class="tool-icon"><Icon name="radio" size={21} /></span>
-            <span><strong>{device.label}</strong><small>{device.detail}{device.configuredInterface ? ` · ${$t('rnodeMaintenance.device.configured')}` : ''}</small></span>
+            <span><strong>{deviceLabel(device)}</strong><small>{device.detail}{device.configuredInterface ? ` · ${$t('rnodeMaintenance.device.configured')}` : ''}</small></span>
             <Icon name="arrow-right" size={17} />
           </button>
         {:else}
@@ -726,6 +761,56 @@
     </section>
   {/if}
 </div>
+
+{#if connectionDetailsOpen && connected && selectedDevice}
+  <ModalDialog
+    titleId="rnode-connection-details-title"
+    className="interface-editor rnode-connection-dialog"
+    onclose={() => { if (!busy) connectionDetailsOpen = false; }}
+  >
+    <header>
+      <div class="section-icon"><Icon name={selectedDevice.transport === 'ble' ? 'bluetooth' : 'interface'} size={21} /></div>
+      <div>
+        <h2 id="rnode-connection-details-title">{$t('rnodeMaintenance.connection.title')}</h2>
+        <p>{$t('rnodeMaintenance.connection.description')}</p>
+      </div>
+    </header>
+    <div class="rnode-connection-dialog-content">
+      <dl class="rnode-connection-details">
+        <div>
+          <dt>{$t('rnodeMaintenance.connection.transport')}</dt>
+          <dd>{$t(`rnodeMaintenance.connection.${selectedDevice.transport}`)}</dd>
+        </div>
+        {#if connectionDeviceName(selectedDevice)}
+          <div>
+            <dt>{$t('rnodeMaintenance.connection.deviceName')}</dt>
+            <dd>{connectionDeviceName(selectedDevice)}</dd>
+          </div>
+        {/if}
+        <div>
+          <dt>{$t(selectedDevice.transport === 'serial'
+            ? 'rnodeMaintenance.connection.usbDevice'
+            : 'rnodeMaintenance.connection.bleDeviceId')}</dt>
+          <dd>{connectionIdentifier(selectedDevice)}</dd>
+        </div>
+        {#if selectedDevice.configuredInterface}
+          <div>
+            <dt>{$t('rnodeMaintenance.connection.configuredInterface')}</dt>
+            <dd>{selectedDevice.configuredInterface.name}</dd>
+          </div>
+        {/if}
+      </dl>
+    </div>
+    <footer>
+      <button class="button secondary" type="button" disabled={busy} onclick={() => { connectionDetailsOpen = false; }}>
+        {$t('common.close')}
+      </button>
+      <button class="button primary" type="button" disabled={busy} onclick={() => void disconnect()}>
+        {$t('rnodeMaintenance.device.disconnect')}
+      </button>
+    </footer>
+  </ModalDialog>
+{/if}
 
 {#if wipeEepromPending}
   <ConfirmationDialog titleId="rnode-wipe-eeprom" title={$t('rnodeMaintenance.confirm.wipe.title')} description={$t('rnodeMaintenance.confirm.wipe.description')} icon="trash" tone="danger" confirmLabel={$t('rnodeMaintenance.confirm.wipe.action')} oncancel={() => { wipeEepromPending = false; }} onconfirm={wipeEeprom} />

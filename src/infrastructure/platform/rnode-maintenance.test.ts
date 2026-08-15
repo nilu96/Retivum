@@ -5,8 +5,13 @@ import { KissDeframer, frame } from './rnode-host';
 import {
   listAuthorizedRNodes,
   listAuthorizedSerialRNodes,
+  requestSerialRNode,
   RNodeMaintenanceSession,
 } from './rnode-maintenance';
+import {
+  answerDesktopDeviceSelection,
+  desktopDeviceSelection,
+} from './desktop-device-selection';
 
 class FakeSerialPort {
   readonly readable: ReadableStream<Uint8Array>;
@@ -111,6 +116,8 @@ class FakeBleConnection implements ByteConnection {
 
 afterEach(() => {
   window.retivumDesktopBluetooth = undefined;
+  window.retivumDesktopDevices = undefined;
+  desktopDeviceSelection.set(undefined);
   vi.unstubAllGlobals();
 });
 
@@ -133,6 +140,63 @@ describe('RNode maintenance serial directory', () => {
       label: 'Workshop RNode',
       detail: 'USB 10c4:ea60',
       configuredInterface: config,
+    });
+  });
+
+  it('retains the Electron chooser name when the serial directory refreshes', async () => {
+    const port = new FakeSerialPort({ usbVendorId: 0x1915, usbProductId: 0x521f });
+    vi.stubGlobal('navigator', {
+      serial: {
+        getPorts: vi.fn().mockResolvedValue([port]),
+        requestPort: vi.fn().mockResolvedValue(port),
+      },
+    });
+    window.retivumDesktopDevices = {
+      serialDevices: vi.fn().mockResolvedValue([]),
+      respond: vi.fn().mockResolvedValue(undefined),
+      respondPairing: vi.fn(),
+      onSelectionRequest: vi.fn(),
+      onPairingRequest: vi.fn(),
+    };
+    desktopDeviceSelection.set({
+      requestId: 'serial-picker',
+      type: 'serial',
+      devices: [{ id: 'port-1', name: 'nRF52 DK', detail: '1915:521f' }],
+    });
+    await answerDesktopDeviceSelection('serial-picker', 'port-1');
+
+    const selected = await requestSerialRNode([]);
+    const refreshed = await listAuthorizedSerialRNodes([]);
+
+    expect(selected.label).toBe('nRF52 DK');
+    expect(refreshed[0].label).toBe('nRF52 DK');
+    expect(refreshed[0].detail).toBe('USB 1915:521f');
+  });
+
+  it('uses Electron serial metadata during automatic device refresh', async () => {
+    const port = new FakeSerialPort({ usbVendorId: 0x239a, usbProductId: 0x8029 });
+    vi.stubGlobal('navigator', {
+      serial: { getPorts: vi.fn().mockResolvedValue([port]), requestPort: vi.fn() },
+    });
+    window.retivumDesktopDevices = {
+      serialDevices: vi.fn().mockResolvedValue([{
+        id: 'serial-1',
+        name: 'NRF52 DK',
+        vendorId: '239a',
+        productId: '8029',
+      }]),
+      respond: vi.fn(),
+      respondPairing: vi.fn(),
+      onSelectionRequest: vi.fn(),
+      onPairingRequest: vi.fn(),
+    };
+
+    const devices = await listAuthorizedSerialRNodes([]);
+
+    expect(devices[0]).toMatchObject({
+      label: 'NRF52 DK',
+      deviceName: 'NRF52 DK',
+      detail: 'USB 239a:8029',
     });
   });
 
