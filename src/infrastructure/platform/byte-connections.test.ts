@@ -363,6 +363,7 @@ describe('native BLE byte connection', () => {
       startScan: vi.fn(),
       stopScan: vi.fn(),
       pair: vi.fn(),
+      connectedDevices: vi.fn().mockResolvedValue([]),
       open: vi.fn().mockResolvedValue(undefined),
       write: vi.fn().mockResolvedValue(undefined),
       close: vi.fn().mockResolvedValue(undefined),

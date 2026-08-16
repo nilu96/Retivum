@@ -110,6 +110,8 @@ describe('Electron native Bluetooth bridge', () => {
     const context = harness();
     const open = context.handlers.get('retivum:ble:open');
     await open(context.event, { id: 'rnode-one', deviceId: 'aabbccddeeff' });
+    await expect(context.handlers.get('retivum:ble:connected-devices')(context.event))
+      .resolves.toEqual(['aabbccddeeff']);
     context.connectionHooks().onData(Uint8Array.of(1, 2, 3));
     expect(context.sender.send).toHaveBeenCalledWith('retivum:ble:event', {
       id: 'rnode-one',
@@ -127,6 +129,8 @@ describe('Electron native Bluetooth bridge', () => {
     );
 
     context.connectionHooks().onClosed('RNODE_BLE_CONNECTION_FAILED');
+    await expect(context.handlers.get('retivum:ble:connected-devices')(context.event))
+      .resolves.toEqual([]);
     expect(context.sender.send).toHaveBeenLastCalledWith('retivum:ble:event', {
       id: 'rnode-one',
       type: 'error',

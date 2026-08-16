@@ -5,6 +5,7 @@ const require = createRequire(import.meta.url);
 const SCAN_START_CHANNEL = 'retivum:ble:scan-start';
 const SCAN_STOP_CHANNEL = 'retivum:ble:scan-stop';
 const PAIR_CHANNEL = 'retivum:ble:pair';
+const CONNECTED_DEVICES_CHANNEL = 'retivum:ble:connected-devices';
 const OPEN_CHANNEL = 'retivum:ble:open';
 const WRITE_CHANNEL = 'retivum:ble:write';
 const CLOSE_CHANNEL = 'retivum:ble:close';
@@ -86,6 +87,15 @@ export function registerDesktopBluetooth(
     }
   });
 
+  ipcMain.handle(CONNECTED_DEVICES_CHANNEL, async (event) => {
+    assertTrusted(event);
+    return Array.from(new Set(
+      Array.from(connections.values())
+        .filter((entry) => entry.ownerId === event.sender.id && entry.connected)
+        .map((entry) => entry.deviceId),
+    ));
+  });
+
   ipcMain.handle(OPEN_CHANNEL, async (event, options) => {
     assertTrusted(event);
     const id = validId(options?.id);
@@ -95,7 +105,7 @@ export function registerDesktopBluetooth(
     }
     await close(id);
     const owner = event.sender;
-    const entry = { ownerId: owner.id, deviceId };
+    const entry = { ownerId: owner.id, deviceId, connected: false };
     connections.set(id, entry);
     try {
       await (await getBackend()).open(id, deviceId, {
@@ -113,6 +123,7 @@ export function registerDesktopBluetooth(
           });
         },
       });
+      if (connections.get(id) === entry) entry.connected = true;
     } catch (error) {
       if (connections.get(id) === entry) connections.delete(id);
       await (await getBackend()).close(id).catch(() => undefined);
@@ -138,6 +149,7 @@ export function registerDesktopBluetooth(
     ipcMain.removeHandler(SCAN_START_CHANNEL);
     ipcMain.removeHandler(SCAN_STOP_CHANNEL);
     ipcMain.removeHandler(PAIR_CHANNEL);
+    ipcMain.removeHandler(CONNECTED_DEVICES_CHANNEL);
     ipcMain.removeHandler(OPEN_CHANNEL);
     ipcMain.removeHandler(WRITE_CHANNEL);
     ipcMain.removeHandler(CLOSE_CHANNEL);

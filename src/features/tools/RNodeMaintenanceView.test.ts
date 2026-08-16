@@ -139,6 +139,29 @@ describe('RNodeMaintenanceView', () => {
     expect(within(dialog).getAllByText('Pocket RNode')).toHaveLength(2);
   });
 
+  it('lists an Electron Bluetooth RNode reported as connected by the native bridge', async () => {
+    const config = createRNodeInterfaceDraft('ble', 'native-ble-rnode');
+    config.name = 'Native RNode';
+    config.connection = { type: 'ble', deviceId: 'native-device-1', deviceName: 'Native RNode' };
+    interfaceConfigurations.set([config]);
+    interfaceStatuses.set({});
+    window.retivumDesktopBluetooth = {
+      startScan: vi.fn(),
+      stopScan: vi.fn(),
+      pair: vi.fn(),
+      connectedDevices: vi.fn().mockResolvedValue(['native-device-1']),
+      open: vi.fn(),
+      write: vi.fn(),
+      close: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+    };
+
+    render(RNodeMaintenanceView);
+
+    expect(await screen.findByText('Native RNode')).toBeInTheDocument();
+    expect(screen.queryByText('No connected RNodes are available yet.')).not.toBeInTheDocument();
+  });
+
   it('shows serial connection details and disconnects from the connected badge', async () => {
     vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
     const release = vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
@@ -222,6 +245,13 @@ describe('RNodeMaintenanceView', () => {
       parameters: { name: 'New BLE RNode' },
     })));
     expect(screen.getByText('New BLE RNode')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh devices' }));
+    await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.device.refreshSuccess',
+      parameters: { count: 2 },
+    })));
+    expect(screen.getByText('New BLE RNode')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     await vi.waitFor(() => expect(screen.queryByText('New BLE RNode')).not.toBeInTheDocument());
   });
@@ -233,6 +263,7 @@ describe('RNodeMaintenanceView', () => {
       startScan,
       stopScan: vi.fn().mockResolvedValue(undefined),
       pair: vi.fn().mockRejectedValue(new Error('RNODE_BLE_PAIRING_FAILED')),
+      connectedDevices: vi.fn().mockResolvedValue([]),
       open: vi.fn(),
       write: vi.fn(),
       close: vi.fn(),

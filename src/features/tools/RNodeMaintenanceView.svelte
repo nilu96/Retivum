@@ -184,6 +184,7 @@
       : undefined;
     return candidates.filter((candidate) => (
       candidate.transport === 'serial'
+      || (candidate.transport === 'ble' && candidate.connected)
       || candidate.id === activeBleDeviceId
       || (candidate.configuredInterface !== undefined
         && $interfaceStatuses[candidate.configuredInterface.id] === 'online')
@@ -193,7 +194,12 @@
   async function refreshDevices(showFeedback = false): Promise<void> {
     const refresh = deviceRefresh ?? (async () => {
       try {
-        devices = connectedMaintenanceDevices(await listAuthorizedRNodes(availableRNodeInterfaces));
+        const discoveredDevices = await listAuthorizedRNodes(availableRNodeInterfaces);
+        const activeDevice = session ? selectedDevice : undefined;
+        const candidates = activeDevice
+          ? [activeDevice, ...discoveredDevices.filter((candidate) => candidate.id !== activeDevice.id)]
+          : discoveredDevices;
+        devices = connectedMaintenanceDevices(candidates);
         appendLog('debug', 'RNODE_MAINTENANCE_DEVICES_REFRESHED', { devices: devices.length });
         return { ok: true, count: devices.length };
       } catch (error) {

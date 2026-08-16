@@ -207,6 +207,7 @@ describe('RNode maintenance serial directory', () => {
     const device = Object.assign(new EventTarget(), {
       id: 'ble-device-1',
       name: 'RNode BLE',
+      gatt: { connected: true },
     }) as BluetoothDevice;
     vi.stubGlobal('navigator', {
       bluetooth: { getDevices: vi.fn().mockResolvedValue([device]) },
@@ -224,6 +225,7 @@ describe('RNode maintenance serial directory', () => {
       connectionConfig: {
         connection: { type: 'ble', deviceId: 'ble-device-1', deviceName: 'RNode BLE' },
       },
+      connected: true,
     });
   });
 
@@ -233,7 +235,16 @@ describe('RNode maintenance serial directory', () => {
     config.connection = { type: 'ble', deviceId: 'native-device-1', deviceName: 'RNode BLE' };
     const getDevices = vi.fn().mockResolvedValue([]);
     vi.stubGlobal('navigator', { bluetooth: { getDevices } });
-    window.retivumDesktopBluetooth = {} as RetivumDesktopBluetoothBridge;
+    window.retivumDesktopBluetooth = {
+      startScan: vi.fn(),
+      stopScan: vi.fn(),
+      pair: vi.fn(),
+      connectedDevices: vi.fn().mockResolvedValue(['native-device-1']),
+      open: vi.fn(),
+      write: vi.fn(),
+      close: vi.fn(),
+      onEvent: vi.fn(() => () => undefined),
+    };
 
     const devices = await listAuthorizedRNodes([config]);
 
@@ -243,6 +254,7 @@ describe('RNode maintenance serial directory', () => {
       id: 'ble-native-device-1',
       label: 'Electron RNode',
       configuredInterface: config,
+      connected: true,
     });
   });
 });
@@ -259,6 +271,7 @@ describe('RNode maintenance session', () => {
       detail: 'BLE',
       connectionConfig: config,
       configuredInterface: config,
+      connected: false,
     }, undefined, undefined, undefined, undefined, connection);
 
     await expect(session.open()).resolves.toEqual({

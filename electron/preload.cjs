@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld('retivumDesktopBluetooth', Object.freeze({
   startScan: () => ipcRenderer.invoke('retivum:ble:scan-start'),
   stopScan: () => ipcRenderer.invoke('retivum:ble:scan-stop'),
   pair: (options) => ipcRenderer.invoke('retivum:ble:pair', options),
+  connectedDevices: () => ipcRenderer.invoke('retivum:ble:connected-devices'),
   open: (options) => ipcRenderer.invoke('retivum:ble:open', options),
   write: (options) => ipcRenderer.invoke('retivum:ble:write', options),
   close: (options) => ipcRenderer.invoke('retivum:ble:close', options),

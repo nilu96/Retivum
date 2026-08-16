@@ -83,6 +83,7 @@ export interface AuthorizedBleRNode {
   detail: string;
   connectionConfig: RNodeInterfaceConfig;
   configuredInterface?: RNodeInterfaceConfig;
+  connected: boolean;
 }
 
 export type AuthorizedRNode = AuthorizedSerialRNode | AuthorizedBleRNode;
@@ -234,6 +235,7 @@ function bleMaintenanceDevice(
   deviceId: string,
   deviceName: string | undefined,
   configuredInterface?: RNodeInterfaceConfig,
+  connected = false,
 ): AuthorizedBleRNode {
   const connectionConfig = configuredInterface
     ? { ...configuredInterface, connection: { ...configuredInterface.connection, deviceId, deviceName } }
@@ -250,6 +252,7 @@ function bleMaintenanceDevice(
     detail: 'BLE',
     connectionConfig,
     configuredInterface,
+    connected,
   };
 }
 
@@ -289,12 +292,29 @@ export async function listAuthorizedBleRNodes(
   // CoreBluetooth client repeatedly resolve the same saved peripheral and can
   // invalidate an otherwise healthy native session. Browser-authorized device
   // handles are relevant only when no desktop bridge is present.
-  if (!window.retivumDesktopBluetooth) {
+  if (window.retivumDesktopBluetooth) {
+    let connectedDeviceIds: string[] = [];
+    try {
+      connectedDeviceIds = await window.retivumDesktopBluetooth.connectedDevices();
+    } catch {
+      // Keep runtime interface status as the fallback when the native bridge is
+      // temporarily unavailable during application startup or shutdown.
+    }
+    for (const deviceId of connectedDeviceIds) {
+      const existing = devices.get(deviceId);
+      if (existing) devices.set(deviceId, { ...existing, connected: true });
+    }
+  } else {
     const authorized = await navigator.bluetooth?.getDevices?.() ?? [];
     for (const device of authorized) {
       rememberBluetoothDevice(device);
       const configuredInterface = matchingBleInterface(device.id, interfaces);
-      devices.set(device.id, bleMaintenanceDevice(device.id, device.name, configuredInterface));
+      devices.set(device.id, bleMaintenanceDevice(
+        device.id,
+        device.name,
+        configuredInterface,
+        device.gatt?.connected === true,
+      ));
     }
   }
   return Array.from(devices.values());
