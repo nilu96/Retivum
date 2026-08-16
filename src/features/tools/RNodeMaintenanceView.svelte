@@ -30,7 +30,7 @@
   import Icon from '../../lib/components/Icon.svelte';
   import DeviceLogViewer from '../../lib/components/DeviceLogViewer.svelte';
   import ModalDialog from '../../lib/components/ModalDialog.svelte';
-  import { toast } from '../../lib/notifications/toasts';
+  import { liveActivity, toast } from '../../lib/notifications/toasts';
   import ProvisioningNamespaceEditor from '../provisioning/ProvisioningNamespaceEditor.svelte';
   import ProvisioningSaveBar from '../provisioning/ProvisioningSaveBar.svelte';
   import {
@@ -241,12 +241,14 @@
 
   async function connect(device: AuthorizedRNode): Promise<void> {
     if (busy) return;
+    const deviceName = deviceLabel(device);
     busy = true;
     connectionDetailsOpen = false;
     status = 'rnodeMaintenance.status.connecting';
-    await closeProtocolSession(false);
-    selectedDevice = device;
+    const activity = liveActivity.start('rnodeMaintenance.connect.connecting', { name: deviceName });
     try {
+      await closeProtocolSession(false);
+      selectedDevice = device;
       await claimConfiguredInterface(device);
       deviceTelemetry = {};
       deviceLogs = [];
@@ -284,14 +286,14 @@
       fieldValidationErrors = {};
       status = 'rnodeMaintenance.status.connected';
       appendLog('info', 'RNODE_MAINTENANCE_CONNECTED', {
-        device: deviceLabel(device),
+        device: deviceName,
         ...(info.firmwareVersion ? { firmware: info.firmwareVersion } : {}),
       });
-      toast.success('rnodeMaintenance.connect.success', { name: deviceLabel(device) });
+      activity.success('rnodeMaintenance.connect.success', { name: deviceName });
       void loadProvisioning();
     } catch (error) {
       appendLog('error', 'RNODE_MAINTENANCE_CONNECT_FAILED', { message: errorMessage(error) });
-      toast.error('rnodeMaintenance.connect.error', { name: deviceLabel(device) });
+      activity.error('rnodeMaintenance.connect.error', { name: deviceName });
       status = 'rnodeMaintenance.status.disconnected';
       selectedDevice = undefined;
       if (device.transport === 'ble') devices = devices.filter((candidate) => candidate.id !== device.id);
@@ -310,17 +312,33 @@
     connectionDetailsOpen = false;
     const disconnectedDevice = selectedDevice;
     const deviceName = selectedDevice ? deviceLabel(selectedDevice) : $t('rnodeMaintenance.device.fallbackName');
+    const restoringConfiguredInterface = claimedInterfaceId !== undefined
+      && rnodeInterfaces.some((config) => config.id === claimedInterfaceId && config.enabled);
     busy = true;
+    status = 'rnodeMaintenance.status.disconnecting';
+    const activity = liveActivity.start('rnodeMaintenance.device.disconnecting', { name: deviceName });
     try {
       await closeProtocolSession(false);
-      await releaseClaim();
+      const restoration = releaseClaim();
+      if (!restoringConfiguredInterface) await restoration;
       status = 'rnodeMaintenance.status.disconnected';
       appendLog('info', 'RNODE_MAINTENANCE_DISCONNECTED', { device: deviceName });
-      toast.success('rnodeMaintenance.device.disconnectSuccess', { name: deviceName });
+      activity.success(
+        restoringConfiguredInterface
+          ? 'rnodeMaintenance.device.disconnectSuccessRestoring'
+          : 'rnodeMaintenance.device.disconnectSuccess',
+        { name: deviceName },
+      );
+      if (restoringConfiguredInterface) {
+        void restoration.catch((error) => {
+          appendLog('error', 'RNODE_MAINTENANCE_INTERFACE_RESTORE_FAILED', { message: errorMessage(error) });
+          toast.error('rnodeMaintenance.device.restoreError', { name: deviceName });
+        });
+      }
     } catch (error) {
       status = 'rnodeMaintenance.status.error';
       appendLog('error', 'RNODE_MAINTENANCE_DISCONNECT_FAILED', { message: errorMessage(error) });
-      toast.error('rnodeMaintenance.device.disconnectError', { name: deviceName });
+      activity.error('rnodeMaintenance.device.disconnectError', { name: deviceName });
     } finally {
       if (disconnectedDevice?.transport === 'ble') {
         devices = devices.filter((candidate) => candidate.id !== disconnectedDevice.id);

@@ -352,12 +352,92 @@ describe('RNodeMaintenanceView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
       kind: 'success',
-      messageKey: 'rnodeMaintenance.device.disconnectSuccess',
+      messageKey: 'rnodeMaintenance.device.disconnectSuccessRestoring',
       parameters: { name: 'Desk RNode' },
     })));
   });
 
-  it('shows error toasts when refreshing or disconnecting fails', async () => {
+  it('shows persistent connection activity and resolves it in place', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    let finishRestore = () => {};
+    const release = vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockReturnValue(
+      new Promise<void>((resolve) => { finishRestore = () => resolve(); }),
+    );
+    let finishOpen = () => {};
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockReturnValue(new Promise<{ firmwareVersion: string }>((resolve) => {
+      finishOpen = () => resolve({ firmwareVersion: '1.73' });
+    }));
+    let finishClose = () => {};
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockReturnValue(new Promise<void>((resolve) => {
+      finishClose = () => resolve();
+    }));
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unsupported'));
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await vi.waitFor(() => expect(screen.getByText('Connecting…')).toBeInTheDocument());
+    const connectingToast = get(toasts).find((item) => item.messageKey === 'rnodeMaintenance.connect.connecting');
+    expect(connectingToast).toEqual(expect.objectContaining({
+      kind: 'activity',
+      parameters: { name: 'Desk RNode' },
+    }));
+
+    finishOpen();
+    await vi.waitFor(() => expect(screen.getByText('Connected')).toBeInTheDocument());
+    expect(get(toasts).find((item) => item.id === connectingToast!.id)).toEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.connect.success',
+      parameters: { name: 'Desk RNode' },
+    }));
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+    await vi.waitFor(() => expect(screen.getByText('Disconnecting…')).toBeInTheDocument());
+    const disconnectingToast = get(toasts).find((item) => item.messageKey === 'rnodeMaintenance.device.disconnecting');
+    expect(disconnectingToast).toEqual(expect.objectContaining({
+      kind: 'activity',
+      parameters: { name: 'Desk RNode' },
+    }));
+
+    finishClose();
+    await vi.waitFor(() => expect(screen.getByText('Disconnected')).toBeInTheDocument());
+    expect(release).toHaveBeenCalledWith('configured-rnode');
+    expect(get(toasts).find((item) => item.id === disconnectingToast!.id)).toEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.device.disconnectSuccessRestoring',
+      parameters: { name: 'Desk RNode' },
+    }));
+    finishRestore();
+  });
+
+  it('does not announce interface restoration when the configured interface is disabled', async () => {
+    const config = createRNodeInterfaceDraft('serial', 'configured-rnode');
+    config.name = 'Desk RNode';
+    config.enabled = false;
+    config.connection.usbVendorId = 0x10c4;
+    config.connection.usbProductId = 0xea60;
+    interfaceConfigurations.set([config]);
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({ firmwareVersion: '1.73' });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unsupported'));
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled());
+    await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
+
+    await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.device.disconnectSuccess',
+      parameters: { name: 'Desk RNode' },
+    })));
+    expect(get(toasts)).not.toContainEqual(expect.objectContaining({
+      messageKey: 'rnodeMaintenance.device.disconnectSuccessRestoring',
+    }));
+  });
+
+  it('shows error toasts when refreshing or restoring a configured interface fails', async () => {
     const getPorts = vi.mocked(navigator.serial!.getPorts);
     render(RNodeMaintenanceView);
     await screen.findByText('Desk RNode');
@@ -381,9 +461,10 @@ describe('RNodeMaintenanceView', () => {
 
     await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
       kind: 'error',
-      messageKey: 'rnodeMaintenance.device.disconnectError',
+      messageKey: 'rnodeMaintenance.device.restoreError',
       parameters: { name: 'Desk RNode' },
     })));
+    expect(screen.getByText('Disconnected')).toBeInTheDocument();
   });
 
   it('shows extended provisioning and logs only after compatible local provisioning succeeds', async () => {
