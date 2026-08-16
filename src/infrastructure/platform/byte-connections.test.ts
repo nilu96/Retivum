@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RNodeInterfaceConfig } from '../../domain/settings';
+import { createTcpInterfaceDraft, type RNodeInterfaceConfig } from '../../domain/settings';
 
 const mocks = vi.hoisted(() => ({
   initialize: vi.fn(),
@@ -38,8 +38,40 @@ vi.mock('@devioarts/capacitor-tcpclient', () => ({
 import {
   authorizeNativeRNodeDevice,
   createRNodeByteConnection,
+  createTcpByteConnection,
   isRetryableBleError,
 } from './byte-connections';
+
+describe('Electron TCP byte connection', () => {
+  afterEach(() => {
+    window.retivumDesktopSockets = undefined;
+  });
+
+  it('treats a missing main-process socket as one closed transition', async () => {
+    let eventListener: ((event: DesktopSocketEvent) => void) | undefined;
+    const bridge: RetivumSocketBridge = {
+      open: vi.fn().mockResolvedValue(undefined),
+      write: vi.fn().mockRejectedValue(new Error('TCP_SOCKET_NOT_OPEN')),
+      close: vi.fn().mockResolvedValue(undefined),
+      onEvent: vi.fn((listener) => {
+        eventListener = listener;
+        return () => { eventListener = undefined; };
+      }),
+    };
+    window.retivumDesktopSockets = bridge;
+    const onClosed = vi.fn();
+    const connection = createTcpByteConnection(createTcpInterfaceDraft('electron-tcp'));
+
+    await connection.open(vi.fn(), onClosed);
+    await connection.write(Uint8Array.of(1, 2, 3));
+    await connection.write(Uint8Array.of(4, 5, 6));
+    eventListener?.({ id: 'electron-tcp', type: 'closed' });
+
+    expect(bridge.write).toHaveBeenCalledTimes(1);
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    await connection.close();
+  });
+});
 
 const config: RNodeInterfaceConfig = {
   id: 'native-rnode',

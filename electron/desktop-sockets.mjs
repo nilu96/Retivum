@@ -50,22 +50,43 @@ export function registerDesktopSockets(ipcMain, isTrustedSender) {
       const socket = net.createConnection({ host, port });
       const owner = event.sender;
       const entry = { socket, ownerId: owner.id };
+      let connected = false;
       sockets.set(id, entry);
       socket.setNoDelay(true);
-      socket.once('connect', resolve);
-      socket.once('error', (error) => {
-        if (sockets.get(id)?.socket === socket) close(id);
-        reject(error);
+      socket.once('connect', () => {
+        if (sockets.get(id)?.socket !== socket) {
+          socket.destroy();
+          reject(new Error('TCP_SOCKET_REPLACED'));
+          return;
+        }
+        connected = true;
+        resolve();
       });
       socket.on('data', (data) => {
-        if (!event.sender.isDestroyed()) event.sender.send(EVENT_CHANNEL, { id, type: 'data', data: Array.from(data) });
+        if (sockets.get(id)?.socket === socket && !owner.isDestroyed()) {
+          owner.send(EVENT_CHANNEL, { id, type: 'data', data: Array.from(data) });
+        }
       });
       socket.on('close', () => {
-        if (sockets.get(id)?.socket === socket) sockets.delete(id);
-        if (!event.sender.isDestroyed()) event.sender.send(EVENT_CHANNEL, { id, type: 'closed' });
+        if (sockets.get(id)?.socket !== socket) {
+          if (!connected) reject(new Error('TCP_SOCKET_REPLACED'));
+          return;
+        }
+        sockets.delete(id);
+        if (!connected) {
+          reject(new Error('TCP_SOCKET_CLOSED'));
+          return;
+        }
+        if (!owner.isDestroyed()) owner.send(EVENT_CHANNEL, { id, type: 'closed' });
       });
-      socket.on('error', () => {
-        if (!event.sender.isDestroyed()) event.sender.send(EVENT_CHANNEL, { id, type: 'error', errorCode: 'TCP_SOCKET_ERROR' });
+      socket.on('error', (error) => {
+        if (sockets.get(id)?.socket !== socket) return;
+        close(id);
+        if (!connected) {
+          reject(error);
+          return;
+        }
+        if (!owner.isDestroyed()) owner.send(EVENT_CHANNEL, { id, type: 'error', errorCode: 'TCP_SOCKET_ERROR' });
       });
     });
   });
@@ -74,11 +95,12 @@ export function registerDesktopSockets(ipcMain, isTrustedSender) {
     assertTrusted(event);
     const id = validId(options?.id);
     const entry = sockets.get(id);
-    if (!entry || entry.ownerId !== event.sender.id) throw new Error('TCP_SOCKET_NOT_OPEN');
+    if (!entry || entry.ownerId !== event.sender.id) return { ok: false, errorCode: 'TCP_SOCKET_NOT_OPEN' };
     if (!Array.isArray(options?.data) || options.data.length > 2 * 1024 * 1024 || options.data.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)) {
       throw new Error('TCP_SOCKET_DATA_INVALID');
     }
-    await new Promise((resolve, reject) => entry.socket.write(Buffer.from(options.data), (error) => error ? reject(error) : resolve()));
+    const error = await new Promise((resolve) => entry.socket.write(Buffer.from(options.data), resolve));
+    return error ? { ok: false, errorCode: 'TCP_SOCKET_WRITE_FAILED' } : { ok: true };
   });
 
   ipcMain.handle(CLOSE_CHANNEL, async (event, options) => {

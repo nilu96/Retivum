@@ -579,31 +579,55 @@ export class NativeSocketByteConnection implements ByteConnection {
   private removeListener?: () => void;
   private onData?: (data: Uint8Array) => void;
   private onClosed?: () => void;
+  private state: 'closed' | 'opening' | 'open' = 'closed';
   private readonly bridge = window.retivumDesktopSockets ?? window.retivumMobileSockets;
 
   constructor(private readonly config: TcpInterfaceConfig) {}
 
   async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
     if (!this.bridge) throw new Error('TCP_BRIDGE_UNAVAILABLE');
+    this.removeListener?.();
     this.onData = onData;
     this.onClosed = onClosed;
+    this.state = 'opening';
     this.removeListener = this.bridge.onEvent((event) => {
       if (event.id !== this.config.id) return;
-      if (event.type === 'data' && event.data) this.onData?.(Uint8Array.from(event.data));
-      if (event.type === 'closed' || event.type === 'error') this.onClosed?.();
+      if (event.type === 'data' && event.data && this.state !== 'closed') {
+        this.onData?.(Uint8Array.from(event.data));
+      }
+      if (event.type === 'closed' || event.type === 'error') this.markClosed();
     });
     await this.bridge.open({ id: this.config.id, ...this.config.connection });
+    if (this.state !== 'opening') throw new Error('TCP_SOCKET_NOT_OPEN');
+    this.state = 'open';
   }
 
   async write(data: Uint8Array): Promise<void> {
     if (!this.bridge) throw new Error('TCP_BRIDGE_UNAVAILABLE');
-    await this.bridge.write({ id: this.config.id, data: Array.from(data) });
+    if (this.state !== 'open') return;
+    try {
+      await this.bridge.write({ id: this.config.id, data: Array.from(data) });
+    } catch (error) {
+      const message = errorMessage(error);
+      if (message.includes('TCP_SOCKET_NOT_OPEN') || message.includes('TCP_SOCKET_WRITE_FAILED')) {
+        this.markClosed();
+        return;
+      }
+      throw error;
+    }
   }
 
   async close(): Promise<void> {
+    this.state = 'closed';
     this.removeListener?.();
     this.removeListener = undefined;
     if (this.bridge) await this.bridge.close({ id: this.config.id });
+  }
+
+  private markClosed(): void {
+    if (this.state === 'closed') return;
+    this.state = 'closed';
+    this.onClosed?.();
   }
 }
 

@@ -9,7 +9,10 @@ const APP_RESUME_CHANNEL = 'retivum:app:resume';
 
 contextBridge.exposeInMainWorld('retivumDesktopSockets', Object.freeze({
   open: (options) => ipcRenderer.invoke('retivum:tcp:open', options),
-  write: (options) => ipcRenderer.invoke('retivum:tcp:write', options),
+  write: async (options) => {
+    const result = await ipcRenderer.invoke('retivum:tcp:write', options);
+    if (result?.ok === false) throw new Error(result.errorCode);
+  },
   close: (options) => ipcRenderer.invoke('retivum:tcp:close', options),
   onEvent: (listener) => {
     const handler = (_event, value) => listener(value);
