@@ -632,6 +632,8 @@
               <div><dt>{$t('rnodeMaintenance.info.platform')}</dt><dd>{codedName(deviceInfo.platform, platformNames)}</dd></div>
               <div><dt>{$t('rnodeMaintenance.info.mcu')}</dt><dd>{codedName(deviceInfo.mcu, mcuNames)}</dd></div>
               <div><dt>{$t('rnodeMaintenance.info.eeprom')}</dt><dd>{deviceInfo.eepromBytes ?? '—'}</dd></div>
+              {#if deviceTelemetry.batteryPercent !== undefined}<div><dt>{$t('status.metric.battery')}</dt><dd>{battery(deviceTelemetry.batteryState, deviceTelemetry.batteryPercent)}</dd></div>{/if}
+              {#if deviceTelemetry.temperatureCelsius !== undefined}<div><dt>{$t('rnodeMaintenance.info.temperature')}</dt><dd>{deviceTelemetry.temperatureCelsius} °C</dd></div>{/if}
               <div>
                 <dt>{$t('rnodeMaintenance.provisioning.rebootRequired')}</dt>
                 <dd>
@@ -644,8 +646,6 @@
                   {/if}
                 </dd>
               </div>
-              {#if deviceTelemetry.batteryPercent !== undefined}<div><dt>{$t('status.metric.battery')}</dt><dd>{battery(deviceTelemetry.batteryState, deviceTelemetry.batteryPercent)}</dd></div>{/if}
-              {#if deviceTelemetry.temperatureCelsius !== undefined}<div><dt>{$t('rnodeMaintenance.info.temperature')}</dt><dd>{deviceTelemetry.temperatureCelsius} °C</dd></div>{/if}
             </dl>
           </section>
           {#if hasRadioLinkTelemetry}<section>

@@ -300,6 +300,9 @@ describe('RNodeMaintenanceView', () => {
     expect(screen.queryByRole('heading', { name: 'Power' })).not.toBeInTheDocument();
     expect(screen.getByText('96% (discharging)')).toBeInTheDocument();
     expect(screen.getByText('25 °C')).toBeInTheDocument();
+    const deviceSection = screen.getByRole('heading', { name: 'Device' }).closest('section')!;
+    const deviceLabels = Array.from(deviceSection.querySelectorAll('dt'), (label) => label.textContent);
+    expect(deviceLabels.at(-1)).toBe('Reboot required');
     expect(screen.getByText('0.00 %')).toBeInTheDocument();
     expect(screen.queryByText('Last packet RSSI')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Node config' })).toBeInTheDocument();
