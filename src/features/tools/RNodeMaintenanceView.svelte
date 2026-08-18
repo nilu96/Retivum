@@ -312,29 +312,18 @@
     connectionDetailsOpen = false;
     const disconnectedDevice = selectedDevice;
     const deviceName = selectedDevice ? deviceLabel(selectedDevice) : $t('rnodeMaintenance.device.fallbackName');
-    const restoringConfiguredInterface = claimedInterfaceId !== undefined
-      && rnodeInterfaces.some((config) => config.id === claimedInterfaceId && config.enabled);
     busy = true;
     status = 'rnodeMaintenance.status.disconnecting';
     const activity = liveActivity.start('rnodeMaintenance.device.disconnecting', { name: deviceName });
     try {
       await closeProtocolSession(false);
       const restoration = releaseClaim();
-      if (!restoringConfiguredInterface) await restoration;
       status = 'rnodeMaintenance.status.disconnected';
       appendLog('info', 'RNODE_MAINTENANCE_DISCONNECTED', { device: deviceName });
-      activity.success(
-        restoringConfiguredInterface
-          ? 'rnodeMaintenance.device.disconnectSuccessRestoring'
-          : 'rnodeMaintenance.device.disconnectSuccess',
-        { name: deviceName },
-      );
-      if (restoringConfiguredInterface) {
-        void restoration.catch((error) => {
-          appendLog('error', 'RNODE_MAINTENANCE_INTERFACE_RESTORE_FAILED', { message: errorMessage(error) });
-          toast.error('rnodeMaintenance.device.restoreError', { name: deviceName });
-        });
-      }
+      activity.success('rnodeMaintenance.device.disconnectSuccess', { name: deviceName });
+      void restoration.catch((error) => {
+        appendLog('error', 'RNODE_MAINTENANCE_INTERFACE_RESTORE_FAILED', { message: errorMessage(error) });
+      });
     } catch (error) {
       status = 'rnodeMaintenance.status.error';
       appendLog('error', 'RNODE_MAINTENANCE_DISCONNECT_FAILED', { message: errorMessage(error) });

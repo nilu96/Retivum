@@ -5,7 +5,12 @@ import { provisioningFieldFlags, provisioningFieldTypes } from '../../domain/pro
 import { createRNodeInterfaceDraft } from '../../domain/settings';
 import { LocalProvisioningClient, RNodeMaintenanceSession } from '../../infrastructure/platform/rnode-maintenance';
 import { answerDesktopBluetoothSelection } from '../../infrastructure/platform/desktop-bluetooth-selection';
-import { interfaceConfigurations, interfaceStatuses, reticulumRuntime } from '../../infrastructure/reticulum/runtime';
+import {
+  interfaceConfigurations,
+  interfaceStatuses,
+  reticulumLogs,
+  reticulumRuntime,
+} from '../../infrastructure/reticulum/runtime';
 import { clearToasts, toasts } from '../../lib/notifications/toasts';
 import RNodeMaintenanceView from './RNodeMaintenanceView.svelte';
 
@@ -18,6 +23,7 @@ describe('RNodeMaintenanceView', () => {
     config.connection.usbProductId = 0xea60;
     interfaceConfigurations.set([config]);
     interfaceStatuses.set({});
+    reticulumLogs.set([]);
     Object.defineProperty(navigator, 'serial', {
       configurable: true,
       value: {
@@ -38,6 +44,7 @@ describe('RNodeMaintenanceView', () => {
     window.retivumDesktopBluetooth = undefined;
     interfaceConfigurations.set([]);
     interfaceStatuses.set({});
+    reticulumLogs.set([]);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -352,7 +359,7 @@ describe('RNodeMaintenanceView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
       kind: 'success',
-      messageKey: 'rnodeMaintenance.device.disconnectSuccessRestoring',
+      messageKey: 'rnodeMaintenance.device.disconnectSuccess',
       parameters: { name: 'Desk RNode' },
     })));
   });
@@ -403,7 +410,7 @@ describe('RNodeMaintenanceView', () => {
     expect(release).toHaveBeenCalledWith('configured-rnode');
     expect(get(toasts).find((item) => item.id === disconnectingToast!.id)).toEqual(expect.objectContaining({
       kind: 'success',
-      messageKey: 'rnodeMaintenance.device.disconnectSuccessRestoring',
+      messageKey: 'rnodeMaintenance.device.disconnectSuccess',
       parameters: { name: 'Desk RNode' },
     }));
     finishRestore();
@@ -432,12 +439,9 @@ describe('RNodeMaintenanceView', () => {
       messageKey: 'rnodeMaintenance.device.disconnectSuccess',
       parameters: { name: 'Desk RNode' },
     })));
-    expect(get(toasts)).not.toContainEqual(expect.objectContaining({
-      messageKey: 'rnodeMaintenance.device.disconnectSuccessRestoring',
-    }));
   });
 
-  it('shows error toasts when refreshing or restoring a configured interface fails', async () => {
+  it('shows refresh errors but only logs a configured-interface restoration failure', async () => {
     const getPorts = vi.mocked(navigator.serial!.getPorts);
     render(RNodeMaintenanceView);
     await screen.findByText('Desk RNode');
@@ -459,11 +463,21 @@ describe('RNodeMaintenanceView', () => {
     await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Disconnect' })).toBeEnabled());
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
 
-    await vi.waitFor(() => expect(get(toasts)).toContainEqual(expect.objectContaining({
-      kind: 'error',
-      messageKey: 'rnodeMaintenance.device.restoreError',
-      parameters: { name: 'Desk RNode' },
+    await vi.waitFor(() => expect(get(reticulumLogs)).toContainEqual(expect.objectContaining({
+      level: 'error',
+      source: 'rnode',
+      code: 'RNODE_MAINTENANCE_INTERFACE_RESTORE_FAILED',
+      details: { message: 'release failed' },
     })));
+    expect(get(toasts)).toContainEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.device.disconnectSuccess',
+      parameters: { name: 'Desk RNode' },
+    }));
+    expect(get(toasts)).not.toContainEqual(expect.objectContaining({
+      kind: 'error',
+      parameters: { name: 'Desk RNode' },
+    }));
     expect(screen.getByText('Disconnected')).toBeInTheDocument();
   });
 
