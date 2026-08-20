@@ -202,13 +202,7 @@
     if (active.id === candidate.id) return true;
     if (active.transport !== 'serial' || candidate.transport !== 'serial') return false;
     const activeInterfaceId = active.configuredInterface?.id;
-    if (activeInterfaceId && activeInterfaceId === candidate.configuredInterface?.id) return true;
-    const activeInfo = active.port.getInfo();
-    const candidateInfo = candidate.port.getInfo();
-    const hasUsbIdentity = activeInfo.usbVendorId !== undefined || activeInfo.usbProductId !== undefined;
-    return hasUsbIdentity
-      && activeInfo.usbVendorId === candidateInfo.usbVendorId
-      && activeInfo.usbProductId === candidateInfo.usbProductId;
+    return activeInterfaceId !== undefined && activeInterfaceId === candidate.configuredInterface?.id;
   }
 
   async function refreshDevices(showFeedback = false): Promise<void> {

@@ -181,6 +181,29 @@ describe('RNode maintenance serial directory', () => {
     });
   });
 
+  it('associates identical authorized ports with distinct configured interfaces', async () => {
+    const firstPort = new FakeSerialPort({ usbVendorId: 9114, usbProductId: 32809 });
+    const secondPort = new FakeSerialPort({ usbVendorId: 9114, usbProductId: 32809 });
+    const firstConfig = createRNodeInterfaceDraft('serial', 'maintenance-identical-first');
+    const secondConfig = createRNodeInterfaceDraft('serial', 'maintenance-identical-second');
+    firstConfig.createdAt = '2026-03-01T00:00:00.000Z';
+    secondConfig.createdAt = '2026-03-02T00:00:00.000Z';
+    for (const config of [firstConfig, secondConfig]) {
+      config.connection.usbVendorId = 9114;
+      config.connection.usbProductId = 32809;
+    }
+    vi.stubGlobal('navigator', {
+      serial: { getPorts: vi.fn().mockResolvedValue([firstPort, secondPort]), requestPort: vi.fn() },
+    });
+
+    const devices = await listAuthorizedSerialRNodes([secondConfig, firstConfig]);
+
+    expect(devices).toHaveLength(2);
+    expect(devices[0]).toMatchObject({ port: firstPort, configuredInterface: firstConfig });
+    expect(devices[1]).toMatchObject({ port: secondPort, configuredInterface: secondConfig });
+    expect(devices[0].id).not.toBe(devices[1].id);
+  });
+
   it('retains the Electron chooser name when the serial directory refreshes', async () => {
     const port = new FakeSerialPort({ usbVendorId: 0x1915, usbProductId: 0x521f });
     vi.stubGlobal('navigator', {

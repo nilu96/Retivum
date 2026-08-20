@@ -10,6 +10,7 @@ import { rememberBluetoothDevice } from './bluetooth-devices';
 import { selectNativeRNodeDevice } from './native-bluetooth-selection';
 import { selectDesktopBluetoothDevice } from './desktop-bluetooth-selection';
 import { takeDesktopDeviceSelection } from './desktop-device-selection';
+import { rememberSelectedSerialPort } from './serial-port-registry';
 
 export interface InterfaceCapabilities {
   websocket: boolean;
@@ -95,6 +96,7 @@ export async function selectRNodeDevice(type: RNodeConnectionType): Promise<{
   if (!navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
   const port = await navigator.serial.requestPort();
   const selectedDevice = takeDesktopDeviceSelection('serial');
+  rememberSelectedSerialPort(port, selectedDevice?.id);
   const info = port.getInfo();
   const identifier = [info.usbVendorId, info.usbProductId]
     .filter((value) => value !== undefined)

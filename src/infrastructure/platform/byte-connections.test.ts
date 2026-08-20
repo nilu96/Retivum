@@ -42,6 +42,7 @@ import {
   createTcpByteConnection,
   isRetryableBleError,
 } from './byte-connections';
+import { rememberSelectedSerialPort } from './serial-port-registry';
 
 describe('serial byte connection recovery', () => {
   afterEach(() => {
@@ -62,7 +63,7 @@ describe('serial byte connection recovery', () => {
     const replacement = port();
     const getPorts = vi.fn().mockResolvedValue([replacement]);
     vi.stubGlobal('navigator', { serial: { getPorts, requestPort: vi.fn() } });
-    const connection = createSerialPortByteConnection(original);
+    const connection = createSerialPortByteConnection(original, rememberSelectedSerialPort(original));
 
     await connection.open(vi.fn(), vi.fn());
     await connection.close();

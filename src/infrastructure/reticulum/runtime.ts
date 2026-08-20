@@ -71,6 +71,7 @@ import { BrowserKnownDestinationRepository } from '../database/known-destination
 import { BrowserInterfaceAnnounceHistoryRepository } from '../database/interface-announce-history-repository';
 import { runtimeInterfaceConfigurations } from '../platform/interface-capabilities';
 import { PlatformInterfaceHost } from '../platform/interface-host';
+import { configureSerialPortRegistry } from '../platform/serial-port-registry';
 import type {
   ChatMessageQueueResult,
   DestinationPathRequestResult,
@@ -251,6 +252,7 @@ class ReticulumRuntimeController {
       identities.set(storedIdentities.map(identitySummary));
       appPreferences.set(structuredClone(settings.preferences));
       interfaceConfigurations.set(structuredClone(settings.interfaces));
+      configureSerialPortRegistry(settings.interfaces);
       this.scheduleMessageRetention();
       provisioningBookmarks.set(storedProvisioningBookmarks);
       knownDestinations.set(storedKnownDestinations);
@@ -334,6 +336,7 @@ class ReticulumRuntimeController {
     };
     appPreferences.set(structuredClone(preferences));
     interfaceConfigurations.set(structuredClone(orderedInterfaces));
+    configureSerialPortRegistry(orderedInterfaces);
     await this.pruneExpiredChatMessages();
     this.post({ type: 'applyConfiguration', configuration });
   }

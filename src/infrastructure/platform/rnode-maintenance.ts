@@ -19,6 +19,10 @@ import { rememberBluetoothDevice } from './bluetooth-devices';
 import { takeDesktopDeviceSelection } from './desktop-device-selection';
 import { authorizeRNodeDevice, selectRNodeDevice } from './interface-capabilities';
 import { KissDeframer, frame, parseRNodeTelemetry } from './rnode-host';
+import {
+  listAssignedSerialPorts,
+  selectedSerialPortEntry,
+} from './serial-port-registry';
 
 const CMD_DETECT = 0x08;
 const CMD_LEAVE = 0x0a;
@@ -174,18 +178,8 @@ function assertIntegerRange(value: number, min: number, max: number, errorCode =
   if (!Number.isInteger(value) || value < min || value > max) throw new Error(errorCode);
 }
 
-const serialPortIds = new WeakMap<SerialPort, string>();
 const serialPortNames = new WeakMap<SerialPort, string>();
 const serialUsbNames = new Map<string, string>();
-let serialPortSequence = 1;
-
-function portId(port: SerialPort): string {
-  const existing = serialPortIds.get(port);
-  if (existing) return existing;
-  const id = `serial-${serialPortSequence++}`;
-  serialPortIds.set(port, id);
-  return id;
-}
 
 function hexId(value: number | undefined): string {
   return value === undefined ? '----' : value.toString(16).padStart(4, '0');
@@ -224,22 +218,16 @@ async function refreshDesktopSerialPortNames(ports: readonly SerialPort[]): Prom
   } catch {
     return;
   }
+  const usedDevices = new Set<number>();
   for (const port of ports) {
     const info = port.getInfo();
-    const match = devices.find((device) => electronUsbId(device.vendorId) === info.usbVendorId
+    const matchIndex = devices.findIndex((device, index) => !usedDevices.has(index)
+      && electronUsbId(device.vendorId) === info.usbVendorId
       && electronUsbId(device.productId) === info.usbProductId);
+    if (matchIndex >= 0) usedDevices.add(matchIndex);
+    const match = matchIndex >= 0 ? devices[matchIndex] : undefined;
     rememberSerialPortName(port, match?.name);
   }
-}
-
-function matchingInterface(
-  port: SerialPort,
-  interfaces: readonly RNodeInterfaceConfig[],
-): RNodeInterfaceConfig | undefined {
-  const info = port.getInfo();
-  return interfaces.find((config) => config.connection.type === 'serial'
-    && (config.connection.usbVendorId === undefined || config.connection.usbVendorId === info.usbVendorId)
-    && (config.connection.usbProductId === undefined || config.connection.usbProductId === info.usbProductId));
 }
 
 function matchingBleInterface(
@@ -278,14 +266,13 @@ export async function listAuthorizedSerialRNodes(
   interfaces: readonly RNodeInterfaceConfig[],
 ): Promise<AuthorizedSerialRNode[]> {
   if (!navigator.serial) return [];
-  const ports = await navigator.serial.getPorts();
-  await refreshDesktopSerialPortNames(ports);
-  return ports.filter((port) => port.connected !== false).map((port) => {
+  const entries = await listAssignedSerialPorts(interfaces);
+  await refreshDesktopSerialPortNames(entries.map((entry) => entry.port));
+  return entries.map(({ id, port, configuredInterface }) => {
     const info = port.getInfo();
-    const configuredInterface = matchingInterface(port, interfaces);
     const deviceName = configuredInterface?.connection.deviceName?.trim() || knownSerialPortName(port);
     return {
-      id: portId(port),
+      id,
       transport: 'serial' as const,
       port,
       configuredInterface,
@@ -355,11 +342,12 @@ export async function requestSerialRNode(
   const port = await navigator.serial.requestPort();
   const selectedDevice = takeDesktopDeviceSelection('serial');
   rememberSerialPortName(port, selectedDevice?.name);
+  const entry = await selectedSerialPortEntry(port, interfaces, selectedDevice?.id);
   const info = port.getInfo();
-  const configuredInterface = matchingInterface(port, interfaces);
+  const { id, configuredInterface } = entry;
   const deviceName = configuredInterface?.connection.deviceName?.trim() || knownSerialPortName(port);
   return {
-    id: portId(port),
+    id,
     transport: 'serial',
     port,
     configuredInterface,
@@ -433,7 +421,7 @@ export class RNodeMaintenanceSession {
     this.deframer = new KissDeframer(MAX_MAINTENANCE_FRAME_BYTES);
     this.writeQueue = Promise.resolve();
     this.connection ??= this.device.transport === 'serial'
-      ? createSerialPortByteConnection(this.device.port)
+      ? createSerialPortByteConnection(this.device.port, this.device.id)
       : createRNodeByteConnection(this.device.connectionConfig);
     await this.connection.open(
       (data) => this.receive(data),

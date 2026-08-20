@@ -135,21 +135,29 @@ export function installDeviceAccess(window, ipcMain) {
   ipcMain.handle(SERIAL_DEVICES_CHANNEL, async (event) => {
     if (event.sender.id !== rendererWebContents.id) return [];
     const connectedDevices = await enumerateConnectedUsbDevices();
-    const merged = new Map(connectedDevices.map((device) => (
-      [`${device.vendorId}:${device.productId}`, device]
-    )));
+    const merged = connectedDevices.map((device) => ({ ...device }));
+    const usedConnectedDevices = new Set();
     for (const device of serialDevices.values()) {
       const vendorId = typeof device.vendorId === 'string' ? device.vendorId.toLowerCase().padStart(4, '0') : '';
       const productId = typeof device.productId === 'string' ? device.productId.toLowerCase().padStart(4, '0') : '';
-      const key = vendorId && productId ? `${vendorId}:${productId}` : device.id;
-      const connectedDevice = merged.get(key);
-      merged.set(key, {
-        ...connectedDevice,
-        ...device,
-        ...(device.name ? { name: device.name } : connectedDevice?.name ? { name: connectedDevice.name } : {}),
-      });
+      const connectedIndex = merged.findIndex((candidate, index) => !usedConnectedDevices.has(index)
+        && vendorId
+        && productId
+        && candidate.vendorId === vendorId
+        && candidate.productId === productId);
+      if (connectedIndex >= 0) {
+        usedConnectedDevices.add(connectedIndex);
+        const connectedDevice = merged[connectedIndex];
+        merged[connectedIndex] = {
+          ...connectedDevice,
+          ...device,
+          ...(device.name ? { name: device.name } : connectedDevice.name ? { name: connectedDevice.name } : {}),
+        };
+      } else {
+        merged.push({ ...device });
+      }
     }
-    return Array.from(merged.values());
+    return merged;
   });
 
   ipcMain.handle(PAIRING_RESPONSE_CHANNEL, (event, response) => {

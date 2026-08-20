@@ -4,6 +4,7 @@ import { BleClient } from '@capacitor-community/bluetooth-le';
 import { TCPClient, type TCPConnection } from '@devioarts/capacitor-tcpclient';
 import { resolveBluetoothDevice } from './bluetooth-devices';
 import { initializeNativeBluetooth, prepareNativeBluetoothDevice } from './native-bluetooth';
+import { resolveConfiguredSerialPort, resolveSerialPortSlot } from './serial-port-registry';
 
 const RNODE_NUS_SERVICE = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
 const RNODE_NUS_WRITE = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
@@ -40,8 +41,8 @@ export function createRNodeByteConnection(
     : new BluetoothByteConnection(config, log);
 }
 
-export function createSerialPortByteConnection(port: SerialPort): ByteConnection {
-  return new SerialByteConnection(undefined, port);
+export function createSerialPortByteConnection(port: SerialPort, slotId: string): ByteConnection {
+  return new SerialByteConnection(undefined, port, slotId);
 }
 
 /**
@@ -96,6 +97,7 @@ class SerialByteConnection implements ByteConnection {
   constructor(
     private readonly config?: RNodeInterfaceConfig,
     private readonly selectedPort?: SerialPort,
+    private readonly slotId?: string,
   ) {
     this.preferredPort = selectedPort;
   }
@@ -105,20 +107,10 @@ class SerialByteConnection implements ByteConnection {
     const usePreferredPort = preferredPort !== undefined
       && !this.refreshPortBeforeOpen
       && preferredPort.connected !== false;
-    if (!usePreferredPort && !navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
-    const ports = usePreferredPort
-      ? []
-      : await navigator.serial!.getPorts();
-    const preferredInfo = preferredPort?.getInfo();
-    this.port = usePreferredPort ? preferredPort : ports.find((port) => {
-      const info = port.getInfo();
-      const vendorId = this.config?.connection.usbVendorId ?? preferredInfo?.usbVendorId;
-      const productId = this.config?.connection.usbProductId ?? preferredInfo?.usbProductId;
-      return port.connected !== false
-        && (vendorId === undefined || info.usbVendorId === vendorId)
-        && (productId === undefined || info.usbProductId === productId);
-    });
-    if (!this.port) throw new Error('RNODE_SERIAL_NOT_AUTHORIZED');
+    if (usePreferredPort) this.port = preferredPort;
+    else if (this.slotId) this.port = await resolveSerialPortSlot(this.slotId, preferredPort);
+    else if (this.config) this.port = await resolveConfiguredSerialPort(this.config);
+    else throw new Error('RNODE_SERIAL_NOT_AUTHORIZED');
     this.preferredPort = this.port;
     try {
       await this.port.open({ baudRate: 115_200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });

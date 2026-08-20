@@ -82,4 +82,48 @@ describe('Electron device access lifecycle', () => {
     }]);
     dispose();
   });
+
+  it('keeps metadata for identical serial devices as distinct entries', async () => {
+    const session = Object.assign(new EventEmitter(), {
+      setBluetoothPairingHandler: vi.fn(),
+      setDevicePermissionHandler: vi.fn(),
+      setPermissionCheckHandler: vi.fn(),
+      setPermissionRequestHandler: vi.fn(),
+    });
+    const webContents = Object.assign(new EventEmitter(), {
+      id: 7,
+      mainFrame: {},
+      send: vi.fn(),
+      session,
+    });
+    const handlers = new Map();
+    const ipcMain = {
+      handle: vi.fn((channel, handler) => handlers.set(channel, handler)),
+      removeHandler: vi.fn(),
+    };
+    const { dispose } = installDeviceAccess({ webContents }, ipcMain);
+    const rememberDevice = session.setDevicePermissionHandler.mock.calls[0][0];
+    for (const [portId, displayName] of [['port-1', 'RNode One'], ['port-2', 'RNode Two']]) {
+      expect(rememberDevice({
+        deviceType: 'serial',
+        origin: 'file://retivum',
+        device: {
+          portId,
+          displayName,
+          vendorId: '239a',
+          productId: '8029',
+        },
+      })).toBe(true);
+    }
+    vi.mocked(enumerateConnectedUsbDevices).mockResolvedValueOnce([
+      { name: 'RNode', vendorId: '239a', productId: '8029' },
+      { name: 'RNode', vendorId: '239a', productId: '8029' },
+    ]);
+
+    await expect(handlers.get('retivum:device:serial-devices')({ sender: webContents })).resolves.toEqual([
+      expect.objectContaining({ id: 'port-1', name: 'RNode One' }),
+      expect.objectContaining({ id: 'port-2', name: 'RNode Two' }),
+    ]);
+    dispose();
+  });
 });
