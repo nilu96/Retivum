@@ -11,6 +11,39 @@ afterEach(() => {
 });
 
 describe('RNodeNodeConfig', () => {
+  it('uses the native confirmation dialog before saving a boot-mode change', async () => {
+    const saveRadioConfig = vi.fn().mockResolvedValue(undefined);
+    const browserConfirm = vi.spyOn(globalThis, 'confirm');
+    const session = {
+      readRadioConfig: vi.fn().mockResolvedValue({
+        bootMode: 'host',
+        frequency: 869_525_000,
+        bandwidth: 125_000,
+        spreadingFactor: 8,
+        codingRate: 5,
+        txPower: 17,
+        interferenceAvoidance: true,
+      }),
+      readEeprom: vi.fn().mockResolvedValue(new Uint8Array(200)),
+      saveRadioConfig,
+    } as unknown as RNodeMaintenanceSession;
+    render(RNodeNodeConfig, { session });
+
+    const bootMode = await screen.findByLabelText('Boot mode');
+    await fireEvent.change(bootMode, { target: { value: 'tnc' } });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save radio' }));
+
+    const dialog = await screen.findByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Switch the RNode to TNC mode on its next boot?');
+    expect(saveRadioConfig).not.toHaveBeenCalled();
+    expect(browserConfirm).not.toHaveBeenCalled();
+
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Save radio' }));
+
+    await waitFor(() => expect(saveRadioConfig).toHaveBeenCalledOnce());
+    expect(saveRadioConfig).toHaveBeenCalledWith(expect.objectContaining({ bootMode: 'tnc' }));
+  });
+
   it('starts set-only Wi-Fi and display settings with empty fields', () => {
     const session = {
       readRadioConfig: vi.fn().mockResolvedValue({

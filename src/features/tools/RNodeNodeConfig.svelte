@@ -26,6 +26,7 @@
   let busy = $state(false);
   let radio = $state<RNodeRadioConfig>();
   let persistedBootMode = $state<RNodeRadioConfig['bootMode']>();
+  let bootModeSavePending = $state(false);
   let eeprom = $state<Uint8Array>();
   let restoreFile = $state<File>();
   let restoreInput = $state<HTMLInputElement>();
@@ -66,10 +67,19 @@
 
   async function saveRadio(): Promise<void> {
     if (!radio) return;
-    if (persistedBootMode !== radio.bootMode && !globalThis.confirm($t('rnodeMaintenance.nodeConfig.bootModeConfirm', { mode: radio.bootMode.toUpperCase() }))) return;
+    if (persistedBootMode !== radio.bootMode) {
+      bootModeSavePending = true;
+      return;
+    }
+    await persistRadio();
+  }
+
+  async function persistRadio(): Promise<void> {
+    if (!radio) return;
     if (await run(() => session!.saveRadioConfig(radio!), 'rnodeMaintenance.nodeConfig.radioSaved', 'RNODE_GENERAL_RADIO_SAVED')) {
       persistedBootMode = radio.bootMode;
     }
+    bootModeSavePending = false;
   }
 
   async function saveWifi(): Promise<void> {
@@ -203,5 +213,17 @@
     confirmLabel={$t('rnodeMaintenance.confirm.restore.action')}
     oncancel={() => { restoreFile = undefined; }}
     onconfirm={restoreEeprom}
+  />
+{/if}
+
+{#if bootModeSavePending && radio}
+  <ConfirmationDialog
+    titleId="rnode-boot-mode-confirmation"
+    title={$t('rnodeMaintenance.nodeConfig.bootModeConfirm', { mode: radio.bootMode.toUpperCase() })}
+    description={$t('rnodeMaintenance.nodeConfig.bootModeHelp')}
+    icon="sync"
+    confirmLabel={$t('rnodeMaintenance.nodeConfig.saveRadio')}
+    oncancel={() => { bootModeSavePending = false; }}
+    onconfirm={persistRadio}
   />
 {/if}
