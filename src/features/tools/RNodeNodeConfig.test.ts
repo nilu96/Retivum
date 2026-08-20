@@ -30,6 +30,11 @@ describe('RNodeNodeConfig', () => {
     render(RNodeNodeConfig, { session });
 
     const bootMode = await screen.findByLabelText('Boot mode');
+    expect(screen.getByRole('spinbutton', { name: /Frequency/ })).toHaveAttribute('min', '100000000');
+    expect(screen.getByRole('spinbutton', { name: /Frequency/ })).toHaveAttribute('max', '1100000000');
+    expect(screen.getByRole('spinbutton', { name: /Bandwidth/ })).toHaveAttribute('max', '500000');
+    expect(screen.getByRole('spinbutton', { name: /TX power/ })).toHaveAttribute('min', '0');
+    expect(screen.getByRole('spinbutton', { name: /TX power/ })).toHaveAttribute('max', '22');
     await fireEvent.change(bootMode, { target: { value: 'tnc' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save radio' }));
 
@@ -42,6 +47,55 @@ describe('RNodeNodeConfig', () => {
 
     await waitFor(() => expect(saveRadioConfig).toHaveBeenCalledOnce());
     expect(saveRadioConfig).toHaveBeenCalledWith(expect.objectContaining({ bootMode: 'tnc' }));
+  });
+
+  it('identifies incomplete HOST-mode defaults before saving a complete TNC profile', async () => {
+    const saveRadioConfig = vi.fn().mockResolvedValue(undefined);
+    const session = {
+      readRadioConfig: vi.fn().mockResolvedValue({
+        bootMode: 'host',
+        frequency: 0,
+        bandwidth: 0,
+        spreadingFactor: 0,
+        codingRate: 5,
+        txPower: 255,
+        interferenceAvoidance: true,
+      }),
+      readEeprom: vi.fn().mockResolvedValue(new Uint8Array(200)),
+      saveRadioConfig,
+    } as unknown as RNodeMaintenanceSession;
+    render(RNodeNodeConfig, { session });
+
+    await fireEvent.change(await screen.findByLabelText('Boot mode'), { target: { value: 'tnc' } });
+
+    expect(screen.getByText('Frequency must be between 100,000,000 and 1,100,000,000 Hz.')).toBeInTheDocument();
+    expect(screen.getByText('Bandwidth must be between 7,800 and 500,000 Hz.')).toBeInTheDocument();
+    expect(screen.getByText('Spreading factor must be between 5 and 12.')).toBeInTheDocument();
+    expect(screen.getByText('TX power must be between 0 and 22 dBm.')).toBeInTheDocument();
+    expect(screen.getByRole('spinbutton', { name: /TX power/ }).closest('label'))
+      .toHaveTextContent('TX power must be between 0 and 22 dBm.');
+    expect(screen.getByText(/Delays transmission while supported RNodes detect interference/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save radio' })).toBeDisabled();
+
+    await fireEvent.input(screen.getByRole('spinbutton', { name: /Frequency/ }), { target: { value: '869525000' } });
+    await fireEvent.input(screen.getByRole('spinbutton', { name: /Bandwidth/ }), { target: { value: '125000' } });
+    await fireEvent.input(screen.getByRole('spinbutton', { name: /Spreading factor/ }), { target: { value: '8' } });
+    await fireEvent.input(screen.getByRole('spinbutton', { name: /TX power/ }), { target: { value: '17' } });
+
+    const save = screen.getByRole('button', { name: 'Save radio' });
+    await waitFor(() => expect(save).toBeEnabled());
+    await fireEvent.click(save);
+    await fireEvent.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Save radio' }));
+
+    await waitFor(() => expect(saveRadioConfig).toHaveBeenCalledWith({
+      bootMode: 'tnc',
+      frequency: 869_525_000,
+      bandwidth: 125_000,
+      spreadingFactor: 8,
+      codingRate: 5,
+      txPower: 17,
+      interferenceAvoidance: true,
+    }));
   });
 
   it('starts set-only Wi-Fi and display settings with empty fields', () => {

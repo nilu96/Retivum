@@ -21,6 +21,8 @@
 
   type DisplayDraft = Partial<RNodeDisplayConfig>;
   type WifiDraft = Partial<RNodeWifiConfig>;
+  type RadioField = 'frequency' | 'bandwidth' | 'spreadingFactor' | 'codingRate' | 'txPower';
+  type RadioValidationError = { field: RadioField; message: MessageKey };
 
   let { session, bluetoothPin = '', onlog = () => undefined, onwipe = () => undefined }: Props = $props();
   let busy = $state(false);
@@ -34,6 +36,39 @@
   let wifi = $state<WifiDraft>({});
   const displayHasValue = $derived(Object.values(display).some((value) => value !== undefined));
   const wifiHasValue = $derived(Object.values(wifi).some((value) => value !== undefined));
+  const radioValidationErrors = $derived.by((): RadioValidationError[] => {
+    if (!radio || radio.bootMode === 'host') return [];
+    const errors: RadioValidationError[] = [];
+    if (!isIntegerInRange(radio.frequency, 100_000_000, 1_100_000_000)) {
+      errors.push({ field: 'frequency', message: 'rnodeMaintenance.nodeConfig.frequencyInvalid' });
+    }
+    if (!isIntegerInRange(radio.bandwidth, 7_800, 500_000)) {
+      errors.push({ field: 'bandwidth', message: 'rnodeMaintenance.nodeConfig.bandwidthInvalid' });
+    }
+    if (!isIntegerInRange(radio.spreadingFactor, 5, 12)) {
+      errors.push({ field: 'spreadingFactor', message: 'rnodeMaintenance.nodeConfig.sfInvalid' });
+    }
+    if (!isIntegerInRange(radio.codingRate, 5, 8)) {
+      errors.push({ field: 'codingRate', message: 'rnodeMaintenance.nodeConfig.crInvalid' });
+    }
+    if (!isIntegerInRange(radio.txPower, 0, 22)) {
+      errors.push({ field: 'txPower', message: 'rnodeMaintenance.nodeConfig.txPowerInvalid' });
+    }
+    return errors;
+  });
+  const frequencyError = $derived(radioValidationErrors.find((error) => error.field === 'frequency')?.message);
+  const bandwidthError = $derived(radioValidationErrors.find((error) => error.field === 'bandwidth')?.message);
+  const spreadingFactorError = $derived(radioValidationErrors.find((error) => error.field === 'spreadingFactor')?.message);
+  const codingRateError = $derived(radioValidationErrors.find((error) => error.field === 'codingRate')?.message);
+  const txPowerError = $derived(radioValidationErrors.find((error) => error.field === 'txPower')?.message);
+
+  function isIntegerInRange(value: number, min: number, max: number): boolean {
+    return Number.isInteger(value) && value >= min && value <= max;
+  }
+
+  function radioFieldInvalid(field: RadioField): boolean {
+    return radioValidationErrors.some((error) => error.field === field);
+  }
 
   onMount(() => {
     if (session) void refreshRadio();
@@ -66,7 +101,7 @@
   }
 
   async function saveRadio(): Promise<void> {
-    if (!radio) return;
+    if (!radio || radioValidationErrors.length > 0) return;
     if (persistedBootMode !== radio.bootMode) {
       bootModeSavePending = true;
       return;
@@ -75,7 +110,7 @@
   }
 
   async function persistRadio(): Promise<void> {
-    if (!radio) return;
+    if (!radio || radioValidationErrors.length > 0) return;
     if (await run(() => session!.saveRadioConfig(radio!), 'rnodeMaintenance.nodeConfig.radioSaved', 'RNODE_GENERAL_RADIO_SAVED')) {
       persistedBootMode = radio.bootMode;
     }
@@ -145,15 +180,15 @@
         {#if radio}
           <div class="rnode-provisioning-fields">
             <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.bootMode')}</span><select bind:value={radio.bootMode}><option value="host">{$t('rnodeMaintenance.nodeConfig.hostMode')}</option><option value="tnc">{$t('rnodeMaintenance.nodeConfig.tncMode')}</option></select></label>
-            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.frequency')}</span><input type="number" min="100000000" max="1100000000" disabled={radio.bootMode === 'host'} bind:value={radio.frequency} /><small>Hz</small></label>
-            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.bandwidth')}</span><input type="number" min="7800" max="1625000" disabled={radio.bootMode === 'host'} bind:value={radio.bandwidth} /><small>Hz</small></label>
-            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.sf')}</span><input type="number" min="5" max="12" disabled={radio.bootMode === 'host'} bind:value={radio.spreadingFactor} /></label>
-            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.cr')}</span><input type="number" min="5" max="8" disabled={radio.bootMode === 'host'} bind:value={radio.codingRate} /></label>
-            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.txPower')}</span><input type="number" min="-9" max="37" disabled={radio.bootMode === 'host'} bind:value={radio.txPower} /><small>dBm</small></label>
-            <label class="field rnode-switch-field"><span>{$t('rnodeMaintenance.nodeConfig.ia')}</span><input type="checkbox" role="switch" disabled={radio.bootMode === 'host'} bind:checked={radio.interferenceAvoidance} /></label>
+            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.frequency')}</span><input type="number" min="100000000" max="1100000000" aria-invalid={radioFieldInvalid('frequency')} disabled={radio.bootMode === 'host'} bind:value={radio.frequency} /><small class:field-error={frequencyError !== undefined} role={frequencyError ? 'alert' : undefined}>{frequencyError ? $t(frequencyError) : 'Hz'}</small></label>
+            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.bandwidth')}</span><input type="number" min="7800" max="500000" aria-invalid={radioFieldInvalid('bandwidth')} disabled={radio.bootMode === 'host'} bind:value={radio.bandwidth} /><small class:field-error={bandwidthError !== undefined} role={bandwidthError ? 'alert' : undefined}>{bandwidthError ? $t(bandwidthError) : 'Hz'}</small></label>
+            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.sf')}</span><input type="number" min="5" max="12" aria-invalid={radioFieldInvalid('spreadingFactor')} disabled={radio.bootMode === 'host'} bind:value={radio.spreadingFactor} />{#if spreadingFactorError}<small class="field-error" role="alert">{$t(spreadingFactorError)}</small>{/if}</label>
+            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.cr')}</span><input type="number" min="5" max="8" aria-invalid={radioFieldInvalid('codingRate')} disabled={radio.bootMode === 'host'} bind:value={radio.codingRate} />{#if codingRateError}<small class="field-error" role="alert">{$t(codingRateError)}</small>{/if}</label>
+            <label class="field"><span>{$t('rnodeMaintenance.nodeConfig.txPower')}</span><input type="number" min="0" max="22" aria-invalid={radioFieldInvalid('txPower')} disabled={radio.bootMode === 'host'} bind:value={radio.txPower} /><small class:field-error={txPowerError !== undefined} role={txPowerError ? 'alert' : undefined}>{txPowerError ? $t(txPowerError) : 'dBm'}</small></label>
+            <label class="field rnode-switch-field"><span>{$t('rnodeMaintenance.nodeConfig.ia')}</span><input type="checkbox" role="switch" disabled={radio.bootMode === 'host'} bind:checked={radio.interferenceAvoidance} /><small>{$t('rnodeMaintenance.nodeConfig.iaHelp')}</small></label>
           </div>
           <aside class="rnode-maintenance-notice"><Icon name="info" size={18} /><p>{$t('rnodeMaintenance.nodeConfig.bootModeHelp')}</p></aside>
-          <div class="rnode-maintenance-actions"><button class="button primary" disabled={busy} onclick={() => void saveRadio()}>{$t('rnodeMaintenance.nodeConfig.saveRadio')}</button></div>
+          <div class="rnode-maintenance-actions"><button class="button primary" disabled={busy || radioValidationErrors.length > 0} onclick={() => void saveRadio()}>{$t('rnodeMaintenance.nodeConfig.saveRadio')}</button></div>
         {:else}<p class="rnode-maintenance-empty">{$t('rnodeMaintenance.nodeConfig.radioPrompt')}</p>{/if}
       </section>
 

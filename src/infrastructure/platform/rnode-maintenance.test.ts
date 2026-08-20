@@ -22,13 +22,21 @@ class FakeSerialPort {
   closeCount = 0;
   private readonly controller: ReadableStreamDefaultController<Uint8Array>;
   private readonly decoder = new KissDeframer(1_100_000);
+  private frequency = Uint8Array.of(0x33, 0xd1, 0x9d, 0x80);
+  private bandwidth = Uint8Array.of(0x00, 0x01, 0xe8, 0x48);
+  private txPower = 17;
+  private spreadingFactor = 8;
+  private codingRate = 5;
+  private radioState = 0;
 
   constructor(
     private readonly info: SerialPortInfo,
     private readonly respond = true,
     readonly connected = true,
+    private readonly maxTxPower = 22,
   ) {
     this.eeprom[0xa7] = 0x73;
+    this.eeprom.set([8, 5, 17, 0x00, 0x01, 0xe8, 0x48, 0x33, 0xd3, 0xe6, 0x08], 0x9c);
     this.eeprom[0xb9] = 0;
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     this.readable = new ReadableStream({
@@ -58,11 +66,25 @@ class FakeSerialPort {
     else if (command === 0x47) this.emit(0x47, [0x35]);
     else if (command === 0x51) this.emit(0x51, this.eeprom);
     else if (command === 0x52 && payload.byteLength === 2) this.eeprom[payload[0]] = payload[1];
-    else if (command === 0x01 && payload.every((byte) => byte === 0)) this.emit(0x01, [0x33, 0xd1, 0x9d, 0x80]);
-    else if (command === 0x02 && payload.every((byte) => byte === 0)) this.emit(0x02, [0x00, 0x01, 0xe8, 0x48]);
-    else if (command === 0x03 && payload[0] === 0xff) this.emit(0x03, [0xfd]);
-    else if (command === 0x04 && payload[0] === 0xff) this.emit(0x04, [8]);
-    else if (command === 0x05 && payload[0] === 0xff) this.emit(0x05, [5]);
+    else if (command === 0x01 && payload.every((byte) => byte === 0)) this.emit(0x01, this.frequency);
+    else if (command === 0x01) this.frequency = Uint8Array.from(payload);
+    else if (command === 0x02 && payload.every((byte) => byte === 0)) this.emit(0x02, this.bandwidth);
+    else if (command === 0x02) this.bandwidth = Uint8Array.from(payload);
+    else if (command === 0x03 && payload[0] === 0xff) this.emit(0x03, [this.txPower]);
+    else if (command === 0x03) this.txPower = Math.min(payload[0], this.maxTxPower);
+    else if (command === 0x04 && payload[0] === 0xff) this.emit(0x04, [this.spreadingFactor]);
+    else if (command === 0x04) this.spreadingFactor = payload[0];
+    else if (command === 0x05 && payload[0] === 0xff) this.emit(0x05, [this.codingRate]);
+    else if (command === 0x05) this.codingRate = payload[0];
+    else if (command === 0x06 && payload[0] === 0xff) this.emit(0x06, [this.radioState]);
+    else if (command === 0x06) this.radioState = payload[0];
+    else if (command === 0x53) {
+      this.eeprom.set([this.spreadingFactor, this.codingRate, this.txPower], 0x9c);
+      this.eeprom.set(this.bandwidth, 0x9f);
+      this.eeprom.set(this.frequency, 0xa3);
+      this.eeprom[0xa7] = 0x73;
+    } else if (command === 0x54) this.eeprom[0xa7] = 0;
+    else if (command === 0x69) this.eeprom[0xb9] = payload[0];
     else if (command === 0x86) this.emit(0x87, payload);
   }
 }
@@ -433,30 +455,40 @@ describe('RNode maintenance session', () => {
 
     await expect(session.readRadioConfig()).resolves.toEqual({
       bootMode: 'tnc',
-      frequency: 869_375_360,
+      frequency: 869_525_000,
       bandwidth: 125_000,
       spreadingFactor: 8,
       codingRate: 5,
-      txPower: -3,
+      txPower: 17,
       interferenceAvoidance: true,
     });
+    const writesBeforeRadioSave = port.writes.length;
     await session.saveRadioConfig({
       bootMode: 'tnc',
-      frequency: 868_300_000,
+      frequency: 869_525_000,
       bandwidth: 125_000,
       spreadingFactor: 9,
       codingRate: 6,
-      txPower: -3,
+      txPower: 17,
       interferenceAvoidance: false,
     });
+    const radioSaveCommands = port.writes.slice(writesBeforeRadioSave)
+      .flatMap((write) => new KissDeframer(1_100_000).process(write));
+    expect(radioSaveCommands.map(({ command }) => command)).toEqual([
+      0x51,
+      0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+      0x06,
+      0x53, 0x69,
+    ]);
+    expect(radioSaveCommands.at(-1)).toEqual({ command: 0x69, payload: Uint8Array.of(1) });
     await session.setBluetooth(2);
     await session.unpairBluetooth();
     await session.saveWifiConfig({ mode: 1, channel: 11, ssid: 'mesh', psk: 'password', ip: '192.168.1.2', netmask: '255.255.255.0' });
     await session.saveDisplayConfig({ intensity: 127, blankingTimeout: 30, rotation: 2, address: 0x3c, neopixelIntensity: 64 });
 
     const commands = port.writes.flatMap((write) => new KissDeframer(1_100_000).process(write));
-    expect(commands).toContainEqual({ command: 0x01, payload: Uint8Array.of(0x33, 0xc1, 0x34, 0xe0) });
-    expect(commands).toContainEqual({ command: 0x03, payload: Uint8Array.of(0xfd) });
+    expect(commands).toContainEqual({ command: 0x01, payload: Uint8Array.of(0x33, 0xd3, 0xe6, 0x08) });
+    expect(commands).toContainEqual({ command: 0x03, payload: Uint8Array.of(17) });
     expect(commands).toContainEqual({ command: 0x53, payload: Uint8Array.of(0) });
     expect(commands).toContainEqual({ command: 0x46, payload: Uint8Array.of(2) });
     expect(commands).toContainEqual({ command: 0x6b, payload: Uint8Array.of(0x6d, 0x65, 0x73, 0x68, 0) });
@@ -480,11 +512,80 @@ describe('RNode maintenance session', () => {
     });
     const hostCommands = port.writes.slice(writesBeforeHostMode).flatMap((write) => new KissDeframer(1_100_000).process(write));
     expect(hostCommands).toEqual([{ command: 0x54, payload: Uint8Array.of(0) }]);
+    const writesBeforeInvalidRadio = port.writes.length;
+    await expect(session.saveRadioConfig({
+      bootMode: 'tnc', frequency: 869_525_000, bandwidth: 0, spreadingFactor: 8, codingRate: 5,
+      txPower: 17, interferenceAvoidance: true,
+    })).rejects.toThrow('RNODE_CONFIG_BANDWIDTH_OUT_OF_RANGE');
+    expect(port.writes).toHaveLength(writesBeforeInvalidRadio);
     const writesBeforeInvalidWifi = port.writes.length;
     await expect(session.saveWifiConfig({
       mode: 1, channel: 11, ssid: 'mesh', psk: 'password', ip: '999.1.1.1', netmask: '255.255.255.0',
     })).rejects.toThrow('RNODE_CONFIG_INVALID_IPV4');
     expect(port.writes).toHaveLength(writesBeforeInvalidWifi);
+    await session.close();
+  });
+
+  it('verifies a HOST-to-TNC profile without issuing the reset-triggering interference command when unchanged', async () => {
+    const port = new FakeSerialPort({ usbVendorId: 0x239a, usbProductId: 0x8029 });
+    port.eeprom[0xa7] = 0;
+    port.eeprom[0xb9] = 0;
+    const session = new RNodeMaintenanceSession({
+      id: 'serial-host-to-tnc',
+      transport: 'serial',
+      label: 'Host RNode',
+      detail: 'USB 239a:8029',
+      port: port as unknown as SerialPort,
+    });
+    await session.open();
+    const writesBeforeSave = port.writes.length;
+
+    await session.saveRadioConfig({
+      bootMode: 'tnc',
+      frequency: 869_525_000,
+      bandwidth: 125_000,
+      spreadingFactor: 8,
+      codingRate: 5,
+      txPower: 17,
+      interferenceAvoidance: true,
+    });
+
+    expect(port.eeprom[0xa7]).toBe(0x73);
+    const commands = port.writes.slice(writesBeforeSave)
+      .flatMap((write) => new KissDeframer(1_100_000).process(write));
+    expect(commands.map(({ command }) => command)).toEqual([
+      0x51,
+      0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+      0x06,
+      0x53,
+    ]);
+    expect(commands.some(({ command }) => command === 0x69)).toBe(false);
+    await session.close();
+  });
+
+  it('rejects negative TX power values before writing radio configuration', async () => {
+    const port = new FakeSerialPort({ usbVendorId: 0x239a, usbProductId: 0x8029 });
+    const session = new RNodeMaintenanceSession({
+      id: 'serial-invalid-tx-power',
+      transport: 'serial',
+      label: 'Validating RNode',
+      detail: 'USB 239a:8029',
+      port: port as unknown as SerialPort,
+    });
+    await session.open();
+    const writesBeforeSave = port.writes.length;
+
+    await expect(session.saveRadioConfig({
+      bootMode: 'tnc',
+      frequency: 869_525_000,
+      bandwidth: 125_000,
+      spreadingFactor: 8,
+      codingRate: 5,
+      txPower: -1,
+      interferenceAvoidance: true,
+    })).rejects.toThrow('RNODE_CONFIG_TX_POWER_OUT_OF_RANGE');
+
+    expect(port.writes).toHaveLength(writesBeforeSave);
     await session.close();
   });
 });

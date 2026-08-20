@@ -61,6 +61,11 @@ const DETECT_RESPONSE = 0x46;
 const RESET_MARKER = 0xf8;
 const EEPROM_CONFIG_OK_ADDRESS = 0xa7;
 const EEPROM_CONFIG_OK = 0x73;
+const EEPROM_CONFIG_SF_ADDRESS = 0x9c;
+const EEPROM_CONFIG_CR_ADDRESS = 0x9d;
+const EEPROM_CONFIG_TX_POWER_ADDRESS = 0x9e;
+const EEPROM_CONFIG_BANDWIDTH_ADDRESS = 0x9f;
+const EEPROM_CONFIG_FREQUENCY_ADDRESS = 0xa3;
 const EEPROM_INFO_LOCK_ADDRESS = 0x9b;
 const EEPROM_INFO_LOCK = 0x73;
 const EEPROM_RESERVED_BYTES = 200;
@@ -165,8 +170,8 @@ function encodeIpv4(value: string): Uint8Array {
   return Uint8Array.from(octets);
 }
 
-function assertIntegerRange(value: number, min: number, max: number): void {
-  if (!Number.isInteger(value) || value < min || value > max) throw new Error('RNODE_CONFIG_VALUE_OUT_OF_RANGE');
+function assertIntegerRange(value: number, min: number, max: number, errorCode = 'RNODE_CONFIG_VALUE_OUT_OF_RANGE'): void {
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(errorCode);
 }
 
 const serialPortIds = new WeakMap<SerialPort, string>();
@@ -470,13 +475,21 @@ export class RNodeMaintenanceSession {
     if (txPower.byteLength !== 1 || spreadingFactor.byteLength !== 1 || codingRate.byteLength !== 1) {
       throw new Error('RNODE_CONFIG_INVALID_RESPONSE');
     }
+    const bootMode = eeprom[EEPROM_CONFIG_OK_ADDRESS] === EEPROM_CONFIG_OK ? 'tnc' : 'host';
     return {
-      bootMode: eeprom[EEPROM_CONFIG_OK_ADDRESS] === EEPROM_CONFIG_OK ? 'tnc' : 'host',
-      frequency: decodeBe32(frequency),
-      bandwidth: decodeBe32(bandwidth),
-      spreadingFactor: spreadingFactor[0],
-      codingRate: codingRate[0],
-      txPower: new Int8Array(txPower.buffer, txPower.byteOffset, 1)[0],
+      bootMode,
+      // As in rnodeconf, an existing TNC profile comes from EEPROM. Live KISS
+      // values can still contain HOST-mode defaults while a boot-mode change is
+      // pending, and are not authoritative for the persisted profile.
+      frequency: bootMode === 'tnc'
+        ? decodeBe32(eeprom.subarray(EEPROM_CONFIG_FREQUENCY_ADDRESS, EEPROM_CONFIG_FREQUENCY_ADDRESS + 4))
+        : decodeBe32(frequency),
+      bandwidth: bootMode === 'tnc'
+        ? decodeBe32(eeprom.subarray(EEPROM_CONFIG_BANDWIDTH_ADDRESS, EEPROM_CONFIG_BANDWIDTH_ADDRESS + 4))
+        : decodeBe32(bandwidth),
+      spreadingFactor: bootMode === 'tnc' ? eeprom[EEPROM_CONFIG_SF_ADDRESS] : spreadingFactor[0],
+      codingRate: bootMode === 'tnc' ? eeprom[EEPROM_CONFIG_CR_ADDRESS] : codingRate[0],
+      txPower: bootMode === 'tnc' ? eeprom[EEPROM_CONFIG_TX_POWER_ADDRESS] : txPower[0],
       interferenceAvoidance: eeprom.byteLength > 0xb9 ? eeprom[0xb9] === 0 : true,
     };
   }
@@ -486,21 +499,38 @@ export class RNodeMaintenanceSession {
       await this.send(CMD_CONF_DELETE, Uint8Array.of(0));
       return;
     }
-    assertIntegerRange(config.frequency, 100_000_000, 1_100_000_000);
-    assertIntegerRange(config.bandwidth, 7_800, 1_625_000);
-    assertIntegerRange(config.spreadingFactor, 5, 12);
-    assertIntegerRange(config.codingRate, 5, 8);
-    assertIntegerRange(config.txPower, -9, 37);
+    assertIntegerRange(config.frequency, 100_000_000, 1_100_000_000, 'RNODE_CONFIG_FREQUENCY_OUT_OF_RANGE');
+    assertIntegerRange(config.bandwidth, 7_800, 500_000, 'RNODE_CONFIG_BANDWIDTH_OUT_OF_RANGE');
+    assertIntegerRange(config.spreadingFactor, 5, 12, 'RNODE_CONFIG_SF_OUT_OF_RANGE');
+    assertIntegerRange(config.codingRate, 5, 8, 'RNODE_CONFIG_CR_OUT_OF_RANGE');
+    assertIntegerRange(config.txPower, 0, 22, 'RNODE_CONFIG_TX_POWER_OUT_OF_RANGE');
+    const eepromBeforeSave = await this.readEeprom();
+    const persistedInterferenceAvoidance = eepromBeforeSave.byteLength > 0xb9 ? eepromBeforeSave[0xb9] === 0 : true;
     const frequency = encodeBe32(config.frequency);
     const bandwidth = encodeBe32(config.bandwidth);
     await this.send(CMD_FREQUENCY, frequency);
     await this.send(CMD_BANDWIDTH, bandwidth);
+    await this.send(CMD_TXPOWER, Uint8Array.of(config.txPower));
     await this.send(CMD_SF, Uint8Array.of(config.spreadingFactor));
     await this.send(CMD_CR, Uint8Array.of(config.codingRate));
-    await this.send(CMD_TXPOWER, Uint8Array.of(config.txPower));
-    await this.send(CMD_DISABLE_INTERFERENCE_AVOIDANCE, Uint8Array.of(config.interferenceAvoidance ? 0 : 1));
     await this.send(CMD_RADIO_STATE, Uint8Array.of(1));
+    // Match rnodeconf's save semantics: the firmware is authoritative for the
+    // live values and may clamp them to board-specific capabilities (most
+    // notably TX power). Querying the state after the start command is also the
+    // synchronization point: the firmware processes startRadio() synchronously.
+    // Its actual CONF_SAVE precondition is that radio initialisation succeeded,
+    // so verify that state instead of requiring every echoed value to be
+    // byte-for-byte identical to the request.
+    const radioState = await this.request(CMD_RADIO_STATE, Uint8Array.of(0xff), 1_500);
+    if (radioState.byteLength !== 1 || radioState[0] !== 1) {
+      throw new Error('RNODE_CONFIG_RADIO_NOT_ONLINE');
+    }
     await this.send(CMD_CONF_SAVE, Uint8Array.of(0));
+    if (persistedInterferenceAvoidance !== config.interferenceAvoidance) {
+      // CMD_DIS_IA persists this separate firmware setting and immediately
+      // hard-resets the RNode, so it must be the final command in the sequence.
+      await this.send(CMD_DISABLE_INTERFERENCE_AVOIDANCE, Uint8Array.of(config.interferenceAvoidance ? 0 : 1));
+    }
   }
 
   async setBluetooth(mode: 0 | 1 | 2): Promise<void> {
