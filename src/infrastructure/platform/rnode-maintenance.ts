@@ -514,21 +514,41 @@ export class RNodeMaintenanceSession {
     await this.send(CMD_SF, Uint8Array.of(config.spreadingFactor));
     await this.send(CMD_CR, Uint8Array.of(config.codingRate));
     await this.send(CMD_RADIO_STATE, Uint8Array.of(1));
-    // Match rnodeconf's save semantics: the firmware is authoritative for the
-    // live values and may clamp them to board-specific capabilities (most
-    // notably TX power). Querying the state after the start command is also the
-    // synchronization point: the firmware processes startRadio() synchronously.
-    // Its actual CONF_SAVE precondition is that radio initialisation succeeded,
-    // so verify that state instead of requiring every echoed value to be
-    // byte-for-byte identical to the request.
+    // Querying the state after the start command is the synchronization point:
+    // the firmware processes startRadio() synchronously. Radio initialisation
+    // must succeed before CONF_SAVE will persist anything.
     const radioState = await this.request(CMD_RADIO_STATE, Uint8Array.of(0xff), 1_500);
     if (radioState.byteLength !== 1 || radioState[0] !== 1) {
       throw new Error('RNODE_CONFIG_RADIO_NOT_ONLINE');
     }
     await this.send(CMD_CONF_SAVE, Uint8Array.of(0));
+    // CONF_SAVE has no acknowledgement and can be silently ignored by the
+    // firmware. Read the persisted profile back after the handler completes;
+    // the longer timeout allows for its synchronous status-light sequence.
+    const persisted = await this.request(CMD_ROM_READ, Uint8Array.of(0), 5_000);
+    if (persisted.byteLength <= EEPROM_CONFIG_OK_ADDRESS
+      || persisted[EEPROM_CONFIG_OK_ADDRESS] !== EEPROM_CONFIG_OK) {
+      throw new Error('RNODE_CONFIG_SAVE_VERIFICATION_FAILED');
+    }
+    if (decodeBe32(persisted.subarray(EEPROM_CONFIG_FREQUENCY_ADDRESS, EEPROM_CONFIG_FREQUENCY_ADDRESS + 4)) !== config.frequency) {
+      throw new Error('RNODE_CONFIG_FREQUENCY_SAVE_VERIFICATION_FAILED');
+    }
+    if (decodeBe32(persisted.subarray(EEPROM_CONFIG_BANDWIDTH_ADDRESS, EEPROM_CONFIG_BANDWIDTH_ADDRESS + 4)) !== config.bandwidth) {
+      throw new Error('RNODE_CONFIG_BANDWIDTH_SAVE_VERIFICATION_FAILED');
+    }
+    if (persisted[EEPROM_CONFIG_SF_ADDRESS] !== config.spreadingFactor) {
+      throw new Error('RNODE_CONFIG_SF_SAVE_VERIFICATION_FAILED');
+    }
+    if (persisted[EEPROM_CONFIG_CR_ADDRESS] !== config.codingRate) {
+      throw new Error('RNODE_CONFIG_CR_SAVE_VERIFICATION_FAILED');
+    }
+    if (persisted[EEPROM_CONFIG_TX_POWER_ADDRESS] !== config.txPower) {
+      throw new Error('RNODE_CONFIG_TX_POWER_SAVE_VERIFICATION_FAILED');
+    }
     if (persistedInterferenceAvoidance !== config.interferenceAvoidance) {
       // CMD_DIS_IA persists this separate firmware setting and immediately
-      // hard-resets the RNode, so it must be the final command in the sequence.
+      // hard-resets the RNode, so it must be the final command in the sequence
+      // and cannot be read back over the current maintenance connection.
       await this.send(CMD_DISABLE_INTERFERENCE_AVOIDANCE, Uint8Array.of(config.interferenceAvoidance ? 0 : 1));
     }
   }

@@ -11,6 +11,75 @@ afterEach(() => {
 });
 
 describe('RNodeNodeConfig', () => {
+  it('shows live radio-save activity and resolves it in place to success', async () => {
+    let finishSave = () => {};
+    const saveRadioConfig = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
+      finishSave = resolve;
+    }));
+    const session = {
+      readRadioConfig: vi.fn().mockResolvedValue({
+        bootMode: 'tnc',
+        frequency: 869_525_000,
+        bandwidth: 125_000,
+        spreadingFactor: 8,
+        codingRate: 5,
+        txPower: 17,
+        interferenceAvoidance: true,
+      }),
+      readEeprom: vi.fn().mockResolvedValue(new Uint8Array(200)),
+      saveRadioConfig,
+    } as unknown as RNodeMaintenanceSession;
+    render(RNodeNodeConfig, { session });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Save radio' }));
+
+    const savingToast = get(toasts).find((item) => (
+      item.messageKey === 'rnodeMaintenance.nodeConfig.radioSaving'
+    ));
+    expect(savingToast).toEqual(expect.objectContaining({ kind: 'activity' }));
+
+    finishSave();
+
+    await waitFor(() => expect(get(toasts).find((item) => item.id === savingToast!.id)).toEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.nodeConfig.radioSaved',
+    })));
+  });
+
+  it('resolves live radio-save activity in place to an error', async () => {
+    let failSave = () => {};
+    const saveRadioConfig = vi.fn().mockReturnValue(new Promise<void>((_resolve, reject) => {
+      failSave = () => reject(new Error('RNODE_CONFIG_TX_POWER_SAVE_VERIFICATION_FAILED'));
+    }));
+    const session = {
+      readRadioConfig: vi.fn().mockResolvedValue({
+        bootMode: 'tnc',
+        frequency: 869_525_000,
+        bandwidth: 125_000,
+        spreadingFactor: 8,
+        codingRate: 5,
+        txPower: 17,
+        interferenceAvoidance: true,
+      }),
+      readEeprom: vi.fn().mockResolvedValue(new Uint8Array(200)),
+      saveRadioConfig,
+    } as unknown as RNodeMaintenanceSession;
+    render(RNodeNodeConfig, { session });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Save radio' }));
+    const savingToast = get(toasts).find((item) => (
+      item.messageKey === 'rnodeMaintenance.nodeConfig.radioSaving'
+    ));
+    expect(savingToast).toEqual(expect.objectContaining({ kind: 'activity' }));
+
+    failSave();
+
+    await waitFor(() => expect(get(toasts).find((item) => item.id === savingToast!.id)).toEqual(expect.objectContaining({
+      kind: 'error',
+      messageKey: 'rnodeMaintenance.nodeConfig.actionFailed',
+    })));
+  });
+
   it('uses the native confirmation dialog before saving a boot-mode change', async () => {
     const saveRadioConfig = vi.fn().mockResolvedValue(undefined);
     const browserConfirm = vi.spyOn(globalThis, 'confirm');

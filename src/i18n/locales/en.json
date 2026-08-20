@@ -768,6 +768,7 @@
   "rnodeMaintenance.nodeConfig.saveRadio": "Save radio",
   "rnodeMaintenance.nodeConfig.radioPrompt": "Select Refresh to read the current standard RNode radio configuration.",
   "rnodeMaintenance.nodeConfig.radioLoaded": "Radio configuration refreshed.",
+  "rnodeMaintenance.nodeConfig.radioSaving": "Saving and verifying radio configuration…",
   "rnodeMaintenance.nodeConfig.radioSaved": "Radio configuration saved. Reboot to apply a boot-mode change.",
   "rnodeMaintenance.nodeConfig.bluetoothOff": "Bluetooth disabled.",
   "rnodeMaintenance.nodeConfig.bluetoothOn": "Bluetooth enabled.",

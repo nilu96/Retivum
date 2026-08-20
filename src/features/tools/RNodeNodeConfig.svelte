@@ -10,7 +10,7 @@
   import { t, type MessageKey } from '../../i18n';
   import ConfirmationDialog from '../../lib/components/ConfirmationDialog.svelte';
   import Icon from '../../lib/components/Icon.svelte';
-  import { toast } from '../../lib/notifications/toasts';
+  import { liveActivity, toast } from '../../lib/notifications/toasts';
 
   interface Props {
     session?: RNodeMaintenanceSession;
@@ -74,16 +74,26 @@
     if (session) void refreshRadio();
   });
 
-  async function run(action: () => Promise<void>, success: MessageKey | undefined, code: string): Promise<boolean> {
+  async function run(
+    action: () => Promise<void>,
+    success: MessageKey | undefined,
+    code: string,
+    activityMessage?: MessageKey,
+  ): Promise<boolean> {
     if (busy || !session) return false;
     busy = true;
+    const activity = activityMessage ? liveActivity.start(activityMessage) : undefined;
     try {
       await action();
-      if (success) toast.success(success);
+      if (success) {
+        if (activity) activity.success(success);
+        else toast.success(success);
+      } else activity?.dismiss();
       onlog('info', code);
       return true;
     } catch (error) {
-      toast.error('rnodeMaintenance.nodeConfig.actionFailed');
+      if (activity) activity.error('rnodeMaintenance.nodeConfig.actionFailed');
+      else toast.error('rnodeMaintenance.nodeConfig.actionFailed');
       onlog('error', `${code}_FAILED`, { message: error instanceof Error ? error.message : String(error) });
       return false;
     } finally {
@@ -111,7 +121,12 @@
 
   async function persistRadio(): Promise<void> {
     if (!radio || radioValidationErrors.length > 0) return;
-    if (await run(() => session!.saveRadioConfig(radio!), 'rnodeMaintenance.nodeConfig.radioSaved', 'RNODE_GENERAL_RADIO_SAVED')) {
+    if (await run(
+      () => session!.saveRadioConfig(radio!),
+      'rnodeMaintenance.nodeConfig.radioSaved',
+      'RNODE_GENERAL_RADIO_SAVED',
+      'rnodeMaintenance.nodeConfig.radioSaving',
+    )) {
       persistedBootMode = radio.bootMode;
     }
     bootModeSavePending = false;

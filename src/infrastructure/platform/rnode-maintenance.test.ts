@@ -478,7 +478,7 @@ describe('RNode maintenance session', () => {
       0x51,
       0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
       0x06,
-      0x53, 0x69,
+      0x53, 0x51, 0x69,
     ]);
     expect(radioSaveCommands.at(-1)).toEqual({ command: 0x69, payload: Uint8Array.of(1) });
     await session.setBluetooth(2);
@@ -557,7 +557,7 @@ describe('RNode maintenance session', () => {
       0x51,
       0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
       0x06,
-      0x53,
+      0x53, 0x51,
     ]);
     expect(commands.some(({ command }) => command === 0x69)).toBe(false);
     await session.close();
@@ -586,6 +586,33 @@ describe('RNode maintenance session', () => {
     })).rejects.toThrow('RNODE_CONFIG_TX_POWER_OUT_OF_RANGE');
 
     expect(port.writes).toHaveLength(writesBeforeSave);
+    await session.close();
+  });
+
+  it('rejects a persisted radio value that differs from the requested configuration', async () => {
+    const port = new FakeSerialPort({ usbVendorId: 0x239a, usbProductId: 0x8029 }, true, true, 17);
+    const session = new RNodeMaintenanceSession({
+      id: 'serial-radio-verification',
+      transport: 'serial',
+      label: 'Verifying RNode',
+      detail: 'USB 239a:8029',
+      port: port as unknown as SerialPort,
+    });
+    await session.open();
+
+    await expect(session.saveRadioConfig({
+      bootMode: 'tnc',
+      frequency: 869_525_000,
+      bandwidth: 125_000,
+      spreadingFactor: 8,
+      codingRate: 5,
+      txPower: 22,
+      interferenceAvoidance: true,
+    })).rejects.toThrow('RNODE_CONFIG_TX_POWER_SAVE_VERIFICATION_FAILED');
+
+    const commands = port.writes.flatMap((write) => new KissDeframer(1_100_000).process(write));
+    expect(commands.slice(-2).map(({ command }) => command)).toEqual([0x53, 0x51]);
+    expect(commands.some(({ command }) => command === 0x69)).toBe(false);
     await session.close();
   });
 });
