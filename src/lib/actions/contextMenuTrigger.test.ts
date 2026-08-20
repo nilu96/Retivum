@@ -42,6 +42,24 @@ describe('contextMenuTrigger', () => {
     action.destroy();
   });
 
+  it('supports SVG graph nodes as context-menu triggers', () => {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    const onopen = vi.fn();
+    const action = contextMenuTrigger(node, { onopen });
+    const contextEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: 48,
+      clientY: 64,
+    });
+
+    node.dispatchEvent(contextEvent);
+
+    expect(contextEvent.defaultPrevented).toBe(true);
+    expect(onopen).toHaveBeenCalledWith(48, 64, 'pointer');
+    action.destroy();
+  });
+
   it('can use Enter and Space for non-button menu triggers', async () => {
     const node = document.createElement('div');
     const onopen = vi.fn();

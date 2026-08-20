@@ -74,6 +74,16 @@ describe('AppShell Chat unread indicator', () => {
     expect(settingsButtons.every((button) => !button.classList.contains('active'))).toBe(true);
   });
 
+  it('keeps the network visualizer grouped under Tools in desktop and mobile navigation', () => {
+    render(AppShell, { current: 'network-visualizer', children: emptyChildren });
+
+    const toolsButtons = screen.getAllByRole('button', { name: 'Tools' });
+    const settingsButtons = screen.getAllByRole('button', { name: 'Settings' });
+    expect(toolsButtons.every((button) => button.classList.contains('active'))).toBe(true);
+    expect(settingsButtons.every((button) => !button.classList.contains('active'))).toBe(true);
+    expect(document.querySelector('.app-shell')).toHaveClass('network-visualizer-route');
+  });
+
   it('resets desktop and mobile scroll positions when the route changes', async () => {
     const { rerender } = render(AppShell, { current: 'tools', children: emptyChildren });
     const main = document.getElementById('main-content') as HTMLElement;

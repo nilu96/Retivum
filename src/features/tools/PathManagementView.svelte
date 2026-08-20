@@ -19,8 +19,8 @@
     statusDetails,
   } from '../../infrastructure/reticulum/runtime';
   import { pendingProbeDestinationHashes } from '../../infrastructure/reticulum/probe-operations';
+  import { disabledPathRequestDestinationHashes } from '../../infrastructure/reticulum/path-request-operations';
   import {
-    pathRequestTimeoutMs,
     probeTimeoutMsForPath,
   } from '../../infrastructure/reticulum/timeouts';
   import type { ContextMenuOpenMethod } from '../../lib/actions/contextMenuTrigger';
@@ -31,7 +31,8 @@
   import Icon from '../../lib/components/Icon.svelte';
   import PageScrollToTop from '../../lib/components/PageScrollToTop.svelte';
   import { showDestinationProbeActivity } from '../../lib/notifications/probe-activity';
-  import { liveActivity, toast } from '../../lib/notifications/toasts';
+  import { showDestinationPathRequestActivity } from '../../lib/notifications/path-request-activity';
+  import { toast } from '../../lib/notifications/toasts';
   import {
     groupKnownDestinationsByIdentity,
     knownDestinationPresentations,
@@ -87,12 +88,10 @@
   );
   let validationVisible = $state(false);
   let busyOperations = $state<string[]>([]);
-  let pathRequestCooldownHashes = $state<string[]>([]);
   let confirmation = $state<Confirmation>();
   let entryActions = $state<EntryActions>();
   let highlightedDestination = $state<string>();
   let highlightTimer: ReturnType<typeof setTimeout> | undefined;
-  const pathRequestCooldownTimers = new Map<string, ReturnType<typeof setTimeout>>();
   const dateFormatter = $derived(createDateFormatter($locale));
   const numberFormatter = $derived(new Intl.NumberFormat($locale, { maximumFractionDigits: 1 }));
   const normalizedDestination = $derived(normalizeDestinationHash(destinationHash));
@@ -193,8 +192,6 @@
     updateBulkClearLayout();
     return () => {
       if (highlightTimer !== undefined) clearTimeout(highlightTimer);
-      for (const timer of pathRequestCooldownTimers.values()) clearTimeout(timer);
-      pathRequestCooldownTimers.clear();
       bulkClearLayoutQuery?.removeEventListener('change', updateBulkClearLayout);
     };
   });
@@ -204,19 +201,7 @@
   }
 
   function pathRequestIsDisabled(hash: string): boolean {
-    return operationIsBusy(`request:${hash}`) || pathRequestCooldownHashes.includes(hash);
-  }
-
-  function beginPathRequestCooldown(hash: string): void {
-    const currentTimer = pathRequestCooldownTimers.get(hash);
-    if (currentTimer !== undefined) clearTimeout(currentTimer);
-    if (!pathRequestCooldownHashes.includes(hash)) {
-      pathRequestCooldownHashes = [...pathRequestCooldownHashes, hash];
-    }
-    pathRequestCooldownTimers.set(hash, setTimeout(() => {
-      pathRequestCooldownTimers.delete(hash);
-      pathRequestCooldownHashes = pathRequestCooldownHashes.filter((item) => item !== hash);
-    }, pathRequestTimeoutMs));
+    return $disabledPathRequestDestinationHashes.has(hash);
   }
 
   async function runOperation(key: string, operation: () => Promise<boolean>): Promise<boolean> {
@@ -233,43 +218,8 @@
     const manualRequest = selectedHash === undefined;
     const hash = selectedHash ?? normalizedDestination;
     if (manualRequest) validationVisible = true;
-    const operationKey = hash ? `request:${hash}` : '';
     if (!hash || $runtimeStatus !== 'online' || pathRequestIsDisabled(hash)) return;
-    busyOperations = [...busyOperations, operationKey];
-    beginPathRequestCooldown(hash);
-    const destination = shortHash(hash);
-    const controller = new AbortController();
-    const activity = liveActivity.start(
-      'pathManagement.activity.pending',
-      { destination },
-      () => controller.abort(),
-    );
-    try {
-      await reticulumRuntime.dropDestinationPath(hash);
-      const result = await reticulumRuntime.requestDestinationPath(hash, controller.signal);
-      if (result.code === 'PATH_REQUEST_CANCELLED') {
-        activity.dismiss();
-        return;
-      }
-      if (result.ok) {
-        activity.success(
-          result.hops === undefined
-            ? 'pathManagement.activity.success'
-            : result.hops === 1
-              ? 'pathManagement.activity.successOneHop'
-              : 'pathManagement.activity.successManyHops',
-          { destination, ...(result.hops === undefined ? {} : { count: result.hops }) },
-        );
-      } else if (result.code === 'PATH_REQUEST_TIMEOUT') {
-        activity.error('pathManagement.activity.timeout', { destination });
-      } else {
-        activity.error('pathManagement.activity.failed', { destination });
-      }
-    } catch {
-      activity.error('pathManagement.activity.failed', { destination });
-    } finally {
-      busyOperations = busyOperations.filter((item) => item !== operationKey);
-    }
+    await showDestinationPathRequestActivity(hash)?.result;
   }
 
   async function deletePath(hash: string): Promise<void> {
@@ -321,10 +271,6 @@
   function interfaceType(interfaceId: string | undefined): string {
     const type = $statusDetails?.interfaces.find((item) => item.id === interfaceId)?.type;
     return type ? $t(`status.interface.type.${type}`) : $t('pathManagement.entry.unknown');
-  }
-
-  function shortHash(value: string): string {
-    return `${value.slice(0, 8)}…${value.slice(-6)}`;
   }
 
   function shortPublicKey(value: string): string {

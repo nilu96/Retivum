@@ -5,7 +5,7 @@
   import Icon, { type IconName } from '../../lib/components/Icon.svelte';
 
   interface ToolDefinition {
-    id: 'provisioning' | 'rnodeMaintenance' | 'logs' | 'pathTable' | 'probe' | 'status';
+    id: 'provisioning' | 'rnodeMaintenance' | 'logs' | 'pathTable' | 'networkVisualizer' | 'probe' | 'status';
     title: MessageKey;
     description: MessageKey;
     icon: IconName;
@@ -24,6 +24,14 @@
       route: 'path-management',
     },
     {
+      id: 'networkVisualizer',
+      title: 'tools.networkVisualizer.title',
+      description: 'tools.networkVisualizer.description',
+      icon: 'network',
+      available: true,
+      route: 'network-visualizer',
+    },
+    {
       id: 'status',
       title: 'tools.status.title',
       description: 'tools.status.description',
@@ -40,21 +48,21 @@
       route: 'probe',
     },
     {
-      id: 'provisioning',
-      title: 'tools.provisioning.title',
-      description: 'tools.provisioning.description',
-      icon: 'network',
-      available: true,
-      route: 'provisioning',
-    },
-    {
       id: 'rnodeMaintenance',
       title: 'tools.rnodeMaintenance.title',
       description: 'tools.rnodeMaintenance.description',
-      icon: 'radio',
+      icon: 'settings',
       available: detectInterfaceCapabilities().rnodeConnections.length > 0,
       hiddenWhenUnavailable: true,
       route: 'rnode-maintenance',
+    },
+    {
+      id: 'provisioning',
+      title: 'tools.provisioning.title',
+      description: 'tools.provisioning.description',
+      icon: 'radio',
+      available: true,
+      route: 'provisioning',
     },
     {
       id: 'logs',

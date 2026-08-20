@@ -23,6 +23,7 @@ The initial application foundation includes:
 - first-run Reticulum identity generation plus AES-GCM-encrypted private-key and runtime-snapshot persistence;
 - persistent multi-identity management with add, edit, activate, delete, standard 64-byte Reticulum identity import/export, and legacy Retivum JSON import compatibility;
 - a bounded current-session Reticulum log viewer for WASM, persistence, and WebSocket diagnostics;
+- an interactive local network visualizer that projects the active identity, configured interfaces, immediate next hops, hop counts, and known destination routes without claiming visibility into unobserved intermediate routers;
 - real binary WebSocket interface drivers, including simultaneous configured interfaces and bounded text-frame compatibility;
 - live LXMF delivery-announce and inbound-message projection from the WASM worker into persistent, identity-scoped Chat directories and conversation history;
 - outbound LXMF composition with recipient-identity discovery before queueing, direct or opportunistic primary delivery, optional propagation fallback after terminal failure, persistent delivery-state updates, stable message IDs, and open-link reuse;

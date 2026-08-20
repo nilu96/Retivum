@@ -245,6 +245,7 @@ export type RuntimeCommand =
   | { type: 'requestDestinationPath'; requestId: string; destinationHash: string }
   | { type: 'cancelDestinationPathRequest'; requestId: string }
   | { type: 'dropDestinationPath'; requestId: string; destinationHash: string }
+  | { type: 'dropDestinationPaths'; requestId: string; destinationHashes: string[] }
   | { type: 'clearDestinationPaths'; requestId: string }
   | { type: 'forgetKnownDestination'; requestId: string; destinationHash: string }
   | { type: 'clearKnownDestinations'; requestId: string }

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history';
+import { clearDestinationPathRequestCooldowns } from '../../infrastructure/reticulum/path-request-operations';
 import type {
   KnownDestinationEntry,
   LocalDestinationEntry,
@@ -120,6 +121,7 @@ describe('PathManagementView', () => {
     vi.restoreAllMocks();
     clearToasts();
     clearProbeHistory();
+    clearDestinationPathRequestCooldowns();
     runtimeStatus.set('online');
     destinationPathStatuses.set({});
     setChatDestinations([]);

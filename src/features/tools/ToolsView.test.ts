@@ -7,6 +7,7 @@ describe('ToolsView', () => {
     render(ToolsView);
 
     expect(screen.getByRole('heading', { name: 'Remote provisioning' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Network visualizer' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Reticulum logs' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Path management' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Probing' })).toBeInTheDocument();
@@ -14,11 +15,19 @@ describe('ToolsView', () => {
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
     expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toEqual([
       'Path management',
+      'Network visualizer',
       'Status details',
       'Probing',
       'Remote provisioning',
       'Reticulum logs',
     ]);
+  });
+
+  it('opens the network visualizer', async () => {
+    render(ToolsView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Network visualizer/ }));
+    expect(window.location.hash).toBe('#/network-visualizer');
   });
 
   it('opens the implemented provisioning tool', async () => {

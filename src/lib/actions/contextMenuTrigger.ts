@@ -11,9 +11,10 @@ const longPressMovementTolerance = 10;
 const nativeContextMenuSuppressionMs = 1_000;
 
 export function contextMenuTrigger(
-  node: HTMLElement,
+  node: HTMLElement | SVGElement,
   initialOptions: ContextMenuTriggerOptions,
 ): { update: (options: ContextMenuTriggerOptions) => void; destroy: () => void } {
+  const eventNode = node as HTMLElement;
   let options = initialOptions;
   let longPressTimer: ReturnType<typeof setTimeout> | undefined;
   let pointerId: number | undefined;
@@ -99,14 +100,14 @@ export function contextMenuTrigger(
     event.stopImmediatePropagation();
   }
 
-  node.addEventListener('contextmenu', handleContextMenu);
-  node.addEventListener('keydown', handleKeydown);
-  node.addEventListener('pointerdown', handlePointerDown);
-  node.addEventListener('pointermove', handlePointerMove);
-  node.addEventListener('pointerup', cancelLongPress);
-  node.addEventListener('pointercancel', cancelLongPress);
-  node.addEventListener('pointerleave', cancelLongPress);
-  node.addEventListener('click', handleClick, true);
+  eventNode.addEventListener('contextmenu', handleContextMenu);
+  eventNode.addEventListener('keydown', handleKeydown);
+  eventNode.addEventListener('pointerdown', handlePointerDown);
+  eventNode.addEventListener('pointermove', handlePointerMove);
+  eventNode.addEventListener('pointerup', cancelLongPress);
+  eventNode.addEventListener('pointercancel', cancelLongPress);
+  eventNode.addEventListener('pointerleave', cancelLongPress);
+  eventNode.addEventListener('click', handleClick, true);
 
   return {
     update(nextOptions) {
@@ -115,14 +116,14 @@ export function contextMenuTrigger(
     },
     destroy() {
       cancelLongPress();
-      node.removeEventListener('contextmenu', handleContextMenu);
-      node.removeEventListener('keydown', handleKeydown);
-      node.removeEventListener('pointerdown', handlePointerDown);
-      node.removeEventListener('pointermove', handlePointerMove);
-      node.removeEventListener('pointerup', cancelLongPress);
-      node.removeEventListener('pointercancel', cancelLongPress);
-      node.removeEventListener('pointerleave', cancelLongPress);
-      node.removeEventListener('click', handleClick, true);
+      eventNode.removeEventListener('contextmenu', handleContextMenu);
+      eventNode.removeEventListener('keydown', handleKeydown);
+      eventNode.removeEventListener('pointerdown', handlePointerDown);
+      eventNode.removeEventListener('pointermove', handlePointerMove);
+      eventNode.removeEventListener('pointerup', cancelLongPress);
+      eventNode.removeEventListener('pointercancel', cancelLongPress);
+      eventNode.removeEventListener('pointerleave', cancelLongPress);
+      eventNode.removeEventListener('click', handleClick, true);
       window.removeEventListener('pointerup', resetClickSuppressionAfterPointerEnd, true);
       window.removeEventListener('pointercancel', resetClickSuppressionAfterPointerEnd, true);
       if (suppressionResetTimer !== undefined) clearTimeout(suppressionResetTimer);

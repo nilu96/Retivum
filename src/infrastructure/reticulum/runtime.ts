@@ -132,10 +132,16 @@ export const nomadLinkStatuses = writable<Record<string, NomadLinkStatus>>({});
 export const provisioningBookmarks = writable<ProvisioningBookmark[]>([]);
 export const destinationPathStatuses = writable<Record<string, DestinationPathStatus>>({});
 export const pathTableEntries = writable<PathTableEntry[]>([]);
+export const pathTableReady = writable(false);
 export const remoteDestinationInventory = writable<KnownDestinationEntry[]>([]);
 export const localDestinationInventory = writable<LocalDestinationEntry[]>([]);
 export const knownDestinations = writable<KnownDestinationRecord[]>([]);
 export const reticulumLogs = writable<ReticulumLogEntry[]>([]);
+
+export interface DestinationPathsDropResult {
+  ok: boolean;
+  count: number;
+}
 
 export function clearReticulumLogs(): void {
   reticulumLogs.set([]);
@@ -217,7 +223,10 @@ class ReticulumRuntimeController {
     cleanup?: () => void;
   }>();
   private readonly pathDropWaiters = new Map<string, (ok: boolean) => void>();
-  private readonly pathManagementWaiters = new Map<string, (ok: boolean) => void>();
+  private readonly pathManagementWaiters = new Map<
+    string,
+    (result: DestinationPathsDropResult) => void
+  >();
   private readonly pathRequestWaiters = new Map<string, {
     destinationHash: string;
     resolve: (result: DestinationPathRequestResult) => void;
@@ -227,6 +236,7 @@ class ReticulumRuntimeController {
     if (this.started) return;
     this.started = true;
     runtimeStatus.set('starting');
+    pathTableReady.set(false);
     nomadDirectoryReady.set(false);
     nomadLinkStatuses.set({});
     chatDirectoryReady.set(false);
@@ -276,10 +286,11 @@ class ReticulumRuntimeController {
         this.failProbeWaiters('PROBE_RUNTIME_FAILED');
         for (const resolve of this.pathDropWaiters.values()) resolve(false);
         this.pathDropWaiters.clear();
-        for (const resolve of this.pathManagementWaiters.values()) resolve(false);
+        for (const resolve of this.pathManagementWaiters.values()) resolve({ ok: false, count: 0 });
         this.pathManagementWaiters.clear();
         this.failPathRequestWaiters('PATH_REQUEST_RUNTIME_FAILED');
         pathTableEntries.set([]);
+        pathTableReady.set(false);
         remoteDestinationInventory.set([]);
         localDestinationInventory.set([]);
       };
@@ -386,12 +397,14 @@ class ReticulumRuntimeController {
   }
 
   /**
-   * Recalls the identity associated with `destination`, derives the destination
-   * hash for `fullDestinationName`, then sends one encrypted raw Reticulum
-   * packet and waits for its delivery proof. This permits a hash announced for
-   * one aspect (for example remote management) to address another aspect on
-   * the same identity (for example `rnstransport.probe`). `timeoutMs` covers
-   * the proof wait; uncached paths use the separate shared path-request timeout.
+   * Recalls the identity associated with `destination`, which may be either an
+   * announced destination hash or a known identity hash, derives the destination
+   * hash for `fullDestinationName`, then sends one encrypted raw Reticulum packet
+   * and waits for its delivery proof. This permits a hash announced for one
+   * aspect (for example remote management), or a path-table next-hop identity,
+   * to address another aspect on the same identity (for example
+   * `rnstransport.probe`). `timeoutMs` covers the proof wait; uncached paths use
+   * the separate shared path-request timeout.
    */
   async probeDestination(
     destination: string,
@@ -525,6 +538,22 @@ class ReticulumRuntimeController {
 
   async clearDestinationPaths(): Promise<boolean> {
     return this.performPathManagementOperation('clearDestinationPaths');
+  }
+
+  async dropDestinationPaths(destinations: readonly string[]): Promise<DestinationPathsDropResult> {
+    const normalized = destinations.map(normalizeDestinationHash);
+    if (normalized.some((destination) => destination === undefined)) {
+      return { ok: false, count: 0 };
+    }
+    const destinationHashes = Array.from(new Set(normalized as string[]));
+    if (destinationHashes.length === 0) return { ok: true, count: 0 };
+    if (!this.worker || !get(activeIdentity)) return { ok: false, count: 0 };
+    const requestId = crypto.randomUUID();
+    return this.performPathManagementCommand({
+      type: 'dropDestinationPaths',
+      requestId,
+      destinationHashes,
+    }, requestId);
   }
 
   async forgetKnownDestination(destination: string): Promise<boolean> {
@@ -1266,6 +1295,7 @@ class ReticulumRuntimeController {
     nomadDirectoryReady.set(false);
     nomadLinkStatuses.set({});
     chatDirectoryReady.set(false);
+    pathTableReady.set(false);
     if (this.messageRetentionTimer !== undefined) {
       window.clearInterval(this.messageRetentionTimer);
       this.messageRetentionTimer = undefined;
@@ -1299,7 +1329,7 @@ class ReticulumRuntimeController {
     this.failProbeWaiters('PROBE_RUNTIME_STOPPED');
     for (const resolve of this.pathDropWaiters.values()) resolve(false);
     this.pathDropWaiters.clear();
-    for (const resolve of this.pathManagementWaiters.values()) resolve(false);
+    for (const resolve of this.pathManagementWaiters.values()) resolve({ ok: false, count: 0 });
     this.pathManagementWaiters.clear();
     this.failPathRequestWaiters('PATH_REQUEST_RUNTIME_STOPPED');
   }
@@ -1378,6 +1408,7 @@ class ReticulumRuntimeController {
       pathTableEntries.set(event.paths);
       remoteDestinationInventory.set(event.remoteDestinations);
       localDestinationInventory.set(event.localDestinations);
+      pathTableReady.set(true);
       return;
     }
     if (event.type === 'knownIdentityInventoryReady') {
@@ -1398,7 +1429,10 @@ class ReticulumRuntimeController {
       return;
     }
     if (event.type === 'pathManagementOperationResult') {
-      this.pathManagementWaiters.get(event.requestId)?.(event.ok);
+      this.pathManagementWaiters.get(event.requestId)?.({
+        ok: event.ok,
+        count: event.count ?? 0,
+      });
       this.pathManagementWaiters.delete(event.requestId);
       return;
     }
@@ -1895,27 +1929,34 @@ class ReticulumRuntimeController {
     return pending;
   }
 
-  private performPathManagementOperation(
+  private async performPathManagementOperation(
     type: 'clearDestinationPaths' | 'forgetKnownDestination' | 'clearKnownDestinations',
     destination?: string,
   ): Promise<boolean> {
     const destinationHash = destination === undefined ? undefined : normalizeDestinationHash(destination);
     if (!this.worker || !get(activeIdentity) || (destination !== undefined && !destinationHash)) {
-      return Promise.resolve(false);
+      return false;
     }
     const requestId = crypto.randomUUID();
     const command = destinationHash
       ? { type, requestId, destinationHash } as RuntimeCommand
       : { type, requestId } as RuntimeCommand;
+    return (await this.performPathManagementCommand(command, requestId)).ok;
+  }
+
+  private performPathManagementCommand(
+    command: RuntimeCommand,
+    requestId: string,
+  ): Promise<DestinationPathsDropResult> {
     this.post(command);
     return new Promise((resolve) => {
       const timeout = window.setTimeout(() => {
         this.pathManagementWaiters.delete(requestId);
-        resolve(false);
+        resolve({ ok: false, count: 0 });
       }, 15_000);
-      this.pathManagementWaiters.set(requestId, (ok) => {
+      this.pathManagementWaiters.set(requestId, (result) => {
         window.clearTimeout(timeout);
-        resolve(ok);
+        resolve(result);
       });
     });
   }

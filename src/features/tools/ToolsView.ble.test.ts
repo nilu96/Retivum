@@ -21,5 +21,7 @@ describe('ToolsView Bluetooth capability', () => {
     render(ToolsView);
 
     expect(screen.getByRole('heading', { name: 'Local RNode configuration' })).toBeInTheDocument();
+    const headings = screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+    expect(headings.indexOf('Local RNode configuration')).toBeLessThan(headings.indexOf('Remote provisioning'));
   });
 });

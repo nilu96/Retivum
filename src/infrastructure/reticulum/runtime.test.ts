@@ -15,6 +15,7 @@ import {
   localDestinationInventory,
   nomadBookmarks,
   nomadLinkStatuses,
+  pathTableReady,
   pathTableEntries,
   propagationSyncActive,
   propagationSyncStatus,
@@ -76,6 +77,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     remoteDestinationInventory.set([]);
     localDestinationInventory.set([]);
     knownDestinations.set([]);
+    pathTableReady.set(false);
     pathTableEntries.set([]);
     propagationSyncActive.set(false);
     propagationSyncStatus.set({ syncing: false });
@@ -376,6 +378,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
         fullDestinationName: 'lxmf.delivery',
       }],
     });
+    expect(get(pathTableReady)).toBe(true);
     expect(get(knownDestinations)).toHaveLength(2);
     expect(get(remoteDestinationInventory)).toEqual([
       { destinationHash: retainedHash, fullDestinationName: 'lxmf.delivery' },
@@ -588,6 +591,34 @@ describe('ReticulumRuntimeController chat deletion', () => {
 
     await internals.handleEvent({ type: 'destinationPathDropResult', requestId: command.requestId, ok: true });
     await expect(pending).resolves.toBe(true);
+  });
+
+  it('drops multiple destination paths with one worker operation', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    const postMessage = vi.fn();
+    internals.worker = { postMessage };
+    const firstDestination = '3'.repeat(32);
+    const secondDestination = '4'.repeat(32);
+
+    const pending = reticulumRuntime.dropDestinationPaths([
+      firstDestination,
+      secondDestination,
+      firstDestination,
+    ]);
+    const command = postMessage.mock.calls[0][0] as { requestId: string };
+    expect(postMessage).toHaveBeenCalledWith({
+      type: 'dropDestinationPaths',
+      requestId: command.requestId,
+      destinationHashes: [firstDestination, secondDestination],
+    });
+
+    await internals.handleEvent({
+      type: 'pathManagementOperationResult',
+      requestId: command.requestId,
+      ok: true,
+      count: 2,
+    });
+    await expect(pending).resolves.toEqual({ ok: true, count: 2 });
   });
 
   it('tracks path-management details and routes request, clear, and forget operations through the worker', async () => {

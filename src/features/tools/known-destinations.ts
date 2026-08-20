@@ -72,10 +72,10 @@ export function groupKnownDestinationsByIdentity(
 }
 
 export function knownDestinationPresentations(
-  entries: KnownDestinationEntry[],
+  entries: readonly KnownDestinationEntry[],
   records: readonly KnownDestinationRecord[],
-  paths: PathTableEntry[],
-  chatContacts: ChatContact[],
+  paths: readonly PathTableEntry[],
+  chatContacts: readonly ChatContact[],
 ): Map<string, KnownDestinationPresentation> {
   const recordsByHash = new Map(records.map((record) => [record.destinationHash, record]));
   const pathsByHash = new Map(paths.map((entry) => [entry.destinationHash, entry]));

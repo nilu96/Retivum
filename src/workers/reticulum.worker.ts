@@ -525,6 +525,11 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       return;
     }
 
+    if (command.type === 'dropDestinationPaths') {
+      dropDestinationPaths(command.requestId, command.destinationHashes);
+      return;
+    }
+
     if (command.type === 'clearDestinationPaths') {
       clearDestinationPaths(command.requestId);
       return;
@@ -1952,6 +1957,42 @@ function clearDestinationPathRequests(code: string): void {
   }
 }
 
+function removeDestinationPaths(destinationHashes: readonly string[]): number {
+  if (!node) return 0;
+  let count = 0;
+  for (const destinationHash of destinationHashes) {
+    const destinationBytes = hexToBytes(destinationHash);
+    if (!node.dropPath(destinationBytes)) continue;
+    count += 1;
+    emitDestinationPathStatus(destinationBytes, false);
+  }
+  return count;
+}
+
+function dropDestinationPaths(requestId: string, requested: readonly string[]): void {
+  if (!node) {
+    emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'PATH_DROP_INVALID' });
+    return;
+  }
+  try {
+    const destinationHashes = Array.from(normalizeDestinationHashes([...requested]));
+    if (destinationHashes.length === 0 && requested.length > 0) {
+      emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'PATH_DROP_INVALID' });
+      return;
+    }
+    const count = removeDestinationPaths(destinationHashes);
+    if (count > 0) queueSnapshotPersistence();
+    emitKnownDestinationSnapshot();
+    log('info', 'wasm', 'RETICULUM_PATHS_DROPPED', {
+      requested: destinationHashes.length,
+      count,
+    });
+    emit({ type: 'pathManagementOperationResult', requestId, ok: true, count });
+  } catch {
+    emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'PATH_DROP_FAILED' });
+  }
+}
+
 function clearDestinationPaths(requestId: string): void {
   if (!node) {
     emit({ type: 'pathManagementOperationResult', requestId, ok: false, code: 'PATH_CLEAR_INVALID' });
@@ -1963,12 +2004,7 @@ function clearDestinationPaths(requestId: string): void {
       const destinationHash = eventBytes(entry, 'destinationHash');
       return destinationHash?.byteLength === 16 ? [destinationHash] : [];
     });
-    let count = 0;
-    for (const destinationHash of destinations) {
-      if (!node.dropPath(destinationHash)) continue;
-      count += 1;
-      emitDestinationPathStatus(destinationHash, false);
-    }
+    const count = removeDestinationPaths(destinations.map(bytesToHex));
     if (count > 0) queueSnapshotPersistence();
     emitKnownDestinationSnapshot();
     log('info', 'wasm', 'RETICULUM_PATHS_CLEARED', { count });
@@ -2108,7 +2144,7 @@ function continueProbe(job: ProbeJob): void {
 
 function deriveProbeDestination(job: ProbeJob): boolean {
   if (!node) return false;
-  const publicKey = job.publicKey ?? knownDestinationPublicKeys.get(job.sourceDestinationHash);
+  const publicKey = job.publicKey ?? recallProbePublicKey(job.sourceDestinationHash);
   if (!publicKey) return false;
   const derivedDestination = new Uint8Array(
     ReticulumNode.hashFromNameAndIdentity(job.fullDestinationName, publicKey),
@@ -2121,6 +2157,22 @@ function deriveProbeDestination(job: ProbeJob): boolean {
   knownDestinationPublicKeys.set(derivedDestinationHash, new Uint8Array(publicKey));
   emitKnownDestinationSnapshot();
   return true;
+}
+
+/**
+ * Mirrors Python Reticulum's `Identity.recall(..., from_identity_hash=True)`
+ * fallback. Path-table next hops are transport identity hashes rather than
+ * destination hashes, so probing one requires recalling any announced
+ * destination that exposed the same public identity first.
+ */
+function recallProbePublicKey(sourceHash: string): Uint8Array | undefined {
+  const direct = knownDestinationPublicKeys.get(sourceHash);
+  if (direct) return direct;
+  for (const publicKey of knownDestinationPublicKeys.values()) {
+    const identityHash = bytesToHex(ReticulumNode.truncatedHash(publicKey));
+    if (identityHash === sourceHash) return publicKey;
+  }
+  return undefined;
 }
 
 function sendProbe(job: ProbeJob): void {
