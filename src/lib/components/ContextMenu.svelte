@@ -70,6 +70,11 @@
     dismissalArmed = true;
   }
 
+  function dismissFromContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    onclose();
+  }
+
   $effect(() => {
     x;
     y;
@@ -116,6 +121,7 @@
   class="context-menu-dismiss"
   aria-label={closeLabel}
   onpointerdown={armDismissal}
+  oncontextmenu={dismissFromContextMenu}
   onclick={dismissFromClick}
 ></button>
 <div

@@ -32,6 +32,52 @@ afterEach(() => {
 });
 
 describe('ContextMenu', () => {
+  it('closes on a right-click outside without opening the native context menu', () => {
+    const onclose = vi.fn();
+    render(ContextMenu, {
+      x: 100,
+      y: 100,
+      autofocus: false,
+      guardOpeningRelease: false,
+      label: 'Actions',
+      closeLabel: 'Close actions',
+      onclose,
+      children,
+    });
+    const contextEvent = new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    });
+
+    screen.getByRole('button', { name: 'Close actions' }).dispatchEvent(contextEvent);
+
+    expect(contextEvent.defaultPrevented).toBe(true);
+    expect(onclose).toHaveBeenCalledOnce();
+  });
+
+  it('does not close when right-clicking inside the menu', () => {
+    const onclose = vi.fn();
+    render(ContextMenu, {
+      x: 100,
+      y: 100,
+      autofocus: false,
+      guardOpeningRelease: false,
+      label: 'Actions',
+      closeLabel: 'Close actions',
+      onclose,
+      children,
+    });
+
+    screen.getByRole('menuitem', { name: 'Action' }).dispatchEvent(new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      button: 2,
+    }));
+
+    expect(onclose).not.toHaveBeenCalled();
+  });
+
   it('keeps the menu inside the visual viewport while the software keyboard is open', async () => {
     const viewport = new TestVisualViewport();
     viewport.offsetLeft = 0;
