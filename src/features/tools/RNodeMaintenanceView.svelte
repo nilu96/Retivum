@@ -71,8 +71,10 @@
   let bluetoothPin = $state('');
   let connectionDetailsOpen = $state(false);
   let deviceRefresh: Promise<{ ok: boolean; count: number }> | undefined;
+  let reconnectActivity: ReturnType<typeof liveActivity.start> | undefined;
   const disconnectedTabs: MaintenanceTab[] = ['device'];
-  const standardTabs: MaintenanceTab[] = ['device', 'nodeConfig'];
+  const reconnectingTabs: MaintenanceTab[] = ['device', 'logs'];
+  const standardTabs: MaintenanceTab[] = ['device', 'nodeConfig', 'logs'];
   const extendedTabs: MaintenanceTab[] = ['device', 'nodeConfig', 'provisioning', 'logs'];
   const availableConnections = detectInterfaceCapabilities().rnodeConnections;
   const platformNames: Record<number, string> = { 0x60: 'Native', 0x70: 'nRF52', 0x80: 'ESP32', 0x90: 'AVR' };
@@ -91,9 +93,11 @@
   const availableRNodeInterfaces = $derived(rnodeInterfaces.filter((config) => (
     availableConnections.includes(config.connection.type)
   )));
-  const connected = $derived(session !== undefined);
+  const connected = $derived(session !== undefined && status === 'rnodeMaintenance.status.connected');
+  const logsAvailable = $derived(session !== undefined
+    || (selectedDevice !== undefined && status === 'rnodeMaintenance.status.connecting'));
   const maintenanceTabs = $derived(
-    connected ? (loaded ? extendedTabs : standardTabs) : disconnectedTabs,
+    connected ? (loaded ? extendedTabs : standardTabs) : logsAvailable ? reconnectingTabs : disconnectedTabs,
   );
   const hasRadioLinkTelemetry = $derived([
     deviceTelemetry.currentRssiDbm,
@@ -126,6 +130,8 @@
   onDestroy(() => {
     const closingSession = session;
     const releasingInterface = claimedInterfaceId;
+    reconnectActivity?.dismiss();
+    reconnectActivity = undefined;
     session = undefined;
     client = undefined;
     void closingSession?.close().finally(() => {
@@ -191,14 +197,39 @@
     ));
   }
 
+  function sameMaintenanceDevice(active: AuthorizedRNode, candidate: AuthorizedRNode): boolean {
+    if (active.transport !== candidate.transport) return false;
+    if (active.id === candidate.id) return true;
+    if (active.transport !== 'serial' || candidate.transport !== 'serial') return false;
+    const activeInterfaceId = active.configuredInterface?.id;
+    if (activeInterfaceId && activeInterfaceId === candidate.configuredInterface?.id) return true;
+    const activeInfo = active.port.getInfo();
+    const candidateInfo = candidate.port.getInfo();
+    const hasUsbIdentity = activeInfo.usbVendorId !== undefined || activeInfo.usbProductId !== undefined;
+    return hasUsbIdentity
+      && activeInfo.usbVendorId === candidateInfo.usbVendorId
+      && activeInfo.usbProductId === candidateInfo.usbProductId;
+  }
+
   async function refreshDevices(showFeedback = false): Promise<void> {
     const refresh = deviceRefresh ?? (async () => {
       try {
         const discoveredDevices = await listAuthorizedRNodes(availableRNodeInterfaces);
         const activeDevice = session ? selectedDevice : undefined;
-        const candidates = activeDevice
-          ? [activeDevice, ...discoveredDevices.filter((candidate) => candidate.id !== activeDevice.id)]
-          : discoveredDevices;
+        let candidates = discoveredDevices;
+        if (activeDevice) {
+          const refreshedIndex = discoveredDevices.findIndex((candidate) => sameMaintenanceDevice(activeDevice, candidate));
+          if (refreshedIndex >= 0) {
+            const refreshedDevice = discoveredDevices[refreshedIndex];
+            candidates = [
+              refreshedDevice,
+              ...discoveredDevices.filter((_candidate, index) => index !== refreshedIndex),
+            ];
+            if (session && selectedDevice === activeDevice) selectedDevice = refreshedDevice;
+          } else {
+            candidates = [activeDevice, ...discoveredDevices];
+          }
+        }
         devices = connectedMaintenanceDevices(candidates);
         appendLog('debug', 'RNODE_MAINTENANCE_DEVICES_REFRESHED', { devices: devices.length });
         return { ok: true, count: devices.length };
@@ -242,6 +273,8 @@
   async function connect(device: AuthorizedRNode): Promise<void> {
     if (busy) return;
     const deviceName = deviceLabel(device);
+    reconnectActivity?.dismiss();
+    reconnectActivity = undefined;
     busy = true;
     connectionDetailsOpen = false;
     status = 'rnodeMaintenance.status.connecting';
@@ -273,6 +306,41 @@
         },
         (pin) => { bluetoothPin = pin; },
         (telemetry) => { deviceTelemetry = { ...deviceTelemetry, ...telemetry }; },
+        (event) => {
+          if (session !== nextSession) return;
+          if (event.type === 'reconnecting') {
+            status = 'rnodeMaintenance.status.reconnecting';
+            deviceTelemetry = {};
+            connectionDetailsOpen = false;
+            if (event.attempt === 1) {
+              appendDeviceLogs($t('rnodeMaintenance.logs.disconnected'));
+            }
+            if (reconnectActivity) {
+              reconnectActivity.update('rnodeMaintenance.connect.reconnecting', { name: deviceName });
+            } else {
+              reconnectActivity = liveActivity.start(
+                'rnodeMaintenance.connect.reconnecting',
+                { name: deviceName },
+                () => { if (session === nextSession) void disconnect(true); },
+              );
+            }
+            appendLog('warning', 'RNODE_MAINTENANCE_RECONNECT_SCHEDULED', {
+              attempt: event.attempt,
+              delayMs: event.delayMs,
+              ...(event.error ? { message: event.error } : {}),
+            });
+            return;
+          }
+          deviceInfo = event.info;
+          status = 'rnodeMaintenance.status.connected';
+          reconnectActivity?.success('rnodeMaintenance.connect.reconnected', { name: deviceName });
+          reconnectActivity = undefined;
+          appendLog('info', 'RNODE_MAINTENANCE_RECONNECTED', {
+            device: deviceName,
+            ...(event.info.firmwareVersion ? { firmware: event.info.firmwareVersion } : {}),
+          });
+          void loadProvisioning();
+        },
       );
       const info = await nextSession.open();
       session = nextSession;
@@ -307,8 +375,10 @@
     }
   }
 
-  async function disconnect(): Promise<void> {
-    if (busy) return;
+  async function disconnect(force = false): Promise<void> {
+    if (busy && !force) return;
+    reconnectActivity?.dismiss();
+    reconnectActivity = undefined;
     connectionDetailsOpen = false;
     const disconnectedDevice = selectedDevice;
     const deviceName = selectedDevice ? deviceLabel(selectedDevice) : $t('rnodeMaintenance.device.fallbackName');
@@ -535,15 +605,17 @@
       await activeSession.reboot();
       appendLog('info', 'RNODE_MAINTENANCE_REBOOT_SENT');
       toast.success('provisioning.reboot.sent');
-      await closeProtocolSession(false);
-      await releaseClaim();
-      selectedDevice = undefined;
-      deviceInfo = undefined;
-      deviceTelemetry = {};
-      loaded = undefined;
-      activeTab = 'device';
-      status = 'rnodeMaintenance.status.disconnected';
-      connectionDetailsOpen = false;
+      if (activeSession.device.transport !== 'serial') {
+        await closeProtocolSession(false);
+        await releaseClaim();
+        selectedDevice = undefined;
+        deviceInfo = undefined;
+        deviceTelemetry = {};
+        loaded = undefined;
+        activeTab = 'device';
+        status = 'rnodeMaintenance.status.disconnected';
+        connectionDetailsOpen = false;
+      }
     } catch (error) {
       appendLog('error', 'RNODE_MAINTENANCE_REBOOT_FAILED', { message: errorMessage(error) });
       toast.error('provisioning.reboot.failed');
@@ -606,7 +678,11 @@
 
   <nav class="scope-tabs rnode-maintenance-tabs" data-tab-count={maintenanceTabs.length} aria-label={$t('rnodeMaintenance.tabs.label')}>
     {#each maintenanceTabs as tab}
-      <button class:active={activeTab === tab} disabled={busy} onclick={() => selectMaintenanceTab(tab as MaintenanceTab)}>
+      <button
+        class:active={activeTab === tab}
+        disabled={busy && !(tab === 'logs' && status === 'rnodeMaintenance.status.connecting')}
+        onclick={() => selectMaintenanceTab(tab as MaintenanceTab)}
+      >
         {$t(`rnodeMaintenance.tabs.${tab}`)}
       </button>
     {/each}

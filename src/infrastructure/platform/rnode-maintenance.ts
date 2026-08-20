@@ -65,6 +65,9 @@ const EEPROM_INFO_LOCK_ADDRESS = 0x9b;
 const EEPROM_INFO_LOCK = 0x73;
 const EEPROM_RESERVED_BYTES = 200;
 const MAX_MAINTENANCE_FRAME_BYTES = 1_100_000;
+const SERIAL_RECONNECT_INITIAL_DELAY_MS = 1_000;
+const SERIAL_RECONNECT_MAXIMUM_DELAY_MS = 5_000;
+const SERIAL_RECONNECT_MULTIPLIER = 1.6;
 
 export interface AuthorizedSerialRNode {
   id: string;
@@ -95,6 +98,16 @@ export interface LocalRNodeInfo {
   board?: number;
   eepromBytes?: number;
 }
+
+export type LocalRNodeConnectionEvent = {
+  type: 'reconnecting';
+  attempt: number;
+  delayMs: number;
+  error?: string;
+} | {
+  type: 'reconnected';
+  info: LocalRNodeInfo;
+};
 
 export interface RNodeRadioConfig {
   bootMode: 'host' | 'tnc';
@@ -374,11 +387,15 @@ interface FrameWaiter {
 }
 
 export class RNodeMaintenanceSession {
-  private readonly deframer = new KissDeframer(MAX_MAINTENANCE_FRAME_BYTES);
+  private deframer = new KissDeframer(MAX_MAINTENANCE_FRAME_BYTES);
   private readonly waiters = new Map<number, FrameWaiter[]>();
   private connection?: ByteConnection;
   private writeQueue: Promise<void> = Promise.resolve();
   private closing = false;
+  private reconnectEnabled = false;
+  private reconnecting = false;
+  private reconnectAttempt = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     readonly device: AuthorizedRNode,
@@ -386,6 +403,7 @@ export class RNodeMaintenanceSession {
     private readonly onClosed: () => void = () => undefined,
     private readonly onBluetoothPin: LocalRNodeBluetoothPinHandler = () => undefined,
     private readonly onTelemetry: LocalRNodeTelemetryHandler = () => undefined,
+    private readonly onConnectionEvent: (event: LocalRNodeConnectionEvent) => void = () => undefined,
     connection?: ByteConnection,
   ) {
     this.connection = connection;
@@ -393,37 +411,47 @@ export class RNodeMaintenanceSession {
 
   async open(): Promise<LocalRNodeInfo> {
     this.closing = false;
+    this.reconnectEnabled = false;
+    this.clearReconnectTimer();
+    try {
+      const info = await this.openConnection();
+      this.reconnectEnabled = this.device.transport === 'serial';
+      this.reconnectAttempt = 0;
+      return info;
+    } catch (error) {
+      await this.connection?.close().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async openConnection(): Promise<LocalRNodeInfo> {
+    this.deframer = new KissDeframer(MAX_MAINTENANCE_FRAME_BYTES);
     this.writeQueue = Promise.resolve();
     this.connection ??= this.device.transport === 'serial'
       ? createSerialPortByteConnection(this.device.port)
       : createRNodeByteConnection(this.device.connectionConfig);
-    try {
-      await this.connection.open(
-        (data) => this.receive(data),
-        () => this.connectionClosed(),
-      );
-      const detected = await this.request(CMD_DETECT, Uint8Array.of(DETECT_REQUEST), 2_000);
-      if (detected[0] !== DETECT_RESPONSE) throw new Error('RNODE_NOT_DETECTED');
-      const [firmware, platform, mcu, board, rom] = await Promise.all([
-        this.optionalRequest(CMD_FIRMWARE_VERSION, Uint8Array.of(0)),
-        this.optionalRequest(CMD_PLATFORM, Uint8Array.of(0)),
-        this.optionalRequest(CMD_MCU, Uint8Array.of(0)),
-        this.optionalRequest(CMD_BOARD, Uint8Array.of(0)),
-        this.optionalRequest(CMD_ROM_READ, Uint8Array.of(0), 2_500),
-      ]);
-      return {
-        firmwareVersion: firmware && firmware.length >= 2
-          ? `${firmware[0]}.${String(firmware[1]).padStart(2, '0')}`
-          : undefined,
-        platform: platform?.[0],
-        mcu: mcu?.[0],
-        board: board?.[0],
-        eepromBytes: rom?.byteLength,
-      };
-    } catch (error) {
-      await this.close();
-      throw error;
-    }
+    await this.connection.open(
+      (data) => this.receive(data),
+      () => this.connectionClosed(),
+    );
+    const detected = await this.request(CMD_DETECT, Uint8Array.of(DETECT_REQUEST), 2_000);
+    if (detected[0] !== DETECT_RESPONSE) throw new Error('RNODE_NOT_DETECTED');
+    const [firmware, platform, mcu, board, rom] = await Promise.all([
+      this.optionalRequest(CMD_FIRMWARE_VERSION, Uint8Array.of(0)),
+      this.optionalRequest(CMD_PLATFORM, Uint8Array.of(0)),
+      this.optionalRequest(CMD_MCU, Uint8Array.of(0)),
+      this.optionalRequest(CMD_BOARD, Uint8Array.of(0)),
+      this.optionalRequest(CMD_ROM_READ, Uint8Array.of(0), 2_500),
+    ]);
+    return {
+      firmwareVersion: firmware && firmware.length >= 2
+        ? `${firmware[0]}.${String(firmware[1]).padStart(2, '0')}`
+        : undefined,
+      platform: platform?.[0],
+      mcu: mcu?.[0],
+      board: board?.[0],
+      eepromBytes: rom?.byteLength,
+    };
   }
 
   async requestProvisioning(payload: Uint8Array, timeoutMs = 8_000): Promise<Uint8Array> {
@@ -549,6 +577,8 @@ export class RNodeMaintenanceSession {
   async close(): Promise<void> {
     if (this.closing) return;
     this.closing = true;
+    this.reconnectEnabled = false;
+    this.clearReconnectTimer();
     await this.writeQueue.catch(() => undefined);
     await this.connection?.close(frame(CMD_LEAVE, Uint8Array.of(0xff))).catch(() => undefined);
     this.rejectWaiters(new Error('RNODE_MAINTENANCE_CLOSED'));
@@ -621,7 +651,61 @@ export class RNodeMaintenanceSession {
   private connectionClosed(): void {
     if (this.closing) return;
     this.rejectWaiters(new Error('RNODE_MAINTENANCE_CLOSED'));
-    this.onClosed();
+    if (this.reconnectEnabled && this.device.transport === 'serial') {
+      this.recoverSerialConnection();
+    } else {
+      this.onClosed();
+    }
+  }
+
+  private recoverSerialConnection(): void {
+    if (this.closing || this.reconnecting || this.reconnectTimer !== undefined) return;
+    this.reconnecting = true;
+    void this.connection?.close().catch(() => undefined).finally(() => {
+      this.reconnecting = false;
+      this.scheduleSerialReconnect();
+    });
+  }
+
+  private scheduleSerialReconnect(error?: unknown): void {
+    if (this.closing || !this.reconnectEnabled || this.reconnectTimer !== undefined) return;
+    this.reconnectAttempt += 1;
+    const delayMs = Math.min(
+      SERIAL_RECONNECT_MAXIMUM_DELAY_MS,
+      SERIAL_RECONNECT_INITIAL_DELAY_MS * SERIAL_RECONNECT_MULTIPLIER ** (this.reconnectAttempt - 1),
+    );
+    this.onConnectionEvent({
+      type: 'reconnecting',
+      attempt: this.reconnectAttempt,
+      delayMs: Math.round(delayMs),
+      ...(error === undefined ? {} : { error: error instanceof Error ? error.message : String(error) }),
+    });
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      void this.reconnectSerialConnection();
+    }, delayMs);
+  }
+
+  private async reconnectSerialConnection(): Promise<void> {
+    if (this.closing || !this.reconnectEnabled || this.reconnecting) return;
+    this.reconnecting = true;
+    try {
+      const info = await this.openConnection();
+      if (this.closing) return;
+      this.reconnectAttempt = 0;
+      this.onConnectionEvent({ type: 'reconnected', info });
+    } catch (error) {
+      await this.connection?.close().catch(() => undefined);
+      if (!this.closing) this.scheduleSerialReconnect(error);
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    this.reconnectAttempt = 0;
   }
 
   private rejectWaiters(error: Error): void {

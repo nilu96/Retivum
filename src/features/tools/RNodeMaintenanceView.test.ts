@@ -12,6 +12,7 @@ import {
   reticulumRuntime,
 } from '../../infrastructure/reticulum/runtime';
 import { clearToasts, toasts } from '../../lib/notifications/toasts';
+import ToastViewport from '../../lib/components/ToastViewport.svelte';
 import RNodeMaintenanceView from './RNodeMaintenanceView.svelte';
 
 describe('RNodeMaintenanceView', () => {
@@ -73,6 +74,42 @@ describe('RNodeMaintenanceView', () => {
 
     await vi.advanceTimersByTimeAsync(2_000);
     expect(getPorts).toHaveBeenCalledTimes(callsAfterLeavingDevice);
+  });
+
+  it('reconciles a re-enumerated serial port without duplicating the active device', async () => {
+    const getPorts = vi.mocked(navigator.serial!.getPorts);
+    const replacementPort = {
+      getInfo: () => ({ usbVendorId: 0x10c4, usbProductId: 0xea60 }),
+    } as SerialPort;
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    let activeSession: RNodeMaintenanceSession | undefined;
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockImplementation(async function (this: RNodeMaintenanceSession) {
+      activeSession = this;
+      return { firmwareVersion: '1.73' };
+    });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unsupported'));
+    const { container } = render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await vi.waitFor(() => expect(activeSession).toBeDefined());
+    (activeSession as unknown as {
+      onConnectionEvent(event: { type: 'reconnecting'; attempt: number; delayMs: number }): void;
+    }).onConnectionEvent({ type: 'reconnecting', attempt: 1, delayMs: 1_000 });
+    getPorts.mockResolvedValue([replacementPort]);
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh devices' }));
+
+    await vi.waitFor(() => expect(container.querySelectorAll('.rnode-device-list > button')).toHaveLength(1));
+    const listedDevice = container.querySelector<HTMLButtonElement>('.rnode-device-list > button');
+    expect(listedDevice).toHaveClass('selected');
+    expect(listedDevice).toHaveTextContent('USB 10c4:ea60');
+
+    const reconnectingActivity = get(toasts).find((item) => item.messageKey === 'rnodeMaintenance.connect.reconnecting');
+    reconnectingActivity?.oncancel?.();
+    await vi.waitFor(() => expect(screen.getByText('Disconnected')).toBeInTheDocument());
+    expect(container.querySelectorAll('.rnode-device-list > button')).toHaveLength(1);
   });
 
   it('lists an already-authorized configured serial RNode and keeps the system picker available', async () => {
@@ -345,7 +382,8 @@ describe('RNodeMaintenanceView', () => {
     expect(screen.queryByText('Last packet RSSI')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Node config' })).toBeInTheDocument();
     await vi.waitFor(() => expect(screen.queryByRole('button', { name: 'Extended provisioning' })).not.toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Logs' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument();
+    expect(screen.getByRole('navigation', { name: 'RNode maintenance sections' })).toHaveAttribute('data-tab-count', '3');
     await fireEvent.click(screen.getByRole('button', { name: 'Node config' }));
     expect(screen.getByRole('heading', { name: 'General RNode configuration' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Radio' })).toBeInTheDocument();
@@ -371,9 +409,12 @@ describe('RNodeMaintenanceView', () => {
       new Promise<void>((resolve) => { finishRestore = () => resolve(); }),
     );
     let finishOpen = () => {};
-    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockReturnValue(new Promise<{ firmwareVersion: string }>((resolve) => {
-      finishOpen = () => resolve({ firmwareVersion: '1.73' });
-    }));
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockImplementation(function (this: RNodeMaintenanceSession) {
+      (this as unknown as { onLog(message: string): void }).onLog('[INF] earliest boot output');
+      return new Promise<{ firmwareVersion: string }>((resolve) => {
+        finishOpen = () => resolve({ firmwareVersion: '1.73' });
+      });
+    });
     let finishClose = () => {};
     vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockReturnValue(new Promise<void>((resolve) => {
       finishClose = () => resolve();
@@ -388,6 +429,10 @@ describe('RNodeMaintenanceView', () => {
       kind: 'activity',
       parameters: { name: 'Desk RNode' },
     }));
+    const earlyLogsTab = screen.getByRole('button', { name: 'Logs' });
+    expect(earlyLogsTab).toBeEnabled();
+    await fireEvent.click(earlyLogsTab);
+    expect(screen.getByText('[INF] earliest boot output')).toBeInTheDocument();
 
     finishOpen();
     await vi.waitFor(() => expect(screen.getByText('Connected')).toBeInTheDocument());
@@ -397,6 +442,7 @@ describe('RNodeMaintenanceView', () => {
       parameters: { name: 'Desk RNode' },
     }));
 
+    await fireEvent.click(screen.getByRole('button', { name: 'Device' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Disconnect' }));
     await vi.waitFor(() => expect(screen.getByText('Disconnecting…')).toBeInTheDocument());
     const disconnectingToast = get(toasts).find((item) => item.messageKey === 'rnodeMaintenance.device.disconnecting');
@@ -514,6 +560,91 @@ describe('RNodeMaintenanceView', () => {
     expect(screen.getByText('[INF] device ready')).toBeInTheDocument();
     expect(screen.getByText('[DBG] radio state')).toBeInTheDocument();
     expect(screen.queryByText('RNODE_MAINTENANCE_CONNECTED')).not.toBeInTheDocument();
+  });
+
+  it('keeps local logs visible while a serial session reconnects', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    let activeSession: RNodeMaintenanceSession | undefined;
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockImplementation(async function (this: RNodeMaintenanceSession) {
+      activeSession = this;
+      (this as unknown as { onLog(message: string): void }).onLog('[INF] before disconnect');
+      return { firmwareVersion: '1.73' };
+    });
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    const load = vi.spyOn(LocalProvisioningClient.prototype, 'load').mockResolvedValue({
+      info: { firmwareVersion: 'microReticulum', schemaVersion: 2, needsReboot: false },
+      schema: { namespaces: [] },
+      state: {},
+    });
+    render(RNodeMaintenanceView);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await fireEvent.click(await screen.findByRole('button', { name: 'Logs' }));
+    expect(screen.getByText('[INF] before disconnect')).toBeInTheDocument();
+
+    (activeSession as unknown as {
+      onConnectionEvent(event: { type: 'reconnecting'; attempt: number; delayMs: number }): void;
+      onLog(message: string): void;
+    }).onConnectionEvent({ type: 'reconnecting', attempt: 1, delayMs: 1_000 });
+    (activeSession as unknown as { onLog(message: string): void }).onLog('[INF] during reconnect');
+
+    expect(await screen.findByText('Reconnecting…')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Device logs' })).toBeInTheDocument();
+    expect(screen.getByText('--------- DISCONNECTED ---------')).toBeInTheDocument();
+    expect(screen.getByText('[INF] during reconnect')).toBeInTheDocument();
+    const reconnectingActivity = get(toasts).find((item) => item.messageKey === 'rnodeMaintenance.connect.reconnecting');
+    expect(reconnectingActivity).toEqual(expect.objectContaining({
+      kind: 'activity',
+      parameters: { name: 'Desk RNode' },
+      oncancel: expect.any(Function),
+    }));
+
+    (activeSession as unknown as {
+      onConnectionEvent(event: { type: 'reconnecting'; attempt: number; delayMs: number; error: string }): void;
+    }).onConnectionEvent({ type: 'reconnecting', attempt: 2, delayMs: 1_600, error: 'device unavailable' });
+    expect(screen.getAllByText('--------- DISCONNECTED ---------')).toHaveLength(1);
+
+    (activeSession as unknown as {
+      onConnectionEvent(event: { type: 'reconnected'; info: { firmwareVersion: string } }): void;
+    }).onConnectionEvent({ type: 'reconnected', info: { firmwareVersion: '1.73' } });
+
+    expect(await screen.findByText('Connected')).toBeInTheDocument();
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    expect(get(toasts).find((item) => item.id === reconnectingActivity!.id)).toEqual(expect.objectContaining({
+      kind: 'success',
+      messageKey: 'rnodeMaintenance.connect.reconnected',
+      parameters: { name: 'Desk RNode' },
+    }));
+    expect(screen.getByText('[INF] before disconnect')).toBeInTheDocument();
+    expect(screen.getByText('[INF] during reconnect')).toBeInTheDocument();
+  });
+
+  it('cancels serial reconnection from the live activity toast', async () => {
+    vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
+    const release = vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
+    let activeSession: RNodeMaintenanceSession | undefined;
+    vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockImplementation(async function (this: RNodeMaintenanceSession) {
+      activeSession = this;
+      return { firmwareVersion: '1.73' };
+    });
+    const close = vi.spyOn(RNodeMaintenanceSession.prototype, 'close').mockResolvedValue();
+    vi.spyOn(LocalProvisioningClient.prototype, 'load').mockRejectedValue(new Error('unsupported'));
+    render(RNodeMaintenanceView);
+    render(ToastViewport);
+
+    await fireEvent.click((await screen.findByText('Desk RNode')).closest('button')!);
+    await vi.waitFor(() => expect(activeSession).toBeDefined());
+    (activeSession as unknown as {
+      onConnectionEvent(event: { type: 'reconnecting'; attempt: number; delayMs: number }): void;
+    }).onConnectionEvent({ type: 'reconnecting', attempt: 1, delayMs: 1_000 });
+
+    await fireEvent.click(await screen.findByRole('button', { name: 'Cancel activity' }));
+
+    await vi.waitFor(() => expect(close).toHaveBeenCalled());
+    await vi.waitFor(() => expect(release).toHaveBeenCalledWith('configured-rnode'));
+    expect(screen.getByText('Disconnected')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Cancel activity' })).not.toBeInTheDocument();
   });
 
   it('uses the shared provisioning fields and saves all local namespace changes in one commit', async () => {
@@ -643,7 +774,7 @@ describe('RNodeMaintenanceView', () => {
     })));
   });
 
-  it('offers the standard RNode reboot action without exposing an unsupported factory reset', async () => {
+  it('keeps serial maintenance active after sending the standard RNode reboot action', async () => {
     vi.spyOn(reticulumRuntime, 'claimRNodeInterfaceForMaintenance').mockResolvedValue(true);
     const release = vi.spyOn(reticulumRuntime, 'releaseRNodeInterfaceFromMaintenance').mockResolvedValue();
     vi.spyOn(RNodeMaintenanceSession.prototype, 'open').mockResolvedValue({ firmwareVersion: '1.73' });
@@ -661,8 +792,8 @@ describe('RNodeMaintenanceView', () => {
 
     await vi.waitFor(() => expect(reboot).toHaveBeenCalledOnce());
     await vi.waitFor(() => {
-      expect(release).toHaveBeenCalledWith('configured-rnode');
-      expect(screen.getByText('Disconnected')).toBeInTheDocument();
+      expect(release).not.toHaveBeenCalled();
+      expect(screen.getByText('Connected')).toBeInTheDocument();
       expect(get(toasts)).toContainEqual(expect.objectContaining({
         kind: 'success',
         messageKey: 'provisioning.reboot.sent',

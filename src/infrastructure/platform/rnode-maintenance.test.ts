@@ -73,16 +73,23 @@ class FakeBleConnection implements ByteConnection {
   finalData?: Uint8Array;
   openCount = 0;
   closeCount = 0;
+  openFailures = 0;
   private onData: (data: Uint8Array) => void = () => undefined;
+  private onClosed: () => void = () => undefined;
   private readonly decoder = new KissDeframer(1_100_000);
 
   constructor() {
     this.eeprom[0xa7] = 0x73;
   }
 
-  async open(onData: (data: Uint8Array) => void): Promise<void> {
+  async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
     this.openCount += 1;
+    if (this.openFailures > 0) {
+      this.openFailures -= 1;
+      throw new Error('serial device unavailable');
+    }
     this.onData = onData;
+    this.onClosed = onClosed;
   }
 
   async write(data: Uint8Array): Promise<void> {
@@ -94,6 +101,14 @@ class FakeBleConnection implements ByteConnection {
   async close(finalData?: Uint8Array): Promise<void> {
     this.closeCount += 1;
     this.finalData = finalData;
+  }
+
+  drop(): void {
+    this.onClosed();
+  }
+
+  emitLog(message: string): void {
+    this.emit(0x80, new TextEncoder().encode(message));
   }
 
   private emit(command: number, payload: ArrayLike<number>): void {
@@ -115,6 +130,7 @@ class FakeBleConnection implements ByteConnection {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   window.retivumDesktopBluetooth = undefined;
   window.retivumDesktopDevices = undefined;
   desktopDeviceSelection.set(undefined);
@@ -272,7 +288,7 @@ describe('RNode maintenance session', () => {
       connectionConfig: config,
       configuredInterface: config,
       connected: false,
-    }, undefined, undefined, undefined, undefined, connection);
+    }, undefined, undefined, undefined, undefined, undefined, connection);
 
     await expect(session.open()).resolves.toEqual({
       firmwareVersion: '1.80',
@@ -349,6 +365,59 @@ describe('RNode maintenance session', () => {
     expect(commands).toContainEqual({ command: 0x59, payload: Uint8Array.of(0xf8) });
     await session.close();
     expect(port.closeCount).toBe(1);
+  });
+
+  it('keeps reconnecting a dropped serial maintenance session until it succeeds or is closed', async () => {
+    vi.useFakeTimers();
+    const connection = new FakeBleConnection();
+    const messages: string[] = [];
+    const connectionEvents: unknown[] = [];
+    const session = new RNodeMaintenanceSession({
+      id: 'serial-reconnect',
+      transport: 'serial',
+      label: 'Reconnect RNode',
+      detail: 'USB 303a:1001',
+      port: new FakeSerialPort({ usbVendorId: 0x303a, usbProductId: 0x1001 }) as unknown as SerialPort,
+    }, (message) => messages.push(message), undefined, undefined, undefined, (event) => connectionEvents.push(event), connection);
+
+    await session.open();
+    connection.openFailures = 1;
+    connection.drop();
+    await vi.waitFor(() => expect(connectionEvents).toContainEqual({
+      type: 'reconnecting',
+      attempt: 1,
+      delayMs: 1_000,
+    }));
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(connection.openCount).toBe(2));
+    expect(connectionEvents.at(-1)).toEqual({
+      type: 'reconnecting',
+      attempt: 2,
+      delayMs: 1_600,
+      error: 'serial device unavailable',
+    });
+
+    await vi.advanceTimersByTimeAsync(1_600);
+    await vi.waitFor(() => expect(connection.openCount).toBe(3));
+    expect(connectionEvents.at(-1)).toEqual({
+      type: 'reconnected',
+      info: {
+        firmwareVersion: '1.80',
+        platform: 0x70,
+        mcu: 0x71,
+        board: 0x50,
+        eepromBytes: 200,
+      },
+    });
+    connection.emitLog('logs resumed');
+    expect(messages).toEqual(['logs resumed']);
+
+    connection.drop();
+    await vi.waitFor(() => expect(connectionEvents.at(-1)).toMatchObject({ type: 'reconnecting', attempt: 1 }));
+    await session.close();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(connection.openCount).toBe(3);
   });
 
   it('reads and writes the standard RNode node configuration with exact KISS payloads', async () => {

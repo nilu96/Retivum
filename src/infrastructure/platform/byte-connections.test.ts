@@ -38,9 +38,42 @@ vi.mock('@devioarts/capacitor-tcpclient', () => ({
 import {
   authorizeNativeRNodeDevice,
   createRNodeByteConnection,
+  createSerialPortByteConnection,
   createTcpByteConnection,
   isRetryableBleError,
 } from './byte-connections';
+
+describe('serial byte connection recovery', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('refreshes the authorized port handle before reopening after a close', async () => {
+    function port(): SerialPort {
+      return {
+        readable: new ReadableStream<Uint8Array>(),
+        writable: new WritableStream<Uint8Array>(),
+        getInfo: () => ({ usbVendorId: 0x303a, usbProductId: 0x1001 }),
+        open: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+      };
+    }
+    const original = port();
+    const replacement = port();
+    const getPorts = vi.fn().mockResolvedValue([replacement]);
+    vi.stubGlobal('navigator', { serial: { getPorts, requestPort: vi.fn() } });
+    const connection = createSerialPortByteConnection(original);
+
+    await connection.open(vi.fn(), vi.fn());
+    await connection.close();
+    await connection.open(vi.fn(), vi.fn());
+
+    expect(getPorts).toHaveBeenCalledOnce();
+    expect(original.open).toHaveBeenCalledOnce();
+    expect(replacement.open).toHaveBeenCalledOnce();
+    await connection.close();
+  });
+});
 
 describe('Electron TCP byte connection', () => {
   afterEach(() => {

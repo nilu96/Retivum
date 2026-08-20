@@ -87,25 +87,46 @@ export function createTcpByteConnection(config: TcpInterfaceConfig): ByteConnect
 
 class SerialByteConnection implements ByteConnection {
   private port?: SerialPort;
+  private preferredPort?: SerialPort;
   private reader?: ReadableStreamDefaultReader<Uint8Array>;
   private writer?: WritableStreamDefaultWriter<Uint8Array>;
   private closing = false;
+  private refreshPortBeforeOpen = false;
 
   constructor(
     private readonly config?: RNodeInterfaceConfig,
     private readonly selectedPort?: SerialPort,
-  ) {}
+  ) {
+    this.preferredPort = selectedPort;
+  }
 
   async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
-    if (!this.selectedPort && !navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
-    const ports = this.selectedPort ? [] : await navigator.serial!.getPorts();
-    this.port = this.selectedPort ?? ports.find((port) => {
+    const preferredPort = this.preferredPort;
+    const usePreferredPort = preferredPort !== undefined
+      && !this.refreshPortBeforeOpen
+      && preferredPort.connected !== false;
+    if (!usePreferredPort && !navigator.serial) throw new Error('RNODE_SERIAL_UNAVAILABLE');
+    const ports = usePreferredPort
+      ? []
+      : await navigator.serial!.getPorts();
+    const preferredInfo = preferredPort?.getInfo();
+    this.port = usePreferredPort ? preferredPort : ports.find((port) => {
       const info = port.getInfo();
-      return (this.config?.connection.usbVendorId === undefined || info.usbVendorId === this.config.connection.usbVendorId)
-        && (this.config?.connection.usbProductId === undefined || info.usbProductId === this.config.connection.usbProductId);
+      const vendorId = this.config?.connection.usbVendorId ?? preferredInfo?.usbVendorId;
+      const productId = this.config?.connection.usbProductId ?? preferredInfo?.usbProductId;
+      return port.connected !== false
+        && (vendorId === undefined || info.usbVendorId === vendorId)
+        && (productId === undefined || info.usbProductId === productId);
     });
     if (!this.port) throw new Error('RNODE_SERIAL_NOT_AUTHORIZED');
-    await this.port.open({ baudRate: 115_200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
+    this.preferredPort = this.port;
+    try {
+      await this.port.open({ baudRate: 115_200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' });
+      this.refreshPortBeforeOpen = false;
+    } catch (error) {
+      this.refreshPortBeforeOpen = true;
+      throw error;
+    }
     if (!this.port.readable || !this.port.writable) throw new Error('RNODE_SERIAL_STREAMS_UNAVAILABLE');
     this.reader = this.port.readable.getReader();
     this.writer = this.port.writable.getWriter();
@@ -120,6 +141,7 @@ class SerialByteConnection implements ByteConnection {
 
   async close(finalData?: Uint8Array): Promise<void> {
     this.closing = true;
+    this.refreshPortBeforeOpen = true;
     if (finalData?.byteLength && this.writer) {
       await bleStage(
         'send RNode shutdown',
