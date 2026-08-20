@@ -201,6 +201,41 @@ describe('RNodeNodeConfig', () => {
     expect(screen.getByRole('button', { name: 'Save display' })).toBeDisabled();
   });
 
+  it('marks every Wi-Fi setting for password managers to ignore', async () => {
+    const session = {
+      readRadioConfig: vi.fn().mockResolvedValue({
+        bootMode: 'host',
+        frequency: 869_525_000,
+        bandwidth: 125_000,
+        spreadingFactor: 8,
+        codingRate: 5,
+        txPower: 17,
+        interferenceAvoidance: true,
+      }),
+      readEeprom: vi.fn().mockResolvedValue(new Uint8Array(200)),
+    } as unknown as RNodeMaintenanceSession;
+    render(RNodeNodeConfig, { session });
+
+    await screen.findByLabelText('Boot mode');
+    for (const label of [
+      'Mode',
+      'Channel',
+      'SSID',
+      'PSK',
+      'Static IP (0.0.0.0 = DHCP)',
+      'Netmask',
+    ]) {
+      const field = screen.getByLabelText(label);
+      expect(field).toHaveAttribute('autocomplete', 'off');
+      expect(field).toHaveAttribute('data-1p-ignore', 'true');
+      expect(field).toHaveAttribute('data-op-ignore', 'true');
+      expect(field).toHaveAttribute('data-bwignore', 'true');
+      expect(field).toHaveAttribute('data-lpignore', 'true');
+      expect(field).toHaveAttribute('data-form-type', 'other');
+      expect(field).toHaveAttribute('data-protonpass-ignore', 'true');
+    }
+  });
+
   it('saves one display setting without requiring the other set-only values', async () => {
     const saveDisplayConfig = vi.fn().mockResolvedValue(undefined);
     const session = {
