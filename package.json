@@ -101,7 +101,7 @@
     "@capacitor/share": "^8.0.1",
     "@capawesome/capacitor-file-picker": "^8.0.3",
     "@devioarts/capacitor-tcpclient": "0.2.1",
-    "@stoprocent/noble": "https://github.com/nilu96/noble/archive/87ac2de21e53dcd31b8c3f117913b44d128359cd.tar.gz",
+    "@stoprocent/noble": "https://github.com/nilu96/noble/archive/537f4a62e6a1ca6b7e51b7b40e0f76828c6457fb.tar.gz",
     "@zxing/browser": "^0.2.1",
     "capacitor-udp-socket": "7.0.0",
     "dbus-next": "npm:@particle/dbus-next@0.11.4",
