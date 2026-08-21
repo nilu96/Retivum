@@ -942,7 +942,7 @@
   "destinationHash.description": "Generate a destination hash locally from an identity hash and full aspect name.",
   "destinationHash.backToTools": "Back to Tools",
   "destinationHash.form.title": "Generate a destination hash",
-  "destinationHash.form.description": "The calculation happens on this device. Requesting a path remains a separate action on each result.",
+  "destinationHash.form.description": "Destination hashes are generated on this device. Nothing is sent over the network unless you choose Request path from a result.",
   "destinationHash.identityHash.label": "Identity hash",
   "destinationHash.identityHash.placeholder": "Reticulum identity hash",
   "destinationHash.identityHash.help": "Enter the identity's 32-character hexadecimal hash.",
