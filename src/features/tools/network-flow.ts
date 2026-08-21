@@ -85,7 +85,7 @@ function nodeIcon(node: NetworkVisualizerNode): IconName {
     }
     if (node.fullDestinationName === 'nomadnetwork.node') return 'nomadnet';
     if (node.fullDestinationName === 'rnstransport.probe') return 'probe';
-    return 'identity';
+    return 'fingerprint';
   }
   if (node.interfaceType === 'rnode') return 'radio';
   if (node.interfaceType === 'tcp' || node.interfaceType === 'udp') return 'network';

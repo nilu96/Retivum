@@ -157,6 +157,18 @@ describe('Svelte Flow network adapter', () => {
       searchActive: false,
     }).nodes.find((node) => node.id === 'destination:one')!;
     expect(probeDestination.data.icon).toBe('probe');
+    const unknownDestination = buildNetworkFlowElements({
+      ...graph,
+      nodes: graph.nodes.map((node) => node.kind === 'destination'
+        ? { ...node, fullDestinationName: undefined }
+        : node),
+    }, {
+      ariaLabel: (node) => `Node ${node.label}`,
+      label: (node) => node.label,
+      onopen: vi.fn(),
+      searchActive: false,
+    }).nodes.find((node) => node.id === 'destination:one')!;
+    expect(unknownDestination.data.icon).toBe('fingerprint');
     expect(elements.edges.find((edge) => edge.id === 'interface-edge')).toEqual(expect.objectContaining({
       sourceHandle: 'source-center',
       targetHandle: 'target-center',
