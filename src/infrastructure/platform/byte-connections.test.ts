@@ -20,6 +20,10 @@ const capacitorPlatform = vi.hoisted(() => ({
   name: 'android',
 }));
 
+const tcpClient = vi.hoisted(() => ({
+  createConnection: vi.fn(),
+}));
+
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     isNativePlatform: () => capacitorPlatform.native,
@@ -32,7 +36,7 @@ vi.mock('@capacitor-community/bluetooth-le', () => ({
 }));
 
 vi.mock('@devioarts/capacitor-tcpclient', () => ({
-  TCPClient: {},
+  TCPClient: tcpClient,
 }));
 
 import {
@@ -104,6 +108,84 @@ describe('Electron TCP byte connection', () => {
     expect(bridge.write).toHaveBeenCalledTimes(1);
     expect(onClosed).toHaveBeenCalledTimes(1);
     await connection.close();
+  });
+});
+
+describe('Capacitor TCP byte connection', () => {
+  afterEach(() => {
+    window.retivumDesktopSockets = undefined;
+    window.retivumMobileSockets = undefined;
+    tcpClient.createConnection.mockReset();
+  });
+
+  it('destroys the native connection and listeners after connect fails', async () => {
+    const removeData = vi.fn().mockResolvedValue(undefined);
+    const removeDisconnect = vi.fn().mockResolvedValue(undefined);
+    const destroy = vi.fn().mockResolvedValue(undefined);
+    const connection = {
+      addListener: vi.fn()
+        .mockResolvedValueOnce({ remove: removeData })
+        .mockResolvedValueOnce({ remove: removeDisconnect }),
+      connect: vi.fn().mockResolvedValue({ error: true, errorMessage: 'connect failed', connected: false }),
+      startRead: vi.fn(),
+      write: vi.fn(),
+      isConnected: vi.fn(),
+      destroy,
+    };
+    tcpClient.createConnection.mockReturnValue(connection);
+    const socket = createTcpByteConnection(createTcpInterfaceDraft('capacitor-failed'));
+
+    await expect(socket.open(vi.fn(), vi.fn())).rejects.toThrow('connect failed');
+
+    expect(removeData).toHaveBeenCalledOnce();
+    expect(removeDisconnect).toHaveBeenCalledOnce();
+    expect(destroy).toHaveBeenCalledOnce();
+    expect(connection.startRead).not.toHaveBeenCalled();
+  });
+
+  it('uses a plugin-owned connection id so overlapping attempts cannot share native state', async () => {
+    const connections = Array.from({ length: 2 }, () => ({
+      addListener: vi.fn().mockResolvedValue({ remove: vi.fn().mockResolvedValue(undefined) }),
+      connect: vi.fn().mockResolvedValue({ error: false, connected: true }),
+      startRead: vi.fn().mockResolvedValue({ error: false, reading: true }),
+      write: vi.fn(),
+      isConnected: vi.fn().mockResolvedValue({ error: false, connected: true }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    }));
+    tcpClient.createConnection
+      .mockReturnValueOnce(connections[0])
+      .mockReturnValueOnce(connections[1]);
+    const config = createTcpInterfaceDraft('capacitor-retry');
+    const first = createTcpByteConnection(config);
+    const second = createTcpByteConnection(config);
+
+    await first.open(vi.fn(), vi.fn());
+    await second.open(vi.fn(), vi.fn());
+
+    expect(tcpClient.createConnection).toHaveBeenCalledTimes(2);
+    for (const [options] of tcpClient.createConnection.mock.calls) {
+      expect(options).not.toHaveProperty('connectionId');
+    }
+    await Promise.all([first.close(), second.close()]);
+  });
+
+  it('checks native socket health for foreground resume recovery', async () => {
+    const connection = {
+      addListener: vi.fn().mockResolvedValue({ remove: vi.fn().mockResolvedValue(undefined) }),
+      connect: vi.fn().mockResolvedValue({ error: false, connected: true }),
+      startRead: vi.fn().mockResolvedValue({ error: false, reading: true }),
+      write: vi.fn(),
+      isConnected: vi.fn().mockResolvedValue({ error: false, connected: false }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    tcpClient.createConnection.mockReturnValue(connection);
+    const socket = createTcpByteConnection(createTcpInterfaceDraft('capacitor-resume'));
+
+    await socket.open(vi.fn(), vi.fn());
+
+    await expect(socket.isConnected?.()).resolves.toBe(false);
+    expect(connection.isConnected).toHaveBeenCalledOnce();
+    await socket.close();
   });
 });
 

@@ -649,42 +649,89 @@ class CapacitorTcpByteConnection implements ByteConnection {
   private connection?: TCPConnection;
   private listeners: PluginListenerHandle[] = [];
   private closing = false;
+  private generation = 0;
+  private closePromise?: Promise<void>;
 
   constructor(private readonly config: TcpInterfaceConfig) {}
 
   async open(onData: (data: Uint8Array) => void, onClosed: () => void): Promise<void> {
+    await this.closePromise?.catch(() => undefined);
+    const generation = ++this.generation;
     this.closing = false;
-    this.connection = TCPClient.createConnection({
-      connectionId: this.config.id,
+    const connection = TCPClient.createConnection({
       host: this.config.connection.host,
       port: this.config.connection.port,
       timeout: TCP_CONNECT_TIMEOUT_MS,
       noDelay: true,
       keepAlive: true,
     });
-    this.listeners.push(await this.connection.addListener('tcpData', (event) => {
-      if (event.data.length) onData(Uint8Array.from(event.data));
-    }));
-    this.listeners.push(await this.connection.addListener('tcpDisconnect', () => {
-      if (!this.closing) onClosed();
-    }));
-    const result = await this.connection.connect();
-    if (result.error || !result.connected) throw new Error(result.errorMessage ?? 'TCP_CONNECTION_FAILED');
-    const reading = await this.connection.startRead({ chunkSize: 16 * 1024 });
-    if (reading.error || !reading.reading) throw new Error(reading.errorMessage ?? 'TCP_READ_FAILED');
+    this.connection = connection;
+    const isCurrent = (): boolean => (
+      !this.closing && this.generation === generation && this.connection === connection
+    );
+    try {
+      const dataListener = await connection.addListener('tcpData', (event) => {
+        if (isCurrent() && event.data.length) onData(Uint8Array.from(event.data));
+      });
+      if (!isCurrent()) {
+        await dataListener.remove().catch(() => undefined);
+        throw new Error('TCP_CONNECTION_CLOSED');
+      }
+      this.listeners.push(dataListener);
+
+      const disconnectListener = await connection.addListener('tcpDisconnect', () => {
+        if (isCurrent()) onClosed();
+      });
+      if (!isCurrent()) {
+        await disconnectListener.remove().catch(() => undefined);
+        throw new Error('TCP_CONNECTION_CLOSED');
+      }
+      this.listeners.push(disconnectListener);
+
+      const result = await connection.connect();
+      if (!isCurrent()) throw new Error('TCP_CONNECTION_CLOSED');
+      if (result.error || !result.connected) throw new Error(result.errorMessage ?? 'TCP_CONNECTION_FAILED');
+      const reading = await connection.startRead({ chunkSize: 16 * 1024 });
+      if (!isCurrent()) throw new Error('TCP_CONNECTION_CLOSED');
+      if (reading.error || !reading.reading) throw new Error(reading.errorMessage ?? 'TCP_READ_FAILED');
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
   }
 
   async write(data: Uint8Array): Promise<void> {
-    if (!this.connection) throw new Error('TCP_CONNECTION_NOT_OPEN');
-    const result = await this.connection.write({ data });
+    const connection = this.connection;
+    if (!connection || this.closing) throw new Error('TCP_CONNECTION_NOT_OPEN');
+    const result = await connection.write({ data });
     if (result.error || result.bytesSent !== data.byteLength) throw new Error(result.errorMessage ?? 'TCP_WRITE_FAILED');
   }
 
+  async isConnected(): Promise<boolean> {
+    const connection = this.connection;
+    if (!connection || this.closing) return false;
+    const result = await connection.isConnected();
+    if (result.error) throw new Error(result.errorMessage ?? 'TCP_CONNECTION_CHECK_FAILED');
+    return result.connected;
+  }
+
   async close(): Promise<void> {
+    this.generation += 1;
     this.closing = true;
-    for (const listener of this.listeners) await listener.remove().catch(() => undefined);
-    this.listeners = [];
-    await this.connection?.destroy().catch(() => undefined);
+    if (this.closePromise) return this.closePromise;
+    const connection = this.connection;
+    const listeners = this.listeners;
     this.connection = undefined;
+    this.listeners = [];
+    const operation = (async () => {
+      for (const listener of listeners) await listener.remove().catch(() => undefined);
+      await connection?.destroy().catch(() => undefined);
+    })();
+    this.closePromise = operation;
+    try {
+      await operation;
+    } finally {
+      if (this.closePromise === operation) this.closePromise = undefined;
+    }
   }
 }

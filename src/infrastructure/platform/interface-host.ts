@@ -17,6 +17,7 @@ interface HostedInterface {
 export class PlatformInterfaceHost {
   private readonly hosts = new Map<string, { host: HostedInterface; config: InterfaceConfig; generation: number }>();
   private readonly lifecycleGenerations = new Map<string, number>();
+  private readonly closeOperations = new Map<string, Promise<void>>();
   private readonly maintenanceClaims = new Set<string>();
   private readonly writeQueues = new Map<string, Promise<void>>();
   private openQueue: Promise<void> = Promise.resolve();
@@ -60,17 +61,23 @@ export class PlatformInterfaceHost {
       }
     }
     let host: HostedInterface;
+    const postIfCurrent = (command: RuntimeCommand): void => {
+      if (this.isCurrentHost(config.id, generation, host)) this.post(command);
+    };
+    const logIfCurrent = (code: string, details?: Record<string, string | number | boolean>): void => {
+      if (this.isCurrentHost(config.id, generation, host)) this.log(code, details);
+    };
     if (config.type === 'rnode') {
       host = new RNodeHost(config, {
-          onPacket: (data) => this.post({ type: 'platformInterfaceData', id: config.id, data }),
-          onState: (state, errorCode) => this.post({ type: 'platformInterfaceState', id: config.id, state, errorCode }),
-          onTelemetry: (telemetry) => this.post({ type: 'platformInterfaceTelemetry', id: config.id, telemetry }),
-          log: (code, details) => this.log(code, details),
+          onPacket: (data) => postIfCurrent({ type: 'platformInterfaceData', id: config.id, data }),
+          onState: (state, errorCode) => postIfCurrent({ type: 'platformInterfaceState', id: config.id, state, errorCode }),
+          onTelemetry: (telemetry) => postIfCurrent({ type: 'platformInterfaceTelemetry', id: config.id, telemetry }),
+          log: logIfCurrent,
         });
     } else if (config.type === 'tcp') {
-      host = new TcpHost(config, this.post, this.log);
+      host = new TcpHost(config, postIfCurrent, logIfCurrent);
     } else {
-      host = new UdpHost(config, this.post, this.log);
+      host = new UdpHost(config, postIfCurrent, logIfCurrent);
     }
     if (!this.isCurrentLifecycle(config.id, generation)) {
       await host.close().catch(() => undefined);
@@ -118,7 +125,18 @@ export class PlatformInterfaceHost {
     this.writeQueues.delete(id);
     const entry = this.hosts.get(id);
     this.hosts.delete(id);
-    await entry?.host.close();
+    const pending = this.closeOperations.get(id);
+    if (!entry) {
+      await pending;
+      return;
+    }
+    const operation = (pending ?? Promise.resolve()).then(() => entry.host.close());
+    const settled = operation.catch(() => undefined);
+    this.closeOperations.set(id, settled);
+    void settled.then(() => {
+      if (this.closeOperations.get(id) === settled) this.closeOperations.delete(id);
+    });
+    await operation;
   }
 
   async closeAll(): Promise<void> {
@@ -148,6 +166,13 @@ export class PlatformInterfaceHost {
 
   private isCurrentLifecycle(id: string, generation: number): boolean {
     return this.lifecycleGenerations.get(id) === generation;
+  }
+
+  private isCurrentHost(id: string, generation: number, host: HostedInterface): boolean {
+    const current = this.hosts.get(id);
+    return this.isCurrentLifecycle(id, generation)
+      && current?.generation === generation
+      && current.host === host;
   }
 }
 
@@ -208,6 +233,27 @@ class TcpHost implements HostedInterface {
         message: errorMessage(error),
       });
       this.post({ type: 'platformInterfaceState', id: this.config.id, state: 'error', errorCode: 'TCP_WRITE_FAILED' });
+    }
+  }
+
+  async resume(): Promise<void> {
+    if (this.closing || !this.connection.isConnected) return;
+    try {
+      if (await this.connection.isConnected()) return;
+      this.log('TCP_RESUME_STALE', {
+        interfaceId: this.config.id,
+        host: this.config.connection.host,
+        port: this.config.connection.port,
+      });
+      this.post({ type: 'platformInterfaceState', id: this.config.id, state: 'offline' });
+    } catch (error) {
+      this.log('TCP_RESUME_CHECK_FAILED', {
+        interfaceId: this.config.id,
+        host: this.config.connection.host,
+        port: this.config.connection.port,
+        message: errorMessage(error),
+      });
+      this.post({ type: 'platformInterfaceState', id: this.config.id, state: 'error', errorCode: 'TCP_CONNECTION_FAILED' });
     }
   }
 

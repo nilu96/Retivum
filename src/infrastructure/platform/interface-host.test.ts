@@ -3,17 +3,27 @@ import { createTcpInterfaceDraft, createUdpInterfaceDraft } from '../../domain/s
 
 const transport = vi.hoisted(() => {
   let releaseFirstOpen: (() => void) | undefined;
+  let rejectFirstOpen: ((error: Error) => void) | undefined;
   let releaseBlockedWrite: (() => void) | undefined;
+  let releaseBlockedClose: (() => void) | undefined;
   let blockNextWrite = false;
+  let blockNextClose = false;
+  let failFirstWhenClosed = false;
   return {
     events: [] as string[],
     connectionCount: 0,
+    connected: true,
     reset() {
       this.events = [];
       this.connectionCount = 0;
+      this.connected = true;
       releaseFirstOpen = undefined;
+      rejectFirstOpen = undefined;
       releaseBlockedWrite = undefined;
+      releaseBlockedClose = undefined;
       blockNextWrite = false;
+      blockNextClose = false;
+      failFirstWhenClosed = false;
     },
     releaseFirst() {
       releaseFirstOpen?.();
@@ -21,15 +31,29 @@ const transport = vi.hoisted(() => {
     blockWrite() {
       blockNextWrite = true;
     },
+    blockClose() {
+      blockNextClose = true;
+    },
+    failOpeningConnectionWhenClosed() {
+      failFirstWhenClosed = true;
+    },
     releaseWrite() {
       releaseBlockedWrite?.();
+    },
+    releaseClose() {
+      releaseBlockedClose?.();
     },
     create() {
       const number = ++this.connectionCount;
       return {
         async open() {
           transport.events.push(`open:${number}:start`);
-          if (number === 1) await new Promise<void>((resolve) => { releaseFirstOpen = resolve; });
+          if (number === 1) {
+            await new Promise<void>((resolve, reject) => {
+              releaseFirstOpen = resolve;
+              rejectFirstOpen = reject;
+            });
+          }
           transport.events.push(`open:${number}:end`);
         },
         async write() {
@@ -41,9 +65,20 @@ const transport = vi.hoisted(() => {
           transport.events.push(`write:${number}:end`);
         },
         async close() {
-          transport.events.push(`close:${number}`);
-          if (number === 1) releaseFirstOpen?.();
+          if (blockNextClose) {
+            blockNextClose = false;
+            transport.events.push(`close:${number}:start`);
+            await new Promise<void>((resolve) => { releaseBlockedClose = resolve; });
+            transport.events.push(`close:${number}:end`);
+          } else {
+            transport.events.push(`close:${number}`);
+          }
+          if (number === 1) {
+            if (failFirstWhenClosed) rejectFirstOpen?.(new Error('obsolete open failed'));
+            else releaseFirstOpen?.();
+          }
         },
+        async isConnected() { return transport.connected; },
       };
     },
   };
@@ -129,6 +164,69 @@ describe('platform interface lifecycle', () => {
 
     expect(transport.connectionCount).toBe(1);
     expect(transport.events).not.toContain('open:2:start');
+  });
+
+  it('waits for native teardown before reconnecting the same interface', async () => {
+    const config = createTcpInterfaceDraft('tcp-overlap');
+    const host = new PlatformInterfaceHost(() => undefined, () => undefined);
+
+    const initialOpen = host.open(config);
+    await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
+    transport.releaseFirst();
+    await initialOpen;
+
+    transport.blockClose();
+    const closing = host.close(config.id);
+    await vi.waitFor(() => expect(transport.events).toContain('close:1:start'));
+    const reopening = host.open(config);
+    await Promise.resolve();
+
+    expect(transport.events).not.toContain('open:2:start');
+    transport.releaseClose();
+    await Promise.all([closing, reopening]);
+    expect(transport.events.slice(-4)).toEqual([
+      'close:1:start',
+      'close:1:end',
+      'open:2:start',
+      'open:2:end',
+    ]);
+  });
+
+  it('suppresses errors emitted by an opening host after its lifecycle is retired', async () => {
+    const config = createTcpInterfaceDraft('tcp-stale-open');
+    const commands: Array<{ type: string; state?: string }> = [];
+    const host = new PlatformInterfaceHost((command) => { commands.push(command); }, () => undefined);
+
+    transport.failOpeningConnectionWhenClosed();
+    const opening = host.open(config);
+    await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
+    await host.close(config.id);
+    await opening;
+
+    expect(commands).not.toContainEqual(expect.objectContaining({
+      type: 'platformInterfaceState',
+      state: 'error',
+    }));
+  });
+
+  it('reports a stale TCP connection after a platform resume', async () => {
+    const config = createTcpInterfaceDraft('tcp-resume');
+    const commands: Array<{ type: string; state?: string }> = [];
+    const host = new PlatformInterfaceHost((command) => { commands.push(command); }, () => undefined);
+
+    const opening = host.open(config);
+    await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
+    transport.releaseFirst();
+    await opening;
+    commands.length = 0;
+    transport.connected = false;
+
+    await host.resume();
+
+    expect(commands).toContainEqual(expect.objectContaining({
+      type: 'platformInterfaceState',
+      state: 'offline',
+    }));
   });
 
   it('passes UDP datagrams without TCP HDLC framing', async () => {
