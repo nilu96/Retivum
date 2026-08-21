@@ -844,7 +844,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   border-inline-start: 1px solid var(--border);
   border-radius: 0 8px 8px 0;
   color: var(--text-muted);
-  background: transparent;
+  background: var(--surface-2);
 }
 .propagation-node-menu-toggle[aria-expanded='true'] svg { rotate: 180deg; }
 .propagation-node-menu {
