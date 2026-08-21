@@ -194,6 +194,7 @@ class ReticulumRuntimeController {
   private loadedChatIdentityId?: string;
   private messageRetentionTimer?: number;
   private readonly identityNameWaiters = new Map<string, (ok: boolean) => void>();
+  private readonly configurationApplyWaiters = new Map<string, (ok: boolean) => void>();
   private readonly identityOperationWaiters = new Map<string, (ok: boolean) => void>();
   private readonly identityExportWaiters = new Map<string, (value: Uint8Array | undefined) => void>();
   private readonly announceWaiters = new Map<string, (ok: boolean) => void>();
@@ -349,7 +350,20 @@ class ReticulumRuntimeController {
     interfaceConfigurations.set(structuredClone(orderedInterfaces));
     configureSerialPortRegistry(orderedInterfaces);
     await this.pruneExpiredChatMessages();
-    this.post({ type: 'applyConfiguration', configuration });
+    if (!this.worker) return;
+    const requestId = crypto.randomUUID();
+    const applied = await new Promise<boolean>((resolve) => {
+      const timeout = window.setTimeout(() => {
+        this.configurationApplyWaiters.delete(requestId);
+        resolve(false);
+      }, 30_000);
+      this.configurationApplyWaiters.set(requestId, (ok) => {
+        window.clearTimeout(timeout);
+        resolve(ok);
+      });
+      this.post({ type: 'applyConfiguration', requestId, configuration });
+    });
+    if (!applied) throw new Error('RUNTIME_CONFIGURATION_APPLY_FAILED');
   }
 
   closeAllLinks(): void {
@@ -1324,6 +1338,8 @@ class ReticulumRuntimeController {
     propagationSyncStatus.set({ syncing: false });
     for (const resolve of this.messageOperationWaiters.values()) resolve(false);
     this.messageOperationWaiters.clear();
+    for (const resolve of this.configurationApplyWaiters.values()) resolve(false);
+    this.configurationApplyWaiters.clear();
     for (const resolve of this.ignoredDestinationsWaiters.values()) resolve(false);
     this.ignoredDestinationsWaiters.clear();
     this.failProbeWaiters('PROBE_RUNTIME_STOPPED');
@@ -1337,6 +1353,11 @@ class ReticulumRuntimeController {
   private async handleEvent(event: RuntimeEvent): Promise<void> {
     if (event.type === 'runtimeLog') {
       reticulumLogs.update((items) => [...items.slice(-499), event.entry]);
+      return;
+    }
+    if (event.type === 'configurationApplyResult') {
+      this.configurationApplyWaiters.get(event.requestId)?.(event.ok);
+      this.configurationApplyWaiters.delete(event.requestId);
       return;
     }
     if (event.type === 'platformInterfaceOpen') {

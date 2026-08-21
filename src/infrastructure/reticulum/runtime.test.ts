@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRNodeInterfaceDraft } from '../../domain/settings';
+import { createRNodeInterfaceDraft, defaultAppPreferences } from '../../domain/settings';
 import {
   blockedChatDestinations,
   chatMessages,
@@ -31,6 +31,7 @@ type RuntimeInternals = {
   queuePropagationFallback(message: unknown): void;
   expectedKnownIdentityInventoryStartupId?: string;
   knownDestinationPersistenceQueue: Promise<void>;
+  configurationApplyWaiters: Map<string, (ok: boolean) => void>;
   worker?: { postMessage(command: unknown): void };
   platformInterfaceHost: {
     claimForMaintenance(interfaceId: string): Promise<void>;
@@ -85,6 +86,7 @@ describe('ReticulumRuntimeController chat deletion', () => {
     internals.worker = undefined;
     internals.expectedKnownIdentityInventoryStartupId = undefined;
     internals.knownDestinationPersistenceQueue = Promise.resolve();
+    internals.configurationApplyWaiters.clear();
   });
 
   it('claims and restores configured BLE RNode interfaces for local maintenance', async () => {
@@ -110,6 +112,32 @@ describe('ReticulumRuntimeController chat deletion', () => {
     await reticulumRuntime.resumePlatformInterfaces();
 
     expect(resume).toHaveBeenCalledOnce();
+  });
+
+  it('waits for the worker to acknowledge a configuration rebuild', async () => {
+    const internals = reticulumRuntime as unknown as RuntimeInternals;
+    let posted: { type?: string; requestId?: string } | undefined;
+    internals.worker = {
+      postMessage(command: unknown) {
+        posted = command as { type?: string; requestId?: string };
+      },
+    };
+
+    let settled = false;
+    const application = reticulumRuntime.applyConfiguration(
+      structuredClone(defaultAppPreferences),
+      [],
+    ).then(() => { settled = true; });
+    await vi.waitFor(() => expect(posted?.type).toBe('applyConfiguration'));
+    expect(settled).toBe(false);
+
+    await internals.handleEvent({
+      type: 'configurationApplyResult',
+      requestId: posted!.requestId,
+      ok: true,
+    });
+    await application;
+    expect(settled).toBe(true);
   });
 
   it('publishes successful automatic propagation sync results without publishing failures', async () => {

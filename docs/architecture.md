@@ -444,7 +444,17 @@ the new runtime will assign. Comparing numeric indexes alone is invalid
 because removing or disabling an earlier interface shifts every later enabled
 interface. The cleaned and remapped checkpoint is both imported into the new
 runtime and persisted, so a removed path cannot be resurrected by the
-pre-rebuild snapshot.
+pre-rebuild snapshot. Configuration rebuilds are serialized and acknowledged;
+each rebuild uses one immutable target configuration rather than mutable
+worker-global state. Durable network checkpoints do not retain the numeric
+path ownership: before encryption, Retivum separates paths from the opaque
+Leviculum network state and tags each path with the stable interface ID and
+material network fingerprint. Restore translates only matching enabled
+interfaces back to the indexes assigned by that runtime. Numeric-only legacy
+paths and paths whose stable interface disappeared or materially changed are
+discarded while identities, announces, ratchets, and other network state are
+preserved. Checkpoint writes carry monotonically increasing revisions so a
+late older write cannot replace a newer interface-consistent snapshot.
 
 ### 7.3 WebSocket editor
 

@@ -2,11 +2,15 @@ import type { EncryptedPayload } from './identity';
 
 /**
  * Singleton, identity-independent Reticulum network checkpoint.
- * The payload schema belongs to leviculum-wasm; the application only encrypts
- * and stores the opaque serialized value.
+ * Version 1 stored the opaque Leviculum snapshot directly. Version 2 wraps
+ * network paths in Retivum's stable-interface checkpoint before encryption.
  */
-export interface PersistedNetworkStateRecord {
-  schemaVersion: 1;
+interface PersistedNetworkStateRecordBase {
   encryptedSnapshot: EncryptedPayload;
   updatedAt: string;
 }
+
+export type PersistedNetworkStateRecord = PersistedNetworkStateRecordBase & (
+  | { schemaVersion: 1; revision?: never }
+  | { schemaVersion: 2; revision: number }
+);

@@ -69,6 +69,10 @@ import { leviculumIfacOptions } from '../infrastructure/reticulum/ifac-options';
 import { publicKeyMatchesLxmfDeliveryDestination } from '../infrastructure/reticulum/lxmf-recipient-identity';
 import { resolvePathRoute, resolveProbeRoute } from '../infrastructure/reticulum/path-route';
 import {
+  createStableNetworkCheckpoint,
+  restoreStableNetworkCheckpoint,
+} from '../infrastructure/reticulum/network-path-checkpoint';
+import {
   planRuntimeInterfaceTransition,
   remapPersistentPaths,
   type RuntimeInterfaceBinding,
@@ -231,6 +235,9 @@ let automaticPropagationSyncPending = false;
 let propagationSyncRequestId: string | undefined;
 let propagationSyncStatusSignature = '';
 let persistenceQueue = Promise.resolve();
+let snapshotPersistenceQueue = Promise.resolve();
+let configurationApplyQueue = Promise.resolve();
+let networkSnapshotRevision = 0;
 const stampWork = new StampWorkRegistry();
 const propagationSyncInboundStampWork = new PendingWorkBarrier();
 const propagationSyncProjectedMessageIds = new Set<string>();
@@ -347,6 +354,11 @@ function log(
 }
 
 scope.onmessage = (message: MessageEvent<RuntimeCommand>) => {
+  if (message.data.type === 'applyConfiguration') {
+    const operation = configurationApplyQueue.then(() => handleCommand(message.data));
+    configurationApplyQueue = operation.then(() => undefined, () => undefined);
+    return;
+  }
   void handleCommand(message.data);
 };
 
@@ -356,6 +368,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       log('info', 'runtime', 'RUNTIME_INITIALIZING');
       wrappingKey = command.wrappingKey;
       persistedNetworkState = command.networkState;
+      networkSnapshotRevision = command.networkState?.revision ?? 0;
       configuration = command.configuration;
       blockedDestinationHashes = command.blockedDestinationHashes;
       contactDestinationHashes = normalizeDestinationHashes(command.contactDestinationHashes);
@@ -402,8 +415,6 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
       const previousBindings = interfacesChanged
         ? runtimeInterfaceBindings()
         : undefined;
-      configuration = command.configuration;
-      pruneInterfaceAnnounceHistory(command.configuration.interfaces);
       if (identity && privateKey) {
         if (rebuild) {
           await rebuildRuntime(
@@ -415,14 +426,20 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
                   nextInterfaces: command.configuration.interfaces,
                 }
               : undefined,
+            command.configuration,
           );
         } else {
+          configuration = command.configuration;
           automaticPropagationSyncPending = false;
           scheduleAutomaticAnnounce();
           scheduleAutomaticPropagationSync();
           log('info', 'runtime', 'CONFIGURATION_APPLIED_LIVE');
         }
+      } else {
+        configuration = command.configuration;
       }
+      pruneInterfaceAnnounceHistory(command.configuration.interfaces);
+      emit({ type: 'configurationApplyResult', requestId: command.requestId, ok: true });
       return;
     }
 
@@ -664,7 +681,7 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
 
     if (command.type === 'shutdown') {
       log('info', 'runtime', 'RUNTIME_SHUTTING_DOWN');
-      await persistSnapshot();
+      await persistSnapshotQueued();
       cleanupRuntime();
       scope.close();
     }
@@ -673,6 +690,9 @@ async function handleCommand(command: RuntimeCommand): Promise<void> {
     log('error', 'runtime', code);
     emit({ type: 'runtimeError', code });
     emit({ type: 'runtimeStatus', state: 'error' });
+    if (command.type === 'applyConfiguration') {
+      emit({ type: 'configurationApplyResult', requestId: command.requestId, ok: false, code });
+    }
   }
 }
 
@@ -691,8 +711,10 @@ async function rebuildRuntime(
   persistCurrent = false,
   startupId?: string,
   pathInterfaceTransition?: PathInterfaceTransition,
+  targetConfiguration?: RuntimeConfiguration,
 ): Promise<void> {
-  if (!identity || !privateKey || !configuration) return;
+  const runtimeConfiguration = targetConfiguration ?? configuration;
+  if (!identity || !privateKey || !runtimeConfiguration) return;
   const transitionPlan = pathInterfaceTransition
     ? planRuntimeInterfaceTransition(
         pathInterfaceTransition.previousBindings,
@@ -705,7 +727,7 @@ async function rebuildRuntime(
     }
   }
   const livePersistentState = persistCurrent && node
-    ? await persistSnapshot(transitionPlan
+    ? await persistSnapshotQueued(transitionPlan
         ? (networkSnapshot) => {
             const result = remapPersistentPaths(
               networkSnapshot,
@@ -719,20 +741,34 @@ async function rebuildRuntime(
             });
             return result.snapshot;
           }
-        : undefined)
+        : undefined, pathInterfaceTransition
+          ? runtimeBindingsForConfiguration(pathInterfaceTransition.nextInterfaces)
+          : undefined)
     : undefined;
   cleanupRuntime(new Set(transitionPlan?.unavailableRuntimeIndexes ?? []));
 
   let legacyPersistentState: unknown;
   let networkPersistentState: unknown = livePersistentState?.network;
   let identityPersistentState: unknown = livePersistentState?.identity;
+  let networkCheckpointNeedsPersistence = false;
   const encryptedNetworkSnapshot = persistedNetworkState?.encryptedSnapshot;
   const hasPersistedNetworkSnapshot = encryptedNetworkSnapshot !== undefined;
   let networkInventoryComplete = livePersistentState !== undefined || !hasPersistedNetworkSnapshot;
   if (!livePersistentState) {
     if (encryptedNetworkSnapshot) {
       try {
-        networkPersistentState = decodeSnapshot(await decrypt(encryptedNetworkSnapshot));
+        const restored = restoreStableNetworkCheckpoint(
+          decodeSnapshot(await decrypt(encryptedNetworkSnapshot)),
+          runtimeConfiguration.interfaces,
+        );
+        networkPersistentState = restored.snapshot;
+        networkCheckpointNeedsPersistence = restored.needsPersistence
+          || persistedNetworkState?.schemaVersion !== 2;
+        if (restored.discarded > 0) {
+          log('warning', 'runtime', 'PERSISTED_PATHS_DISCARDED_DURING_RESTORE', {
+            count: restored.discarded,
+          });
+        }
         networkInventoryComplete = true;
       } catch {
         emit({ type: 'runtimeError', code: 'RUNTIME_NETWORK_SNAPSHOT_RESTORE_FAILED' });
@@ -742,7 +778,11 @@ async function rebuildRuntime(
       try {
         const decoded = decodeSnapshot(await decrypt(identity.encryptedSnapshot));
         if (hasPersistedNetworkSnapshot && networkInventoryComplete) identityPersistentState = decoded;
-        else legacyPersistentState = decoded;
+        else {
+          const restored = restoreStableNetworkCheckpoint(decoded, runtimeConfiguration.interfaces);
+          legacyPersistentState = restored.snapshot;
+          networkCheckpointNeedsPersistence = true;
+        }
       } catch {
         if (!hasPersistedNetworkSnapshot) networkInventoryComplete = false;
         emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_RESTORE_FAILED' });
@@ -751,18 +791,20 @@ async function rebuildRuntime(
   }
   restoreKnownDestinationPublicKeys(networkPersistentState ?? legacyPersistentState);
 
+  configuration = runtimeConfiguration;
+
   node = new ReticulumNode({
     identityPrivateKey: privateKey,
     persistentState: legacyPersistentState,
     networkPersistentState,
     identityPersistentState,
-    transportEnabled: configuration.preferences.transportEnabled,
+    transportEnabled: runtimeConfiguration.preferences.transportEnabled,
   });
-  const propagationHash = normalizeDestinationHash(configuration.preferences.lxmf.propagationNodeHash ?? '');
+  const propagationHash = normalizeDestinationHash(runtimeConfiguration.preferences.lxmf.propagationNodeHash ?? '');
   const lxmf = node.enableLxmf({
     enableRatchets: true,
     enablePropagationClient: true,
-    inboundStampCost: configuration.preferences.lxmf.inboundStampCost,
+    inboundStampCost: runtimeConfiguration.preferences.lxmf.inboundStampCost,
   }) as {
     deliveryDestinationHash?: Uint8Array;
   };
@@ -773,7 +815,7 @@ async function rebuildRuntime(
 
   if (startupId && networkInventoryComplete) emitCompleteKnownIdentityInventory(startupId);
 
-  for (const interfaceConfig of configuration.interfaces) {
+  for (const interfaceConfig of runtimeConfiguration.interfaces) {
     if (!interfaceConfig.enabled) {
       emit({ type: 'interfaceStatus', id: interfaceConfig.id, state: 'disabled' });
       continue;
@@ -797,9 +839,9 @@ async function rebuildRuntime(
     deliveryDestinationHashHex: localLxmfDeliveryDestinationHash,
   });
   log('info', 'runtime', 'RUNTIME_READY', {
-    interfaces: configuration.interfaces.filter((item) => item.enabled).length,
-    transport: configuration.preferences.transportEnabled,
-    propagationSending: propagationIsActive(configuration.preferences.lxmf),
+    interfaces: runtimeConfiguration.interfaces.filter((item) => item.enabled).length,
+    transport: runtimeConfiguration.preferences.transportEnabled,
+    propagationSending: propagationIsActive(runtimeConfiguration.preferences.lxmf),
     propagationConfigured: propagationHash !== undefined,
   });
   emitAggregateStatus();
@@ -809,7 +851,10 @@ async function rebuildRuntime(
   scheduleAutomaticAnnounce();
   scheduleAutomaticPropagationSync();
   if (livePersistentState && !livePersistentState.persisted) queueSnapshotPersistence();
-  if (legacyPersistentState && !persistedNetworkState) queueSnapshotPersistence();
+  if (
+    (legacyPersistentState && !persistedNetworkState)
+    || networkCheckpointNeedsPersistence
+  ) queueSnapshotPersistence();
 }
 
 function normalizeBlockedDestinationHashes(destinationHashes: string[]): string[] {
@@ -2048,11 +2093,18 @@ async function forgetKnownDestinations(requestId: string, requested?: string[]):
     const filtered = filterNetworkSnapshot(snapshot, matchingTargets);
     const now = new Date().toISOString();
     const updatedNetworkState: PersistedNetworkStateRecord = {
-      schemaVersion: 1,
-      encryptedSnapshot: await encrypt(encodeSnapshot(filtered)),
+      schemaVersion: 2,
+      revision: nextNetworkSnapshotRevision(),
+      encryptedSnapshot: await encrypt(encodeSnapshot(createStableNetworkCheckpoint(
+        filtered,
+        runtimeInterfaceBindings(),
+      ))),
       updatedAt: now,
     };
-    if (!await requestNetworkStateSave(updatedNetworkState)) {
+    if (
+      !networkStateCanReplaceCurrent(updatedNetworkState)
+      || !await requestNetworkStateSave(updatedNetworkState)
+    ) {
       emit({
         type: 'pathManagementOperationResult',
         requestId,
@@ -4419,6 +4471,22 @@ function runtimeInterfaceBindings(): RuntimeInterfaceBinding[] {
   });
 }
 
+function runtimeBindingsForConfiguration(
+  interfaces: readonly InterfaceConfig[],
+): RuntimeInterfaceBinding[] {
+  let runtimeIndex = 0;
+  return interfaces.flatMap((config) => {
+    if (!config.enabled) return [];
+    const binding = {
+      interfaceId: config.id,
+      runtimeIndex,
+      networkFingerprint: interfaceNetworkFingerprint(config),
+    };
+    runtimeIndex += 1;
+    return [binding];
+  });
+}
+
 function currentChatMessagePath(
   destinationHash: string,
   networkSnapshot?: unknown,
@@ -4491,35 +4559,55 @@ function scheduleNextTick(): void {
 }
 
 function queueSnapshotPersistence(): void {
-  persistenceQueue = persistenceQueue
-    .then(() => persistSnapshot())
-    .then(() => undefined)
-    .catch(() => {
-      emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_PERSIST_FAILED' });
-    });
+  void persistSnapshotQueued().catch(() => {
+    emit({ type: 'runtimeError', code: 'RUNTIME_SNAPSHOT_PERSIST_FAILED' });
+  });
+}
+
+function persistSnapshotQueued(
+  transformNetworkState?: (
+    snapshot: Record<string, unknown>,
+  ) => Record<string, unknown>,
+  durableBindings?: readonly RuntimeInterfaceBinding[],
+): Promise<ExportedRuntimePersistentState | undefined> {
+  const operation = snapshotPersistenceQueue.then(() => persistSnapshot(
+    transformNetworkState,
+    durableBindings,
+  ));
+  snapshotPersistenceQueue = operation.then(() => undefined, () => undefined);
+  return operation;
 }
 
 async function persistSnapshot(
   transformNetworkState?: (
     snapshot: Record<string, unknown>,
   ) => Record<string, unknown>,
+  durableBindings?: readonly RuntimeInterfaceBinding[],
 ): Promise<ExportedRuntimePersistentState | undefined> {
   if (!node || !identity || !wrappingKey) return undefined;
-  const identityPersistentState = node.exportIdentityPersistentState();
-  const exportedNetworkState = node.exportNetworkPersistentState() as Record<string, unknown>;
+  const snapshotNode = node;
+  const snapshotIdentity = identity;
+  const identityPersistentState = snapshotNode.exportIdentityPersistentState();
+  const exportedNetworkState = snapshotNode.exportNetworkPersistentState() as Record<string, unknown>;
   const networkPersistentState = transformNetworkState
     ? transformNetworkState(exportedNetworkState)
     : exportedNetworkState;
+  const stableNetworkCheckpoint = createStableNetworkCheckpoint(
+    networkPersistentState,
+    durableBindings ?? runtimeInterfaceBindings(),
+  );
+  const networkRevision = nextNetworkSnapshotRevision();
   const encryptedSnapshot = await encrypt(encodeSnapshot(identityPersistentState));
-  const encryptedNetworkSnapshot = await encrypt(encodeSnapshot(networkPersistentState));
+  const encryptedNetworkSnapshot = await encrypt(encodeSnapshot(stableNetworkCheckpoint));
   const now = new Date().toISOString();
   const updated: PersistedIdentityRecord = {
-    ...identity,
+    ...snapshotIdentity,
     encryptedSnapshot,
     updatedAt: now,
   };
   const updatedNetworkState: PersistedNetworkStateRecord = {
-    schemaVersion: 1,
+    schemaVersion: 2,
+    revision: networkRevision,
     encryptedSnapshot: encryptedNetworkSnapshot,
     updatedAt: now,
   };
@@ -4527,11 +4615,13 @@ async function persistSnapshot(
     requestIdentitySave(updated),
     requestNetworkStateSave(updatedNetworkState),
   ]);
-  const persisted = identitySaved && networkSaved;
-  if (persisted) {
+  const persisted = identitySaved
+    && networkSaved
+    && networkStateCanReplaceCurrent(updatedNetworkState);
+  if (persisted && node === snapshotNode && identity?.id === snapshotIdentity.id) {
     identity = updated;
     persistedNetworkState = updatedNetworkState;
-    node.clearDirtyPersistentState();
+    snapshotNode.clearDirtyPersistentState();
     log('debug', 'persistence', 'SNAPSHOT_PERSISTED');
     emitPropagationNodeSnapshot();
   }
@@ -4540,6 +4630,16 @@ async function persistSnapshot(
     network: networkPersistentState,
     persisted,
   };
+}
+
+function nextNetworkSnapshotRevision(): number {
+  networkSnapshotRevision += 1;
+  return networkSnapshotRevision;
+}
+
+function networkStateCanReplaceCurrent(record: PersistedNetworkStateRecord): boolean {
+  if (!persistedNetworkState || persistedNetworkState.schemaVersion !== 2) return true;
+  return record.schemaVersion === 2 && record.revision > persistedNetworkState.revision;
 }
 
 async function persistIdentityDisplayName(displayName: string): Promise<boolean> {
@@ -4587,7 +4687,7 @@ async function activateIdentityRecord(
   nextInterfaceAnnounceHistory: InterfaceAnnounceHistoryRecord[],
 ): Promise<boolean> {
   if (!identity || !privateKey) return false;
-  await persistSnapshot();
+  await persistSnapshotQueued();
   const nextPrivateKey = await decrypt(nextIdentity.encryptedPrivateKey);
   const derived = ReticulumNode.identityFromPrivateKey(nextPrivateKey) as GeneratedIdentity;
   if (bytesToHex(new Uint8Array(derived.hash)) !== bytesToHex(nextIdentity.identityHash)) return false;

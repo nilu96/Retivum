@@ -22,7 +22,16 @@ export class BrowserNetworkStateRepository {
     const database = await openRetivumDatabase();
     try {
       const transaction = database.transaction('networkState', 'readwrite');
-      transaction.objectStore('networkState').put(structuredClone(value), networkStateKey);
+      const store = transaction.objectStore('networkState');
+      const current = await requestResult<PersistedNetworkStateRecord | undefined>(store.get(networkStateKey));
+      const currentRevision = current?.revision ?? 0;
+      const nextRevision = value.revision ?? 0;
+      if (
+        current?.schemaVersion !== 2
+        || (value.schemaVersion === 2 && nextRevision > currentRevision)
+      ) {
+        store.put(structuredClone(value), networkStateKey);
+      }
       await transactionDone(transaction);
     } finally {
       database.close();

@@ -187,7 +187,7 @@ export type RuntimeCommand =
       newIdentity: NewIdentityMetadata;
       configuration: RuntimeConfiguration;
     }
-  | { type: 'applyConfiguration'; configuration: RuntimeConfiguration }
+  | { type: 'applyConfiguration'; requestId: string; configuration: RuntimeConfiguration }
   | { type: 'announceLxmf'; requestId: string }
   | {
       type: 'syncLxmfPropagation';
@@ -292,6 +292,7 @@ export type RuntimeEvent =
   | { type: 'statusDetails'; details: RuntimeStatusDetails }
   | ({ type: 'lxmfPropagationSyncStatus' } & LxmfPropagationSyncStatus)
   | { type: 'identityReady'; identity: PersistedIdentityRecord; deliveryDestinationHashHex?: string }
+  | { type: 'configurationApplyResult'; requestId: string; ok: boolean; code?: string }
   | { type: 'persistIdentity'; requestId: string; identity: PersistedIdentityRecord; activate?: boolean }
   | { type: 'persistNetworkState'; requestId: string; networkState: PersistedNetworkStateRecord }
   | { type: 'persistInterfaceAnnounceHistory'; records: InterfaceAnnounceHistoryRecord[] }
