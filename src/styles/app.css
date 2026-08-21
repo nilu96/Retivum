@@ -829,16 +829,16 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .field select option { color: var(--text); background: var(--surface-2); }
 .field select:disabled { background-color: var(--surface-1); }
 .field input[aria-invalid='true'] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
-.propagation-node-combobox { position: relative; }
-.propagation-node-combobox > input { padding-inline-end: 44px; font-family: "SFMono-Regular", Consolas, monospace; }
+.propagation-node-combobox { --combobox-toggle-size: 40px; position: relative; }
+.field .propagation-node-combobox > input { padding-inline-end: calc(var(--combobox-toggle-size) + 12px); font-family: "SFMono-Regular", Consolas, monospace; }
 .propagation-node-menu-toggle {
   position: absolute;
   z-index: 2;
   inset-block-start: 1px;
   inset-inline-end: 1px;
   display: grid;
-  width: 40px;
-  height: 40px;
+  width: var(--combobox-toggle-size);
+  height: var(--combobox-toggle-size);
   place-items: center;
   border: 0;
   border-inline-start: 1px solid var(--border);
