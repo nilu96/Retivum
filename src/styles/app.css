@@ -315,7 +315,6 @@ code { font-family: "SFMono-Regular", Consolas, monospace; }
 .desktop-navigation .navigation-copy { flex: 1; }
 .navigation-unread-badge { display: inline-grid; min-width: 19px; height: 19px; place-items: center; padding-inline: 5px; border-radius: 999px; color: var(--accent-ink); background: var(--accent); font-size: .6rem; font-weight: 800; line-height: 1; }
 .desktop-navigation button.active { color: var(--accent-strong); background: var(--accent-soft); }
-.desktop-navigation button.active::before { content: ''; position: absolute; inset-inline-start: 0; width: 3px; height: 22px; border-radius: 0 3px 3px 0; background: var(--accent); }
 
 .sidebar-status { grid-column: 1 / -1; display: flex; width: 100%; align-items: center; gap: 11px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; color: var(--text); background: var(--surface-2); text-align: start; }
 .status-dot { width: 9px; height: 9px; flex: none; border-radius: 50%; background: var(--text-subtle); box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-subtle) 13%, transparent); }
