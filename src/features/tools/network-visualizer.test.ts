@@ -565,6 +565,63 @@ describe('network visualizer graph', () => {
     ]));
   });
 
+  it('renders every ingress occurrence as transport when the identity is a known next hop', () => {
+    const secondInterface: InterfaceConfig = {
+      ...websocket,
+      id: 'websocket-2',
+      name: 'Field relay',
+    };
+    const publicKey = 'a'.repeat(128);
+    const identityHash = 'b'.repeat(32);
+    const ownedDestination = 'c'.repeat(32);
+    const relayedDestination = 'd'.repeat(32);
+    const graph = buildNetworkVisualizerGraph({
+      interfaces: [websocket, secondInterface],
+      interfaceStatuses: {},
+      paths: [
+        {
+          destinationHash: relayedDestination,
+          nextHop: identityHash,
+          hops: 3,
+          interfaceId: websocket.id,
+        },
+        {
+          destinationHash: ownedDestination,
+          hops: 1,
+          interfaceId: secondInterface.id,
+        },
+      ],
+      destinations: [],
+      destinationInventory: [{
+        destinationHash: ownedDestination,
+        publicKey,
+        identityHash,
+      }],
+      groupByIdentity: true,
+    });
+    const occurrences = graph.nodes.filter((node) => (
+      node.kind === 'identity' && node.publicKey === publicKey
+    ));
+    const directOccurrenceId = graph.edges.find((edge) => (
+      edge.from === `interface:${secondInterface.id}`
+      && occurrences.some((node) => node.id === edge.to)
+    ))?.to;
+
+    expect(occurrences).toHaveLength(2);
+    expect(occurrences.every((node) => node.nextHopHash === identityHash)).toBe(true);
+    expect(graph.nodes.some((node) => node.kind === 'nextHop'
+      && node.nextHopHash === identityHash)).toBe(false);
+    expect(graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        from: directOccurrenceId,
+        to: `destination:${ownedDestination}`,
+        kind: 'direct',
+        hops: 1,
+        showHopLabel: false,
+      }),
+    ]));
+  });
+
   it('uses one identity node as both a transport and a local-destination parent', () => {
     const transportPublicKey = 'a'.repeat(128);
     const transportIdentityHash = '6'.repeat(32);

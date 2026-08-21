@@ -768,6 +768,9 @@ function groupNetworkVisualizerIdentities(
       ? nodes.filter((node) => node.nextHopHash === group.identityHash)
       : [];
     if (destinationIds.length < 2 && transportNodes.length === 0) continue;
+    const transportIdentityHash = transportNodes.length > 0
+      ? group.identityHash
+      : undefined;
 
     const destinationGroup = destinationIds.length >= 2;
     const expanded = !destinationGroup || expandedIdentityPublicKeys.has(group.publicKey);
@@ -892,8 +895,8 @@ function groupNetworkVisualizerIdentities(
         label: identityLabel,
         publicKey: group.publicKey,
         identityHash: group.identityHash,
-        ...(occurrence.transportNodes.length > 0 && group.identityHash
-          ? { nextHopHash: group.identityHash }
+        ...(transportIdentityHash
+          ? { nextHopHash: transportIdentityHash }
           : {}),
         ...(destinationGroup ? {
           destinationCount: destinationIds.length,
