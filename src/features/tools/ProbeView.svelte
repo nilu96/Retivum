@@ -416,7 +416,7 @@
             </div>
             {#if entry.status === 'pending'}
               <button
-                class="button secondary compact probe-cancel-button"
+                class="button secondary compact history-inline-action probe-cancel-button"
                 type="button"
                 aria-label={$t('probe.history.cancel')}
                 onclick={() => cancelPendingDestinationProbe(entry.destinationHash)}

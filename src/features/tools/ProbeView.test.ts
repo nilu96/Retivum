@@ -289,7 +289,7 @@ describe('ProbeView', () => {
     expect(screen.getByText(`Probe sent to <${'c'.repeat(8)}…${'c'.repeat(6)}>. Waiting for a response…`)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Send probe' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Drop path' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Cancel probe' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel probe' })).toHaveClass('history-inline-action');
     const contextTrigger = within(history).getByRole('listitem')
       .querySelector<HTMLElement>('.probe-history-context-trigger')!;
     await fireEvent.contextMenu(contextTrigger, { clientX: 100, clientY: 100 });

@@ -3,7 +3,7 @@
   import { navigateBack } from '../../app/router';
   import { knownFullDestinationNames } from '../../domain/known-destination';
   import { normalizeDestinationHash } from '../../domain/settings';
-  import { createDateFormatter, locale, t } from '../../i18n';
+  import { t } from '../../i18n';
   import {
     clearDestinationHashHistory,
     destinationHashHistory,
@@ -44,11 +44,6 @@
   const normalizedIdentityHash = $derived(normalizeDestinationHash(identityHash));
   const normalizedName = $derived(normalizeFullDestinationName(fullDestinationName));
   const formValid = $derived(Boolean(normalizedIdentityHash && normalizedName));
-  const generatedAtFormatter = $derived(createDateFormatter($locale, {
-    dateStyle: undefined,
-    timeStyle: 'medium',
-  }));
-
   onMount(() => {
     page.closest('main')?.scrollTo({ top: 0, left: 0 });
     const closeMenu = (event: PointerEvent) => {
@@ -263,10 +258,7 @@
                 onopen: (x, y, method) => openHistoryActions(entry, x, y, method),
               }}
             >
-              <header>
-                <strong>{$t('destinationHash.output.label')}</strong>
-                <time datetime={entry.generatedAt}>{generatedAtFormatter.format(new Date(entry.generatedAt))}</time>
-              </header>
+              <strong class="destination-hash-result-label">{$t('destinationHash.output.label')}</strong>
               <code class="destination-hash-result-value">{entry.destinationHash}</code>
               <dl>
                 <div>
@@ -280,7 +272,11 @@
               </dl>
             </div>
             <div class="destination-hash-result-actions">
-              <button class="button secondary compact" type="button" onclick={() => void copyDestinationHash(entry.destinationHash)}>
+              <button
+                class="button secondary compact history-inline-action"
+                type="button"
+                onclick={() => void copyDestinationHash(entry.destinationHash)}
+              >
                 <Icon name="copy" size={16} />{$t('destinationHash.output.copy')}
               </button>
             </div>
@@ -374,7 +370,6 @@
     gap: 10px 16px;
     padding: 15px 17px;
     border: 1px solid var(--border);
-    border-inline-start: 3px solid var(--accent);
     border-radius: 11px;
     background: var(--surface-1);
   }
@@ -387,15 +382,7 @@
     outline-offset: 5px;
   }
 
-  .destination-hash-history-context-trigger header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-  }
-
-  .destination-hash-history-list header strong { font-size: .8rem; }
-  .destination-hash-history-list time { color: var(--text-subtle); font-size: .65rem; }
+  .destination-hash-result-label { font-size: .8rem; }
 
   .destination-hash-result-value {
     min-width: 0;
@@ -419,6 +406,7 @@
   .destination-hash-result-actions {
     display: flex;
     flex-wrap: wrap;
+    align-items: center;
     justify-content: flex-end;
     gap: 8px;
   }

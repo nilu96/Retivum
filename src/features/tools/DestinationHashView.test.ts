@@ -58,9 +58,13 @@ describe('DestinationHashView', () => {
     const result = await screen.findByText(expectedDestination);
     expect(result).toBeInTheDocument();
     expect(result.closest('.settings-card')).toBeNull();
+    expect(result.closest('li')?.querySelector('time')).toBeNull();
     expect(screen.getByRole('heading', { name: 'Generation history' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Request path/ })).not.toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'Copy destination hash' }));
+    const copyButton = screen.getByRole('button', { name: 'Copy destination hash' });
+    expect(copyButton).toHaveClass('history-inline-action');
+    expect(copyButton.parentElement).toHaveStyle({ alignItems: 'center' });
+    await fireEvent.click(copyButton);
     await waitFor(() => expect(writeText).toHaveBeenCalledWith(expectedDestination));
   });
 
