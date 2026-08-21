@@ -35,6 +35,17 @@ const websocket: InterfaceConfig = {
   connection: { scheme: 'wss', host: 'example.test', path: '/' },
 };
 
+function pointerEvent(
+  type: string,
+  init: { button?: number; clientX: number; clientY: number; pointerId: number },
+): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  for (const [property, value] of Object.entries({ isPrimary: true, ...init })) {
+    Object.defineProperty(event, property, { configurable: true, value });
+  }
+  return event;
+}
+
 describe('NetworkVisualizerView', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -88,6 +99,7 @@ describe('NetworkVisualizerView', () => {
 
     expect(screen.getByLabelText('Maximum hops')).toHaveAttribute('type', 'number');
     expect(screen.getByLabelText('Maximum hops')).toHaveValue(5);
+    expect(screen.getByRole('checkbox', { name: 'Group by identity' })).not.toBeChecked();
     expect(screen.getByRole('heading', { name: 'Network visualizer' })).toBeInTheDocument();
     expect(screen.getByText(
       'Explore the routes currently known to this device without inferring unseen intermediate routers.',
@@ -104,6 +116,268 @@ describe('NetworkVisualizerView', () => {
     expect(screen.getByLabelText('Visible network summary').closest('.network-visualizer-panel')).not.toBeNull();
     expect(screen.queryByRole('complementary', { name: 'Selected network node details' })).not.toBeInTheDocument();
     expect(container.querySelector('.page-scroll-top')).not.toBeInTheDocument();
+  });
+
+  it('groups multiple destinations for one public identity on demand', async () => {
+    const secondDestinationHash = 'e'.repeat(32);
+    const publicKey = 'f'.repeat(128);
+    const identityHash = '1'.repeat(32);
+    pathTableEntries.set([
+      { destinationHash, interfaceId: websocket.id, hops: 1 },
+      { destinationHash: secondDestinationHash, interfaceId: websocket.id, hops: 1 },
+    ]);
+    remoteDestinationInventory.set([
+      { destinationHash, publicKey, identityHash },
+      { destinationHash: secondDestinationHash, publicKey, identityHash },
+    ]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: secondDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    const { container } = render(NetworkVisualizerView);
+
+    expect(container.querySelector('.network-flow-node.identity')).not.toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+
+    await waitFor(() => expect(container.querySelectorAll('.network-flow-node.identity')).toHaveLength(1));
+    expect(screen.getByText('Identity')).toBeInTheDocument();
+    expect(screen.getByText('Transport node')).toBeInTheDocument();
+    const identity = screen.getByRole('button', {
+      name: `Identity: ${identityHash.slice(0, 8)}…${identityHash.slice(-6)}. 2 destinations, collapsed. Activate to toggle destinations; open the context menu for identity actions.`,
+    });
+    expect(identity).toHaveAttribute('aria-expanded', 'false');
+    expect(identity).toHaveTextContent('2');
+    expect(screen.queryByText('Field station')).not.toBeInTheDocument();
+    expect(screen.queryByText('Workshop')).not.toBeInTheDocument();
+
+    await fireEvent.click(identity);
+
+    expect(await screen.findByText('Field station')).toBeInTheDocument();
+    expect(screen.getByText('Workshop')).toBeInTheDocument();
+    const expandedIdentity = screen.getByRole('button', { name: /2 destinations, expanded/ });
+    expect(expandedIdentity).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByPlaceholderText('Search names, hashes, interfaces, or applications'))
+      .toHaveValue('');
+    expect(expandedIdentity).toHaveClass('search-match');
+    expect(screen.getByRole('button', { name: /Destination: Field station/ }))
+      .toHaveClass('search-match');
+    expect(screen.getByRole('button', { name: /Destination: Workshop/ }))
+      .toHaveClass('search-match');
+    const identityWrapper = expandedIdentity.closest('.svelte-flow__node') as HTMLElement;
+    const destinationWrapper = screen.getByText('Field station')
+      .closest('.svelte-flow__node') as HTMLElement;
+
+    await fireEvent.click(expandedIdentity);
+
+    expect(Number(identityWrapper.style.zIndex))
+      .toBeGreaterThan(Number(destinationWrapper.style.zIndex));
+    await waitFor(() => expect(screen.queryByText('Field station')).not.toBeInTheDocument());
+    expect(screen.queryByText('Workshop')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: /2 destinations, collapsed/ }));
+    expect(await screen.findByText('Field station')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Fit network' }));
+
+    await waitFor(() => expect(screen.queryByText('Field station')).not.toBeInTheDocument());
+    expect(screen.queryByText('Workshop')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /2 destinations, collapsed/ }))
+      .toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('expands and highlights every ingress occurrence of one identity together', async () => {
+    const secondInterface: InterfaceConfig = {
+      ...websocket,
+      id: 'websocket-2',
+      name: 'Field relay',
+    };
+    const secondDestinationHash = 'e'.repeat(32);
+    const publicKey = 'f'.repeat(128);
+    const identityHash = '1'.repeat(32);
+    interfaceConfigurations.set([websocket, secondInterface]);
+    interfaceStatuses.set({
+      [websocket.id]: 'online',
+      [secondInterface.id]: 'online',
+    });
+    pathTableEntries.set([
+      { destinationHash, interfaceId: websocket.id, hops: 1 },
+      { destinationHash: secondDestinationHash, interfaceId: secondInterface.id, hops: 1 },
+    ]);
+    remoteDestinationInventory.set([
+      { destinationHash, publicKey, identityHash },
+      { destinationHash: secondDestinationHash, publicKey, identityHash },
+    ]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: secondDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    render(NetworkVisualizerView);
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    const collapsedOccurrences = await screen.findAllByRole('button', {
+      name: /2 destinations, collapsed/,
+    });
+    expect(collapsedOccurrences).toHaveLength(2);
+    expect(collapsedOccurrences.every((node) => node.textContent?.includes('2'))).toBe(true);
+
+    await fireEvent.click(collapsedOccurrences[0]);
+
+    const expandedOccurrences = await screen.findAllByRole('button', {
+      name: /2 destinations, expanded/,
+    });
+    expect(expandedOccurrences).toHaveLength(2);
+    expect(expandedOccurrences.every((node) => node.classList.contains('search-match'))).toBe(true);
+    expect(await screen.findByText('Field station')).toBeInTheDocument();
+    expect(screen.getByText('Workshop')).toBeInTheDocument();
+
+    await fireEvent.click(expandedOccurrences[1]);
+
+    await waitFor(() => expect(screen.queryByText('Field station')).not.toBeInTheDocument());
+    expect(screen.queryByText('Workshop')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /2 destinations, collapsed/ })).toHaveLength(2);
+  });
+
+  it('collapses expanded identities on Escape or an ordinary outside click, but not node or drag gestures', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(prefers-reduced-motion: reduce)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const secondDestinationHash = 'e'.repeat(32);
+    const publicKey = 'f'.repeat(128);
+    const identityHash = '1'.repeat(32);
+    pathTableEntries.set([
+      { destinationHash, interfaceId: websocket.id, hops: 1 },
+      { destinationHash: secondDestinationHash, interfaceId: websocket.id, hops: 1 },
+    ]);
+    remoteDestinationInventory.set([
+      { destinationHash, publicKey, identityHash },
+      { destinationHash: secondDestinationHash, publicKey, identityHash },
+    ]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: secondDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    const { container } = render(NetworkVisualizerView);
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    const expand = async (): Promise<void> => {
+      await fireEvent.click(await screen.findByRole('button', { name: /2 destinations, collapsed/ }));
+      await screen.findByRole('button', { name: /2 destinations, expanded/ });
+    };
+
+    await expand();
+    await fireEvent.click(screen.getByRole('button', { name: /Destination: Field station/ }));
+    expect(screen.getByRole('button', { name: /2 destinations, expanded/ })).toBeInTheDocument();
+
+    await fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByText('Field station')).not.toBeInTheDocument());
+
+    await expand();
+    const pane = container.querySelector('.svelte-flow__pane') as HTMLElement;
+    await fireEvent(pane, pointerEvent('pointerdown', {
+      button: 0, pointerId: 1, clientX: 10, clientY: 10,
+    }));
+    await fireEvent(pane, pointerEvent('pointermove', {
+      pointerId: 1, clientX: 30, clientY: 10,
+    }));
+    await fireEvent(pane, pointerEvent('pointerup', {
+      button: 0, pointerId: 1, clientX: 30, clientY: 10,
+    }));
+    await fireEvent.click(pane, { clientX: 30, clientY: 10 });
+    expect(screen.getByRole('button', { name: /2 destinations, expanded/ })).toBeInTheDocument();
+
+    const interfaceNode = screen.getByRole('button', { name: /Interface: Community hub/ });
+    await fireEvent(interfaceNode, pointerEvent('pointerdown', {
+      button: 0, pointerId: 2, clientX: 40, clientY: 40,
+    }));
+    await fireEvent(interfaceNode, pointerEvent('pointermove', {
+      pointerId: 2, clientX: 55, clientY: 55,
+    }));
+    await fireEvent(interfaceNode, pointerEvent('pointerup', {
+      button: 0, pointerId: 2, clientX: 55, clientY: 55,
+    }));
+    await fireEvent.click(interfaceNode, { clientX: 55, clientY: 55 });
+    expect(screen.getByRole('button', { name: /2 destinations, expanded/ })).toBeInTheDocument();
+
+    await fireEvent(pane, pointerEvent('pointerdown', {
+      button: 0, pointerId: 3, clientX: 40, clientY: 40,
+    }));
+    await fireEvent(pane, pointerEvent('pointerup', {
+      button: 0, pointerId: 3, clientX: 40, clientY: 40,
+    }));
+    await fireEvent.click(pane, { clientX: 40, clientY: 40 });
+    await waitFor(() => expect(screen.queryByText('Field station')).not.toBeInTheDocument());
+  });
+
+  it('redistributes automatic children around a pinned expanded identity', async () => {
+    const secondDestinationHash = 'e'.repeat(32);
+    const addedDestinationHash = '9'.repeat(32);
+    const publicKey = 'f'.repeat(128);
+    const identityHash = '1'.repeat(32);
+    const initialPaths = [
+      { destinationHash, interfaceId: websocket.id, hops: 1 },
+      { destinationHash: secondDestinationHash, interfaceId: websocket.id, hops: 1 },
+    ];
+    pathTableEntries.set(initialPaths);
+    remoteDestinationInventory.set([
+      { destinationHash, publicKey, identityHash },
+      { destinationHash: secondDestinationHash, publicKey, identityHash },
+      { destinationHash: addedDestinationHash, publicKey, identityHash },
+    ]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: secondDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+      { destinationHash: addedDestinationHash, displayName: 'Portable node', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    render(NetworkVisualizerView);
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    await fireEvent.click(await screen.findByRole('button', { name: /2 destinations, collapsed/ }));
+    await screen.findByText('Field station');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 280));
+
+    const identity = screen.getByRole('button', { name: /2 destinations, expanded/ });
+    const identityWrapper = identity.closest('.svelte-flow__node') as HTMLElement;
+    const destinationWrapper = screen.getByText('Field station')
+      .closest('.svelte-flow__node') as HTMLElement;
+    const identityPosition = identityWrapper.style.transform;
+    const destinationPosition = destinationWrapper.style.transform;
+
+    pathTableEntries.set([
+      ...initialPaths,
+      { destinationHash: addedDestinationHash, interfaceId: websocket.id, hops: 1 },
+    ]);
+
+    expect(await screen.findByText('Portable node')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: /3 destinations, expanded/ }))
+      .toBeInTheDocument());
+    expect(identityWrapper.style.transform).toBe(identityPosition);
+    expect(destinationWrapper.style.transform).not.toBe(destinationPosition);
+    const redistributedDestinationPosition = destinationWrapper.style.transform;
+
+    pathTableEntries.set(initialPaths);
+
+    await waitFor(() => expect(screen.queryByText('Portable node')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /2 destinations, expanded/ })).toBeInTheDocument();
+    expect(identityWrapper.style.transform).toBe(identityPosition);
+    expect(destinationWrapper.style.transform).toBe(redistributedDestinationPosition);
+
+    pathTableEntries.set([initialPaths[0]]);
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: /destinations, expanded/ }))
+      .not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: /Destination: Field station/ }))
+      .not.toHaveClass('search-match');
+
+    pathTableEntries.set(initialPaths);
+
+    expect(await screen.findByRole('button', { name: /2 destinations, collapsed/ }))
+      .toBeInTheDocument();
+    expect(screen.queryByText('Field station')).not.toBeInTheDocument();
   });
 
   it('copies a destination hash from its context menu', async () => {
@@ -133,6 +407,89 @@ describe('NetworkVisualizerView', () => {
     }
   });
 
+  it('copies, probes, and drops every cached path of a grouped identity', async () => {
+    const secondDestinationHash = 'e'.repeat(32);
+    const unrelatedDestinationHash = '9'.repeat(32);
+    const publicKey = 'f'.repeat(128);
+    const identityHash = '1'.repeat(32);
+    pathTableEntries.set([
+      { destinationHash, interfaceId: websocket.id, hops: 1 },
+      { destinationHash: secondDestinationHash, interfaceId: websocket.id, hops: 1 },
+      { destinationHash: unrelatedDestinationHash, interfaceId: websocket.id, hops: 1 },
+    ]);
+    remoteDestinationInventory.set([
+      { destinationHash, publicKey, identityHash },
+      { destinationHash: secondDestinationHash, publicKey, identityHash },
+      {
+        destinationHash: unrelatedDestinationHash,
+        publicKey: '8'.repeat(128),
+        identityHash: '7'.repeat(32),
+      },
+    ]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: secondDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+      { destinationHash: unrelatedDestinationHash, displayName: 'Relay', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const probe = vi.spyOn(reticulumRuntime, 'probeDestination').mockResolvedValue({
+      ok: true,
+      destinationHash: '6'.repeat(32),
+      fullDestinationName: 'rnstransport.probe',
+      probeSizeBytes: 8,
+      roundTripTimeMs: 18,
+    });
+    const drop = vi.spyOn(reticulumRuntime, 'dropDestinationPaths').mockResolvedValue({
+      ok: true,
+      count: 2,
+    });
+
+    try {
+      render(NetworkVisualizerView);
+      await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+      const identity = await screen.findByRole('button', { name: /2 destinations, collapsed/ });
+      expect(identity).toHaveAttribute('aria-haspopup', 'menu');
+
+      await fireEvent.contextMenu(identity, { clientX: 140, clientY: 180 });
+      expect(screen.getByRole('menu', { name: 'Identity actions' })).toBeInTheDocument();
+      expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
+        'Copy identity hash',
+        'Probe identity',
+        'Drop all paths of identity',
+      ]);
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy identity hash' }));
+      expect(writeText).toHaveBeenCalledWith(identityHash);
+
+      await fireEvent.contextMenu(identity, { clientX: 140, clientY: 180 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe identity' }));
+      expect(probe).toHaveBeenCalledWith(
+        identityHash,
+        'rnstransport.probe',
+        20_000,
+        8,
+        expect.any(AbortSignal),
+      );
+
+      await fireEvent.contextMenu(identity, { clientX: 140, clientY: 180 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Drop all paths of identity' }));
+      const dialog = screen.getByRole('alertdialog');
+      expect(dialog).toHaveTextContent(`Drop 2 cached paths for identity ${identityHash.slice(0, 8)}…${identityHash.slice(-6)}?`);
+      expect(drop).not.toHaveBeenCalled();
+      await fireEvent.click(screen.getByRole('button', { name: 'Drop all paths' }));
+
+      await waitFor(() => expect(drop).toHaveBeenCalledTimes(1));
+      expect(drop).toHaveBeenCalledWith([destinationHash, secondDestinationHash]);
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
   it('copies an immediate next-hop hash from its context menu', async () => {
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -150,12 +507,33 @@ describe('NetworkVisualizerView', () => {
       await fireEvent.contextMenu(nextHop, { clientX: 140, clientY: 180 });
 
       expect(screen.getByRole('menu', { name: 'Transport-node actions' })).toBeInTheDocument();
-      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy identity hash' }));
       expect(writeText).toHaveBeenCalledWith(nextHopHash);
     } finally {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
+  });
+
+  it('keeps transport-node actions on an identity-grouped immediate transport node', async () => {
+    remoteDestinationInventory.set([{
+      destinationHash,
+      publicKey: 'f'.repeat(128),
+      identityHash: nextHopHash,
+    }]);
+    render(NetworkVisualizerView);
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    const transportIdentity = await screen.findByRole('button', {
+      name: `Transport identity: ${nextHopHash.slice(0, 8)}…${nextHopHash.slice(-6)}. Open transport-node actions.`,
+    });
+    await fireEvent.contextMenu(transportIdentity, { clientX: 140, clientY: 180 });
+
+    expect(screen.getByRole('menu', { name: 'Transport-node actions' })).toBeInTheDocument();
+    expect(screen.queryByRole('menu', { name: 'Identity actions' })).not.toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Probe transport node' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Drop all paths via transport node' }))
+      .toBeInTheDocument();
   });
 
   it('probes a destination from the shared destination action', async () => {
@@ -232,7 +610,7 @@ describe('NetworkVisualizerView', () => {
       clientX: 140,
       clientY: 180,
     });
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe destination' }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Probe transport node' }));
 
     expect(probe).toHaveBeenCalledWith(
       nextHopHash,
@@ -338,6 +716,49 @@ describe('NetworkVisualizerView', () => {
     await waitFor(() => expect(saveInterface).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: websocket.id, enabled: true }),
     ));
+  });
+
+  it('confirms and drops every cached path using an interface', async () => {
+    const secondDestinationHash = 'e'.repeat(32);
+    const unrelatedDestinationHash = 'f'.repeat(32);
+    pathTableEntries.set([
+      { destinationHash, nextHop: nextHopHash, interfaceId: websocket.id, hops: 3 },
+      {
+        destinationHash: secondDestinationHash,
+        nextHop: '8'.repeat(32),
+        interfaceId: websocket.id,
+        hops: 4,
+      },
+      {
+        destinationHash: unrelatedDestinationHash,
+        nextHop: '9'.repeat(32),
+        interfaceId: 'other-interface',
+        hops: 3,
+      },
+    ]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: secondDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+      { destinationHash: unrelatedDestinationHash, displayName: 'Relay', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    const drop = vi.spyOn(reticulumRuntime, 'dropDestinationPaths').mockResolvedValue({
+      ok: true,
+      count: 2,
+    });
+    render(NetworkVisualizerView);
+
+    await fireEvent.contextMenu(screen.getByRole('button', {
+      name: 'Interface: Community hub. Open interface actions.',
+    }), { clientX: 140, clientY: 180 });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Drop all paths via interface' }));
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(dialog).toHaveTextContent('Drop 2 cached paths that use interface Community hub?');
+    expect(drop).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('button', { name: 'Drop all paths' }));
+
+    await waitFor(() => expect(drop).toHaveBeenCalledTimes(1));
+    expect(drop).toHaveBeenCalledWith([destinationHash, secondDestinationHash]);
   });
 
   it('confirms before removing a configured interface', async () => {

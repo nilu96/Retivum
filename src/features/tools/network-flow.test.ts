@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { NetworkVisualizerGraph } from './network-visualizer';
 import {
   buildNetworkFlowElements,
+  preserveExpandedIdentityNodePositions,
+  preserveIdentityToggleNodePositions,
   preserveNetworkFlowNodePositions,
 } from './network-flow';
 
@@ -83,6 +85,66 @@ describe('Svelte Flow network adapter', () => {
     expect(local.data.icon).toBe('identity');
     expect(interfaceNode.data.icon).toBe('interface');
     expect(destination.data.icon).toBe('nomadnet');
+    const toggleIdentity = vi.fn();
+    const identity = buildNetworkFlowElements({
+      ...graph,
+      nodes: [
+        ...graph.nodes,
+        {
+          id: `identity:${'f'.repeat(128)}`,
+          kind: 'identity',
+          label: 'Field identity',
+          publicKey: 'f'.repeat(128),
+          identityHash: 'e'.repeat(32),
+          destinationCount: 2,
+          expanded: false,
+          x: 720,
+          y: 520,
+        },
+      ],
+    }, {
+      ariaLabel: (node) => `Node ${node.label}`,
+      label: (node) => node.label,
+      onopen: vi.fn(),
+      ontoggle: toggleIdentity,
+      searchActive: false,
+    }).nodes.find((node) => node.data.kind === 'identity')!;
+    expect(identity).toEqual(expect.objectContaining({ width: 54, height: 54 }));
+    expect(identity.data).toEqual(expect.objectContaining({
+      actionable: true,
+      contextActionable: true,
+      destinationCount: 2,
+      expandable: true,
+      expanded: false,
+      icon: 'identity',
+    }));
+    identity.data.ontoggle();
+    expect(toggleIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      publicKey: 'f'.repeat(128),
+    }));
+    const transportIdentity = buildNetworkFlowElements({
+      ...graph,
+      nodes: [{
+        id: `identity:${'a'.repeat(128)}`,
+        kind: 'identity',
+        label: 'Direct transport identity',
+        publicKey: 'a'.repeat(128),
+        identityHash: 'b'.repeat(32),
+        nextHopHash: 'b'.repeat(32),
+        x: 720,
+        y: 520,
+      }],
+    }, {
+      ariaLabel: (node) => `Node ${node.label}`,
+      label: (node) => node.label,
+      onopen: vi.fn(),
+      searchActive: false,
+    }).nodes[0];
+    expect(transportIdentity.data).toEqual(expect.objectContaining({
+      actionable: true,
+      icon: 'route',
+      transportNode: true,
+    }));
     const probeDestination = buildNetworkFlowElements({
       ...graph,
       nodes: graph.nodes.map((node) => node.kind === 'destination'
@@ -105,7 +167,25 @@ describe('Svelte Flow network adapter', () => {
       targetHandle: 'target-center',
       label: '3',
     }));
-    expect(elements.edges.find((edge) => edge.id === 'two-hop-edge')?.label).toBeUndefined();
+    expect(elements.edges.find((edge) => edge.id === 'two-hop-edge')?.label).toBe('2');
+
+    const membershipEdge = buildNetworkFlowElements({
+      ...graph,
+      edges: [{
+        id: 'identity-membership-edge',
+        from: 'interface:one',
+        to: 'destination:one',
+        kind: 'direct',
+        hops: 2,
+        showHopLabel: false,
+      }],
+    }, {
+      ariaLabel: (node) => `Node ${node.label}`,
+      label: (node) => node.label,
+      onopen: vi.fn(),
+      searchActive: false,
+    }).edges[0];
+    expect(membershipEdge.label).toBeUndefined();
 
     const relayout = buildNetworkFlowElements({
       ...graph,
@@ -134,14 +214,19 @@ describe('Svelte Flow network adapter', () => {
 
     expect(elements.edges.find((edge) => edge.id === 'interface-edge')?.class)
       .toContain('search-match');
+    expect(elements.edges.find((edge) => edge.id === 'interface-edge')?.zIndex).toBe(20);
     expect(elements.edges.find((edge) => edge.id === 'route-edge')?.class)
       .toContain('search-dimmed');
+    expect(elements.edges.find((edge) => edge.id === 'route-edge')?.zIndex).toBe(0);
     expect(elements.edges.find((edge) => edge.id === 'route-edge')?.labelStyle)
       .toContain('color-mix(in srgb, var(--text-muted) 16%, var(--surface-1))');
     expect(elements.edges.find((edge) => edge.id === 'route-edge')?.labelStyle)
       .toContain('opacity: 1');
     expect(elements.nodes.find((node) => node.id === 'destination:one')?.data)
       .toEqual(expect.objectContaining({ matched: false, searchActive: true }));
+    expect(elements.nodes.find((node) => node.id === 'local')?.zIndex).toBe(30);
+    expect(elements.nodes.find((node) => node.id === 'interface:one')?.zIndex).toBe(30);
+    expect(elements.nodes.find((node) => node.id === 'destination:one')?.zIndex).toBe(10);
   });
 
   it('updates search presentation without replacing dragged node positions', () => {
@@ -202,5 +287,190 @@ describe('Svelte Flow network adapter', () => {
       .toEqual({ x: 1_240, y: -360 });
     expect(synchronized.find((node) => node.id === 'local')?.position)
       .toEqual(automaticPosition);
+  });
+
+  it('keeps existing nodes fixed and translates newly expanded children to the current identity', () => {
+    const identityId = `identity:${'f'.repeat(128)}`;
+    const collapsedGraph: NetworkVisualizerGraph = {
+      ...graph,
+      nodes: [
+        graph.nodes[0],
+        {
+          id: identityId,
+          kind: 'identity',
+          label: 'eeeeeeee…eeeeee',
+          publicKey: 'f'.repeat(128),
+          identityHash: 'e'.repeat(32),
+          destinationCount: 2,
+          expanded: false,
+          x: 760,
+          y: 520,
+        },
+      ],
+      edges: [{ id: 'local~identity', from: 'local', to: identityId, kind: 'direct' }],
+    };
+    const options = {
+      ariaLabel: (node: NetworkVisualizerGraph['nodes'][number]) => `Node ${node.label}`,
+      label: (node: NetworkVisualizerGraph['nodes'][number]) => node.label,
+      onopen: vi.fn(),
+      searchActive: false,
+    };
+    const current = buildNetworkFlowElements(collapsedGraph, options).nodes.map((node) => ({
+      ...node,
+      position: node.id === identityId ? { x: 1_200, y: 300 } : { x: 80, y: 90 },
+    }));
+    const expandedGraph: NetworkVisualizerGraph = {
+      ...collapsedGraph,
+      nodes: [
+        { ...collapsedGraph.nodes[0], x: 200, y: 220 },
+        { ...collapsedGraph.nodes[1], expanded: true, x: 500, y: 400 },
+        {
+          id: 'destination:child',
+          kind: 'destination',
+          label: 'Child',
+          destinationHash: 'c'.repeat(32),
+          x: 650,
+          y: 460,
+        },
+      ],
+      edges: [
+        collapsedGraph.edges[0],
+        { id: 'identity~child', from: identityId, to: 'destination:child', kind: 'route' },
+      ],
+    };
+    const next = buildNetworkFlowElements(expandedGraph, options);
+    const nextIdentityPosition = next.nodes.find((node) => node.id === identityId)!.position;
+    const automaticChildPosition = next.nodes.find((node) => node.id === 'destination:child')!.position;
+    const synchronized = preserveIdentityToggleNodePositions(
+      next.nodes,
+      current,
+      next.edges,
+      new Set([identityId]),
+    );
+
+    expect(synchronized.find((node) => node.id === 'local')?.position).toEqual({ x: 80, y: 90 });
+    expect(synchronized.find((node) => node.id === identityId)?.position)
+      .toEqual({ x: 1_200, y: 300 });
+    expect(synchronized.find((node) => node.id === 'destination:child')?.position).toEqual({
+      x: automaticChildPosition.x + 1_200 - nextIdentityPosition.x,
+      y: automaticChildPosition.y + 300 - nextIdentityPosition.y,
+    });
+  });
+
+  it('redistributes automatic expanded children while preserving dragged positions', () => {
+    const identityId = `identity:${'f'.repeat(128)}`;
+    const childId = 'destination:child';
+    const newChildId = 'destination:new-child';
+    const options = {
+      ariaLabel: (node: NetworkVisualizerGraph['nodes'][number]) => `Node ${node.label}`,
+      label: (node: NetworkVisualizerGraph['nodes'][number]) => node.label,
+      onopen: vi.fn(),
+      searchActive: true,
+    };
+    const currentGraph: NetworkVisualizerGraph = {
+      ...graph,
+      nodes: [
+        graph.nodes[0],
+        {
+          id: identityId,
+          kind: 'identity',
+          label: 'eeeeeeee…eeeeee',
+          publicKey: 'f'.repeat(128),
+          destinationCount: 2,
+          expanded: true,
+          x: 700,
+          y: 500,
+          matched: true,
+        },
+        {
+          id: childId,
+          kind: 'destination',
+          label: 'Existing child',
+          destinationHash: 'c'.repeat(32),
+          x: 820,
+          y: 560,
+          matched: true,
+        },
+      ],
+      edges: [
+        { id: 'local~identity', from: 'local', to: identityId, kind: 'direct', matched: true },
+        { id: 'identity~child', from: identityId, to: childId, kind: 'route', matched: true },
+      ],
+    };
+    const current = buildNetworkFlowElements(currentGraph, options).nodes.map((node) => ({
+      ...node,
+      position: node.id === identityId
+        ? { x: 1_100, y: 260 }
+        : node.id === childId ? { x: 1_260, y: 330 } : { x: 40, y: 50 },
+    }));
+    const nextGraph: NetworkVisualizerGraph = {
+      ...currentGraph,
+      nodes: [
+        { ...currentGraph.nodes[0], x: 300, y: 200 },
+        { ...currentGraph.nodes[1], destinationCount: 3, x: 520, y: 420 },
+        { ...currentGraph.nodes[2], x: 680, y: 480 },
+        {
+          id: newChildId,
+          kind: 'destination',
+          label: 'New child',
+          destinationHash: 'd'.repeat(32),
+          x: 440,
+          y: 570,
+          matched: true,
+        },
+      ],
+      edges: [
+        ...currentGraph.edges,
+        { id: 'identity~new-child', from: identityId, to: newChildId, kind: 'route', matched: true },
+      ],
+    };
+    const next = buildNetworkFlowElements(nextGraph, options);
+    const automaticIdentity = next.nodes.find((node) => node.id === identityId)!;
+    const automaticChild = next.nodes.find((node) => node.id === childId)!;
+    const automaticNewChild = next.nodes.find((node) => node.id === newChildId)!;
+    const synchronized = preserveExpandedIdentityNodePositions(
+      next.nodes,
+      current,
+      next.edges,
+      new Set([identityId]),
+    );
+
+    expect(synchronized.find((node) => node.id === identityId)?.position)
+      .toEqual({ x: 1_100, y: 260 });
+    expect(synchronized.find((node) => node.id === childId)?.position).toEqual({
+      x: automaticChild.position.x + 1_100 - automaticIdentity.position.x,
+      y: automaticChild.position.y + 260 - automaticIdentity.position.y,
+    });
+    expect(synchronized.find((node) => node.id === newChildId)?.position).toEqual({
+      x: automaticNewChild.position.x + 1_100 - automaticIdentity.position.x,
+      y: automaticNewChild.position.y + 260 - automaticIdentity.position.y,
+    });
+    expect(synchronized.find((node) => node.id === 'local')?.position)
+      .toEqual(next.nodes.find((node) => node.id === 'local')?.position);
+
+    const withDraggedChild = preserveExpandedIdentityNodePositions(
+      next.nodes,
+      current,
+      next.edges,
+      new Set([identityId]),
+      new Set([childId]),
+    );
+    expect(withDraggedChild.find((node) => node.id === childId)?.position)
+      .toEqual({ x: 1_260, y: 330 });
+
+    const unhighlightedNext = buildNetworkFlowElements({
+      ...nextGraph,
+      nodes: nextGraph.nodes.map((node) => (
+        node.id === newChildId ? { ...node, matched: false } : node
+      )),
+    }, options);
+    const withUnhighlightedChild = preserveExpandedIdentityNodePositions(
+      unhighlightedNext.nodes,
+      current,
+      unhighlightedNext.edges,
+      new Set([identityId]),
+    );
+    expect(withUnhighlightedChild.find((node) => node.id === childId)?.position)
+      .toEqual({ x: 1_260, y: 330 });
   });
 });

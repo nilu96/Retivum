@@ -278,7 +278,11 @@ describe('network visualizer graph', () => {
     });
 
     expect(graph.nodes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'local', label: 'Nora', kind: 'local' }),
+      expect.objectContaining({
+        id: 'local',
+        label: 'Nora',
+        kind: 'local',
+      }),
       expect.objectContaining({ id: 'interface:websocket-1', label: 'Community hub', interfaceState: 'online' }),
       expect.objectContaining({ id: `next-hop:websocket-1:${nextHop}`, nextHopHash: nextHop }),
       expect.objectContaining({ id: `destination:${destination}`, label: 'Field station', hops: 3 }),
@@ -310,7 +314,40 @@ describe('network visualizer graph', () => {
       }));
   });
 
-  it('shares an immediate next-hop node and prefers a local contact name', () => {
+  it('does not use an identity-shared name for visualization labels', () => {
+    const nomadDestination = '6'.repeat(32);
+    const deliveryDestination = '7'.repeat(32);
+    const publicKey = 'e'.repeat(128);
+    const graph = buildNetworkVisualizerGraph({
+      interfaces: [websocket],
+      interfaceStatuses: {},
+      paths: [{
+        destinationHash: deliveryDestination,
+        hops: 1,
+        interfaceId: websocket.id,
+      }],
+      destinations: [
+        {
+          destinationHash: nomadDestination,
+          displayName: 'Shared device name',
+          fullDestinationName: 'nomadnetwork.node',
+        },
+        {
+          destinationHash: deliveryDestination,
+          fullDestinationName: 'lxmf.delivery',
+        },
+      ],
+      destinationInventory: [
+        { destinationHash: nomadDestination, publicKey, identityHash: 'd'.repeat(32) },
+        { destinationHash: deliveryDestination, publicKey, identityHash: 'd'.repeat(32) },
+      ],
+    });
+
+    expect(graph.nodes.find((node) => node.destinationHash === deliveryDestination)?.label)
+      .toBe(`${deliveryDestination.slice(0, 8)}…${deliveryDestination.slice(-6)}`);
+  });
+
+  it('shares an immediate transport node without treating two-hop paths as local destinations', () => {
     const nextHop = 'e'.repeat(32);
     const first = '1'.repeat(32);
     const second = '2'.repeat(32);
@@ -335,6 +372,348 @@ describe('network visualizer graph', () => {
     expect(graph.nodes.filter((node) => node.kind === 'nextHop')).toHaveLength(1);
     expect(graph.nodes.find((node) => node.id === `destination:${first}`)?.label).toBe('My station name');
     expect(graph.edges.filter((edge) => edge.from === `next-hop:websocket-1:${nextHop}`)).toHaveLength(2);
+    expect(graph.edges.find((edge) => edge.to === `destination:${first}`)).toEqual(
+      expect.objectContaining({ kind: 'route', hops: 2 }),
+    );
+    expect(graph.edges.find((edge) => edge.to === `destination:${second}`)).toEqual(
+      expect.objectContaining({ kind: 'route', hops: 4 }),
+    );
+  });
+
+  it('adds an identity node only when a public key owns multiple visible destinations', () => {
+    const sharedPublicKey = 'a'.repeat(128);
+    const sharedIdentityHash = '1'.repeat(32);
+    const singletonPublicKey = 'b'.repeat(128);
+    const first = '2'.repeat(32);
+    const second = '3'.repeat(32);
+    const singleton = '4'.repeat(32);
+    const input = {
+      interfaces: [websocket],
+      interfaceStatuses: {},
+      paths: [first, second, singleton].map((destinationHash) => ({
+        destinationHash,
+        hops: 1,
+        interfaceId: websocket.id,
+      })),
+      destinations: [],
+      destinationInventory: [
+        { destinationHash: first, publicKey: sharedPublicKey, identityHash: sharedIdentityHash },
+        { destinationHash: second, publicKey: sharedPublicKey, identityHash: sharedIdentityHash },
+        { destinationHash: singleton, publicKey: singletonPublicKey, identityHash: '5'.repeat(32) },
+      ],
+      groupByIdentity: true,
+    };
+    const graph = buildNetworkVisualizerGraph(input);
+    const identity = graph.nodes.find((node) => node.kind === 'identity'
+      && node.publicKey === sharedPublicKey)!;
+    const identityId = identity.id;
+
+    expect(graph.nodes.filter((node) => node.kind === 'identity')).toEqual([
+      expect.objectContaining({
+        id: identityId,
+        publicKey: sharedPublicKey,
+        identityHash: sharedIdentityHash,
+        label: `${sharedIdentityHash.slice(0, 8)}…${sharedIdentityHash.slice(-6)}`,
+        destinationCount: 2,
+        expanded: false,
+      }),
+    ]);
+    expect(graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: `interface:${websocket.id}`, to: identityId }),
+      expect.objectContaining({ from: `interface:${websocket.id}`, to: `destination:${singleton}` }),
+    ]));
+    expect(graph.nodes.some((node) => node.destinationHash === first
+      || node.destinationHash === second)).toBe(false);
+    expect(graph.nodes.some((node) => node.kind === 'identity'
+      && node.publicKey === singletonPublicKey)).toBe(false);
+
+    const expanded = buildNetworkVisualizerGraph({
+      ...input,
+      expandedIdentityPublicKeys: new Set([sharedPublicKey]),
+    });
+    expect(expanded.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        from: identityId,
+        to: `destination:${first}`,
+        kind: 'direct',
+        hops: 1,
+        showHopLabel: false,
+        matched: true,
+      }),
+      expect.objectContaining({
+        from: identityId,
+        to: `destination:${second}`,
+        kind: 'direct',
+        hops: 1,
+        showHopLabel: false,
+        matched: true,
+      }),
+      expect.objectContaining({ from: `interface:${websocket.id}`, to: identityId, matched: true }),
+    ]));
+    expect(expanded.nodes.find((node) => node.id === identityId)).toEqual(expect.objectContaining({
+      expanded: true,
+      matched: true,
+    }));
+    expect(expanded.nodes.find((node) => node.id === 'local')?.matched).toBe(true);
+    expect(expanded.nodes.find((node) => node.id === `interface:${websocket.id}`)?.matched).toBe(true);
+    expect(expanded.nodes.find((node) => node.id === `destination:${first}`)?.matched).toBe(true);
+    expect(expanded.nodes.find((node) => node.id === `destination:${second}`)?.matched).toBe(true);
+    expect(expanded.nodes.find((node) => node.id === `destination:${singleton}`)?.matched).toBe(false);
+    expect(expanded.matchedPathCount).toBe(0);
+
+    const otherPublicKey = '6'.repeat(128);
+    const otherFirst = '7'.repeat(32);
+    const otherSecond = '8'.repeat(32);
+    const expandedWithOtherGroup = buildNetworkVisualizerGraph({
+      ...input,
+      paths: [
+        ...input.paths,
+        { destinationHash: otherFirst, hops: 1, interfaceId: websocket.id },
+        { destinationHash: otherSecond, hops: 1, interfaceId: websocket.id },
+      ],
+      destinationInventory: [
+        ...input.destinationInventory,
+        { destinationHash: otherFirst, publicKey: otherPublicKey, identityHash: '9'.repeat(32) },
+        { destinationHash: otherSecond, publicKey: otherPublicKey, identityHash: '9'.repeat(32) },
+      ],
+      expandedIdentityPublicKeys: new Set([sharedPublicKey]),
+    });
+    expect(expandedWithOtherGroup.nodes.find((node) => node.id === identityId)?.matched).toBe(true);
+    expect(expandedWithOtherGroup.nodes.find((node) => (
+      node.kind === 'identity' && node.publicKey === otherPublicKey
+    ))?.matched).toBe(false);
+
+    const searched = buildNetworkVisualizerGraph({
+      ...input,
+      search: singleton,
+      expandedIdentityPublicKeys: new Set([sharedPublicKey]),
+    });
+    expect(searched.nodes.find((node) => node.id === identityId)?.matched).toBe(false);
+    expect(searched.nodes.find((node) => node.id === `destination:${singleton}`)?.matched).toBe(true);
+    expect(searched.matchedPathCount).toBe(1);
+
+    const expiredGroup = buildNetworkVisualizerGraph({
+      ...input,
+      paths: input.paths.filter((path) => path.destinationHash !== second),
+      expandedIdentityPublicKeys: new Set([sharedPublicKey]),
+    });
+    expect(expiredGroup.nodes.some((node) => node.kind === 'identity'
+      && node.publicKey === sharedPublicKey)).toBe(false);
+    expect(expiredGroup.nodes.find((node) => node.id === `destination:${first}`)?.matched).toBe(false);
+    expect(expiredGroup.edges.some((edge) => edge.matched)).toBe(false);
+  });
+
+  it('projects one synchronized identity occurrence into each ingress interface', () => {
+    const secondInterface: InterfaceConfig = {
+      ...websocket,
+      id: 'websocket-2',
+      name: 'Field relay',
+    };
+    const publicKey = 'a'.repeat(128);
+    const identityHash = 'b'.repeat(32);
+    const first = 'c'.repeat(32);
+    const second = 'd'.repeat(32);
+    const input = {
+      interfaces: [websocket, secondInterface],
+      interfaceStatuses: {},
+      paths: [
+        { destinationHash: first, hops: 1, interfaceId: websocket.id },
+        { destinationHash: second, hops: 1, interfaceId: secondInterface.id },
+      ],
+      destinations: [],
+      destinationInventory: [
+        { destinationHash: first, publicKey, identityHash },
+        { destinationHash: second, publicKey, identityHash },
+      ],
+      groupByIdentity: true,
+    };
+    const collapsed = buildNetworkVisualizerGraph(input);
+    const collapsedOccurrences = collapsed.nodes.filter((node) => (
+      node.kind === 'identity' && node.publicKey === publicKey
+    ));
+
+    expect(collapsedOccurrences).toHaveLength(2);
+    expect(collapsedOccurrences.every((node) => (
+      node.destinationCount === 2 && node.expanded === false
+    ))).toBe(true);
+    expect(new Set(collapsedOccurrences.map((node) => node.id)).size).toBe(2);
+    expect(collapsed.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: `interface:${websocket.id}`, to: collapsedOccurrences[0].id }),
+      expect.objectContaining({ from: `interface:${secondInterface.id}`, to: collapsedOccurrences[1].id }),
+    ]));
+
+    const expanded = buildNetworkVisualizerGraph({
+      ...input,
+      expandedIdentityPublicKeys: new Set([publicKey]),
+    });
+    const expandedOccurrences = expanded.nodes.filter((node) => (
+      node.kind === 'identity' && node.publicKey === publicKey
+    ));
+    const childEdges = expanded.edges.filter((edge) => (
+      expandedOccurrences.some((node) => node.id === edge.from)
+      && edge.to.startsWith('destination:')
+    ));
+
+    expect(expandedOccurrences).toHaveLength(2);
+    expect(expandedOccurrences.every((node) => (
+      node.destinationCount === 2 && node.expanded === true && node.matched === true
+    ))).toBe(true);
+    expect(childEdges).toHaveLength(2);
+    expect(new Set(childEdges.map((edge) => edge.to))).toEqual(new Set([
+      `destination:${first}`,
+      `destination:${second}`,
+    ]));
+  });
+
+  it('uses one identity node as both a transport and a local-destination parent', () => {
+    const transportPublicKey = 'a'.repeat(128);
+    const transportIdentityHash = '6'.repeat(32);
+    const downstreamPublicKey = 'b'.repeat(128);
+    const downstreamIdentityHash = '7'.repeat(32);
+    const transportDestinations = ['8'.repeat(32), '9'.repeat(32)];
+    const downstreamDestinations = ['c'.repeat(32), 'd'.repeat(32)];
+    const graph = buildNetworkVisualizerGraph({
+      interfaces: [websocket],
+      interfaceStatuses: {},
+      paths: [
+        ...transportDestinations.map((destinationHash) => ({
+          destinationHash,
+          hops: 1,
+          interfaceId: websocket.id,
+        })),
+        ...downstreamDestinations.map((destinationHash) => ({
+          destinationHash,
+          nextHop: transportIdentityHash,
+          hops: 3,
+          interfaceId: websocket.id,
+        })),
+      ],
+      destinations: [],
+      destinationInventory: [
+        ...transportDestinations.map((destinationHash) => ({
+          destinationHash,
+          publicKey: transportPublicKey,
+          identityHash: transportIdentityHash,
+        })),
+        ...downstreamDestinations.map((destinationHash) => ({
+          destinationHash,
+          publicKey: downstreamPublicKey,
+          identityHash: downstreamIdentityHash,
+        })),
+      ],
+      groupByIdentity: true,
+      expandedIdentityPublicKeys: new Set([transportPublicKey, downstreamPublicKey]),
+    });
+    const transportIdentity = graph.nodes.find((node) => node.kind === 'identity'
+      && node.publicKey === transportPublicKey
+      && node.nextHopHash === transportIdentityHash)!;
+    const downstreamIdentity = graph.nodes.find((node) => node.kind === 'identity'
+      && node.publicKey === downstreamPublicKey)!;
+    const transportIdentityId = transportIdentity.id;
+    const downstreamIdentityId = downstreamIdentity.id;
+
+    expect(transportIdentity).toEqual(expect.objectContaining({
+      kind: 'identity',
+      nextHopHash: transportIdentityHash,
+    }));
+    expect(graph.nodes.some((node) => node.kind === 'nextHop'
+      && node.nextHopHash === transportIdentityHash)).toBe(false);
+    expect(graph.edges).toEqual(expect.arrayContaining([
+      expect.objectContaining({ from: `interface:${websocket.id}`, to: transportIdentityId }),
+      expect.objectContaining({ from: transportIdentityId, to: downstreamIdentityId }),
+      ...transportDestinations.map((destinationHash) => expect.objectContaining({
+        from: transportIdentityId,
+        to: `destination:${destinationHash}`,
+      })),
+      ...downstreamDestinations.map((destinationHash) => expect.objectContaining({
+        from: downstreamIdentityId,
+        to: `destination:${destinationHash}`,
+      })),
+    ]));
+  });
+
+  it('recursively reserves each grouped identity destination orbit in its parent layout', () => {
+    const transportPublicKey = 'a'.repeat(128);
+    const transportIdentityHash = 'f'.repeat(32);
+    const transportDestinations = [`${'a'.repeat(31)}0`, `${'a'.repeat(31)}1`];
+    const groupedIdentities = Array.from({ length: 8 }, (_, index) => {
+      const digit = (index + 1).toString(16);
+      return {
+        publicKey: digit.repeat(128),
+        identityHash: digit.repeat(32),
+        destinations: [`${digit.repeat(31)}0`, `${digit.repeat(31)}1`],
+      };
+    });
+    const graph = buildNetworkVisualizerGraph({
+      interfaces: [websocket],
+      interfaceStatuses: {},
+      paths: [
+        ...transportDestinations.map((destinationHash) => ({
+          destinationHash,
+          hops: 1,
+          interfaceId: websocket.id,
+        })),
+        ...groupedIdentities.flatMap((group) => group.destinations.map((destinationHash) => ({
+          destinationHash,
+          nextHop: transportIdentityHash,
+          hops: 4,
+          interfaceId: websocket.id,
+        }))),
+      ],
+      destinations: [],
+      destinationInventory: [
+        ...transportDestinations.map((destinationHash) => ({
+          destinationHash,
+          publicKey: transportPublicKey,
+          identityHash: transportIdentityHash,
+        })),
+        ...groupedIdentities.flatMap((group) => group.destinations.map((destinationHash) => ({
+          destinationHash,
+          publicKey: group.publicKey,
+          identityHash: group.identityHash,
+        }))),
+      ],
+      groupByIdentity: true,
+      expandedIdentityPublicKeys: new Set([
+        transportPublicKey,
+        ...groupedIdentities.map((group) => group.publicKey),
+      ]),
+    });
+    const transportIdentity = graph.nodes.find((node) => (
+      node.kind === 'identity'
+      && node.publicKey === transportPublicKey
+      && node.nextHopHash === transportIdentityHash
+    ))!;
+    const childIdentityIds = new Set(graph.edges
+      .filter((edge) => edge.from === transportIdentity.id && edge.to.startsWith('identity:'))
+      .map((edge) => edge.to));
+    const childIdentities = graph.nodes.filter((node) => childIdentityIds.has(node.id));
+    const destinationOrbitRadius = (identity: (typeof graph.nodes)[number]): number => {
+      const destinationIds = new Set(graph.edges
+        .filter((edge) => edge.from === identity.id && edge.to.startsWith('destination:'))
+        .map((edge) => edge.to));
+      return Math.max(...graph.nodes
+        .filter((node) => destinationIds.has(node.id))
+        .map((node) => Math.hypot(node.x - identity.x, node.y - identity.y)));
+    };
+    const orbitRadii = new Map(childIdentities.map((identity) => [
+      identity.id,
+      destinationOrbitRadius(identity),
+    ]));
+    const parentEdgeLengths = childIdentities.map((identity) => (
+      Math.hypot(identity.x - transportIdentity.x, identity.y - transportIdentity.y)
+    ));
+    const circleClearances = childIdentities.flatMap((identity, index) => (
+      childIdentities.slice(index + 1).map((other) => (
+        Math.hypot(identity.x - other.x, identity.y - other.y)
+        - orbitRadii.get(identity.id)!
+        - orbitRadii.get(other.id)!
+      ))
+    ));
+
+    expect(childIdentities).toHaveLength(groupedIdentities.length);
+    expect(new Set(parentEdgeLengths.map(Math.round)).size).toBeGreaterThan(1);
+    expect(Math.min(...circleClearances)).toBeGreaterThan(0);
   });
 
   it('keeps unmatched routes visible while marking the complete matching route context', () => {

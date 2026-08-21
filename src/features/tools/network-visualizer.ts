@@ -15,7 +15,7 @@ import { settleNetworkVisualizerLayout } from './network-force-layout';
 
 export const networkVisualizerPathLimit = 120;
 
-export type NetworkVisualizerNodeKind = 'local' | 'interface' | 'nextHop' | 'destination';
+export type NetworkVisualizerNodeKind = 'local' | 'interface' | 'identity' | 'nextHop' | 'destination';
 export type NetworkVisualizerEdgeKind = 'interface' | 'direct' | 'route';
 
 export interface NetworkVisualizerNode {
@@ -26,6 +26,7 @@ export interface NetworkVisualizerNode {
   y: number;
   destinationHash?: string;
   identityHash?: string;
+  publicKey?: string;
   nextHopHash?: string;
   interfaceId?: string;
   interfaceName?: string;
@@ -33,6 +34,8 @@ export interface NetworkVisualizerNode {
   interfaceState?: InterfaceRuntimeState;
   hops?: number;
   fullDestinationName?: KnownFullDestinationName;
+  destinationCount?: number;
+  expanded?: boolean;
   matched?: boolean;
 }
 
@@ -42,6 +45,7 @@ export interface NetworkVisualizerEdge {
   to: string;
   kind: NetworkVisualizerEdgeKind;
   hops?: number;
+  showHopLabel?: boolean;
   matched?: boolean;
 }
 
@@ -71,6 +75,8 @@ export interface NetworkVisualizerInput {
   contacts?: readonly ChatContact[];
   search?: string;
   maximumHops?: number;
+  groupByIdentity?: boolean;
+  expandedIdentityPublicKeys?: ReadonlySet<string>;
   pathLimit?: number;
 }
 
@@ -87,6 +93,8 @@ interface VisualizerPath {
   interface: VisualizerInterface;
   label: string;
   fullDestinationName?: KnownFullDestinationName;
+  publicKey?: string;
+  identityHash?: string;
 }
 
 const center = { x: 600, y: 450 };
@@ -103,18 +111,21 @@ const networkLayoutCacheLimit = 6;
 const minimumBranchRadius: Record<Exclude<NetworkVisualizerNodeKind, 'destination'>, number> = {
   local: 145,
   interface: 110,
+  identity: 110,
   nextHop: 110,
 };
 
 const branchNodeCircleRadius: Record<Exclude<NetworkVisualizerNodeKind, 'destination'>, number> = {
   local: 38,
   interface: 31,
+  identity: 27,
   nextHop: 27,
 };
 
 interface BranchOrbitLayout {
   radii: Map<string, number>;
   edgeScales: Map<string, number>;
+  edgeLengths: Map<string, number>;
 }
 
 interface CrowdedLeafLayout {
@@ -122,11 +133,12 @@ interface CrowdedLeafLayout {
   distances: number[];
 }
 
-interface CrowdedLeafPair {
+interface CrowdedCirclePair {
   left: number;
   right: number;
   cosine: number;
   oneMinusCosine: number;
+  clearanceSquared: number;
 }
 
 const branchLayoutCache = new Map<string, BranchOrbitLayout>();
@@ -154,9 +166,10 @@ function interfaceState(
 function destinationLabel(
   destinationHash: string,
   presentation: KnownDestinationPresentation | undefined,
+  destination: KnownDestinationRecord | undefined,
 ): string {
   return presentation?.localContactName
-    || presentation?.displayName
+    || destination?.displayName
     || abbreviatedHash(destinationHash);
 }
 
@@ -194,6 +207,7 @@ function childBranchAngle(outwardAngle: number, index: number, childCount: numbe
 function topologyNodeKind(nodeId: string): NetworkVisualizerNodeKind {
   if (nodeId === 'local') return 'local';
   if (nodeId.startsWith('interface:')) return 'interface';
+  if (nodeId.startsWith('identity:')) return 'identity';
   if (nodeId.startsWith('next-hop:')) return 'nextHop';
   return 'destination';
 }
@@ -208,32 +222,50 @@ function greatestCommonDivisor(left: number, right: number): number {
 }
 
 /**
- * Packs a high-degree leaf branch into several concentric rings. For each
- * ring count, coprime layer orders distribute neighbouring spokes across the
- * available radii. Radial spacing is sampled from zero through the complete
- * bubble clearance. The quadratic pair-distance constraint gives the exact
- * smallest base radius for each candidate, so invalid/intersecting candidates
- * are never eligible.
+ * Packs a high-degree branch into several concentric rings. Child circles can
+ * be simple leaf bubbles or complete recursively sized subtrees. For each ring
+ * count, coprime layer orders distribute neighbouring spokes across the
+ * available radii. Radial spacing is sampled from zero through the largest
+ * required bubble clearance. The quadratic pair-distance constraint gives the
+ * exact smallest base radius for each candidate, so invalid/intersecting child
+ * circles are never eligible.
  */
-function crowdedLeafLayout(
-  childCount: number,
+function crowdedCircleLayout(
+  childCircleRadii: readonly number[],
   slotCount: number,
   step: number,
   minimumRadius: number,
+  parentCircleRadius: number,
 ): CrowdedLeafLayout {
-  const bubbleClearance = leafCircleRadius * 2 + branchCircleGap;
+  const childCount = childCircleRadii.length;
+  const maximumBubbleClearance = childCircleRadii.length > 1
+    ? Math.max(...childCircleRadii.flatMap((radius, index) => (
+      childCircleRadii.slice(index + 1).map((otherRadius) => (
+        radius + otherRadius + branchCircleGap
+      ))
+    )))
+    : childCircleRadii[0] * 2 + branchCircleGap;
   const maximumLayers = Math.min(
     maximumCrowdedLeafLayers,
     Math.max(2, Math.ceil(Math.sqrt(childCount))),
   );
   let selectedRadius = Number.POSITIVE_INFINITY;
   let selectedDistances: number[] = [];
-  const pairs: CrowdedLeafPair[] = [];
+  const pairs: CrowdedCirclePair[] = [];
   for (let left = 0; left < childCount; left += 1) {
     for (let right = left + 1; right < childCount; right += 1) {
       const slotDistance = Math.min(right - left, slotCount - (right - left));
       const cosine = Math.cos(slotDistance * step);
-      pairs.push({ left, right, cosine, oneMinusCosine: 1 - cosine });
+      const clearance = childCircleRadii[left]
+        + childCircleRadii[right]
+        + branchCircleGap;
+      pairs.push({
+        left,
+        right,
+        cosine,
+        oneMinusCosine: 1 - cosine,
+        clearanceSquared: clearance ** 2,
+      });
     }
   }
 
@@ -244,18 +276,24 @@ function crowdedLeafLayout(
         .filter((stride) => greatestCommonDivisor(stride, layerCount) === 1);
     for (const stride of strides) {
       for (let sample = 0; sample <= crowdedLayerSpacingSamples; sample += 1) {
-        const layerSpacing = bubbleClearance * sample / crowdedLayerSpacingSamples;
+        const layerSpacing = maximumBubbleClearance * sample / crowdedLayerSpacingSamples;
         const offsets = Array.from({ length: childCount }, (_, index) => (
           layerCount === 1 ? 0 : (index * stride % layerCount) * layerSpacing
         ));
         let baseRadius = minimumRadius;
+        for (const [index, childRadius] of childCircleRadii.entries()) {
+          baseRadius = Math.max(
+            baseRadius,
+            parentCircleRadius + childRadius + branchCircleGap - offsets[index],
+          );
+        }
         for (const pair of pairs) {
           const leftOffset = offsets[pair.left];
           const rightOffset = offsets[pair.right];
           const constant = leftOffset ** 2
             + rightOffset ** 2
             - 2 * leftOffset * rightOffset * pair.cosine
-            - bubbleClearance ** 2;
+            - pair.clearanceSquared;
           if (constant >= 0) continue;
           const quadratic = 2 * pair.oneMinusCosine;
           const linear = 2 * (leftOffset + rightOffset) * pair.oneMinusCosine;
@@ -277,6 +315,21 @@ function crowdedLeafLayout(
   return { radius: selectedRadius, distances: selectedDistances };
 }
 
+function crowdedLeafLayout(
+  childCount: number,
+  slotCount: number,
+  step: number,
+  minimumRadius: number,
+): CrowdedLeafLayout {
+  return crowdedCircleLayout(
+    Array.from({ length: childCount }, () => leafCircleRadius),
+    slotCount,
+    step,
+    minimumRadius,
+    branchNodeCircleRadius.identity,
+  );
+}
+
 /**
  * Recursively sizes every node's own child orbit. Crowded groups may alternate
  * leaf nodes between outer and inner radii. The inner scale is selected by
@@ -288,6 +341,7 @@ function crowdedLeafLayout(
 function branchOrbitLayout(childrenByParent: ReadonlyMap<string, readonly string[]>): BranchOrbitLayout {
   const radii = new Map<string, number>();
   const edgeScales = new Map<string, number>();
+  const edgeLengths = new Map<string, number>();
   const visit = (nodeId: string): number => {
     const cached = radii.get(nodeId);
     if (cached !== undefined) return cached;
@@ -361,15 +415,19 @@ function branchOrbitLayout(childrenByParent: ReadonlyMap<string, readonly string
     };
     let selectedScales = scalesFor(1);
     let radius = minimumFittingRadius(selectedScales);
-    if (leafCount === children.length && leafCount >= crowdedLeafThreshold) {
-      const crowdedLayout = crowdedLeafLayout(
-        children.length,
+    if (children.length >= crowdedLeafThreshold) {
+      const crowdedLayout = crowdedCircleLayout(
+        childCircleRadii,
         slotCount,
         step,
         minimumRadius,
+        branchNodeCircleRadius[kind],
       );
       radius = crowdedLayout.radius;
       selectedScales = crowdedLayout.distances.map((distance) => distance / radius);
+      for (const [index, childId] of children.entries()) {
+        edgeLengths.set(`${nodeId}\u0000${childId}`, crowdedLayout.distances[index]);
+      }
     } else if (leafCount >= crowdedLeafThreshold) {
       for (
         let innerScale = minimumAlternatingLeafScale;
@@ -393,7 +451,7 @@ function branchOrbitLayout(childrenByParent: ReadonlyMap<string, readonly string
     return radius;
   };
   visit('local');
-  return { radii, edgeScales };
+  return { radii, edgeScales, edgeLengths };
 }
 
 function branchLayoutKey(childrenByParent: ReadonlyMap<string, readonly string[]>): string {
@@ -450,11 +508,425 @@ function branchEdgeLength(
   childId: string,
   orbitRadii: ReadonlyMap<string, number>,
   edgeScales: ReadonlyMap<string, number>,
+  edgeLengths: ReadonlyMap<string, number>,
 ): number {
+  const explicitLength = edgeLengths.get(`${parentId}\u0000${childId}`);
+  if (explicitLength !== undefined) return explicitLength;
   const parentRadius = orbitRadii.get(parentId) ?? 0;
   const childRadius = orbitRadii.get(childId) ?? 0;
   if (childRadius > 0) return parentRadius + childRadius + branchCircleGap;
   return parentRadius * (edgeScales.get(`${parentId}\u0000${childId}`) ?? 1);
+}
+
+const topologyKindOrder: Record<NetworkVisualizerNodeKind, number> = {
+  local: 0,
+  interface: 1,
+  nextHop: 2,
+  identity: 3,
+  destination: 4,
+};
+
+/**
+ * Rebuilds a rooted branch tree from a projected graph and applies the same
+ * recursive orbit sizing used by the base network layout. Grouping can turn a
+ * former leaf into an identity branch with its own destination orbit, so its
+ * complete child-circle radius must be known before its parent is positioned.
+ * Additional incoming graph edges remain visible, but the shortest rooted
+ * traversal chooses one layout parent for every node and therefore cannot
+ * introduce cycles into the recursive sizing pass.
+ */
+function recursivelyArrangeTopology(
+  nodes: readonly NetworkVisualizerNode[],
+  edges: readonly NetworkVisualizerEdge[],
+): NetworkVisualizerNode[] {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  if (!nodesById.has('local')) return nodes.map((node) => ({ ...node }));
+
+  const compareNodeIds = (leftId: string, rightId: string): number => {
+    const left = nodesById.get(leftId);
+    const right = nodesById.get(rightId);
+    if (!left || !right) return leftId.localeCompare(rightId);
+    return topologyKindOrder[left.kind] - topologyKindOrder[right.kind]
+      || left.label.localeCompare(right.label)
+      || left.id.localeCompare(right.id);
+  };
+  const outgoing = new Map<string, Set<string>>();
+  for (const edge of edges) {
+    if (edge.from === edge.to || !nodesById.has(edge.from) || !nodesById.has(edge.to)) continue;
+    const children = outgoing.get(edge.from) ?? new Set<string>();
+    children.add(edge.to);
+    outgoing.set(edge.from, children);
+  }
+
+  const childrenByParent = new Map<string, string[]>();
+  const reached = new Set<string>(['local']);
+  const queue = ['local'];
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const parentId = queue[cursor];
+    const children = Array.from(outgoing.get(parentId) ?? []).sort(compareNodeIds);
+    for (const childId of children) {
+      if (reached.has(childId)) continue;
+      reached.add(childId);
+      queue.push(childId);
+      const branchChildren = childrenByParent.get(parentId) ?? [];
+      branchChildren.push(childId);
+      childrenByParent.set(parentId, branchChildren);
+    }
+  }
+
+  // A malformed or partially projected snapshot should remain renderable. Put
+  // any orphan beside the root instead of allowing every orphan to overlap at
+  // the graph center.
+  const orphans = Array.from(nodesById.keys())
+    .filter((nodeId) => !reached.has(nodeId))
+    .sort(compareNodeIds);
+  if (orphans.length) {
+    const rootChildren = childrenByParent.get('local') ?? [];
+    rootChildren.push(...orphans);
+    childrenByParent.set('local', rootChildren);
+  }
+
+  const { radii, edgeScales, edgeLengths } = cachedBranchOrbitLayout(childrenByParent);
+  const positions = new Map<string, { x: number; y: number }>([['local', center]]);
+  const outwardAngles = new Map<string, number>();
+  const placeChildren = (parentId: string): void => {
+    const parentPosition = positions.get(parentId);
+    if (!parentPosition) return;
+    const children = childrenByParent.get(parentId) ?? [];
+    const parentAngle = outwardAngles.get(parentId) ?? 0;
+    for (const [index, childId] of children.entries()) {
+      const angle = parentId === 'local'
+        ? index / Math.max(1, children.length) * fullCircle
+        : childBranchAngle(parentAngle, index, children.length);
+      positions.set(childId, pointFrom(
+        parentPosition,
+        angle,
+        branchEdgeLength(parentId, childId, radii, edgeScales, edgeLengths),
+      ));
+      outwardAngles.set(childId, angle);
+      placeChildren(childId);
+    }
+  };
+  placeChildren('local');
+
+  return nodes.map((node) => ({
+    ...node,
+    ...(positions.get(node.id) ?? {}),
+  }));
+}
+
+interface VisualizerIdentityGroup {
+  publicKey: string;
+  identityHash?: string;
+  routes: VisualizerPath[];
+}
+
+interface VisualizerIdentityOccurrence {
+  id: string;
+  ingressId: string;
+  destinationIds: Set<string>;
+  routes: VisualizerPath[];
+  transportNodes: NetworkVisualizerNode[];
+}
+
+function routeIngressNodeId(route: VisualizerPath): string {
+  const nextHop = route.path.hops > 1 && route.path.nextHop !== route.path.destinationHash
+    ? route.path.nextHop
+    : undefined;
+  return nextHop
+    ? `next-hop:${route.interface.id}:${nextHop}`
+    : `interface:${route.interface.id}`;
+}
+
+function identityOccurrenceId(publicKey: string, ingressId: string): string {
+  return `identity:${publicKey}:via:${encodeURIComponent(ingressId)}`;
+}
+
+function averageNodePosition(
+  nodeIds: readonly string[],
+  nodesById: ReadonlyMap<string, NetworkVisualizerNode>,
+): { x: number; y: number } | undefined {
+  const positions = nodeIds.flatMap((nodeId) => {
+    const node = nodesById.get(nodeId);
+    return node ? [{ x: node.x, y: node.y }] : [];
+  });
+  if (!positions.length) return undefined;
+  return {
+    x: positions.reduce((sum, position) => sum + position.x, 0) / positions.length,
+    y: positions.reduce((sum, position) => sum + position.y, 0) / positions.length,
+  };
+}
+
+function stableIdentityAngle(publicKey: string): number {
+  let seed = 0;
+  for (let index = 0; index < publicKey.length; index += 1) {
+    seed = (seed * 31 + publicKey.charCodeAt(index)) >>> 0;
+  }
+  return seed / 0xffff_ffff * fullCircle;
+}
+
+function identityChildLayout(childCount: number): CrowdedLeafLayout {
+  if (childCount === 0) return { radius: 0, distances: [] };
+  const slotCount = childCount + 1;
+  const step = fullCircle / slotCount;
+  const minimumRadius = minimumBranchRadius.identity;
+  if (childCount >= crowdedLeafThreshold) {
+    return crowdedLeafLayout(childCount, slotCount, step, minimumRadius);
+  }
+  const bubbleClearance = leafCircleRadius * 2 + branchCircleGap;
+  const adjacentClearanceRadius = bubbleClearance / (2 * Math.sin(step / 2));
+  const parentClearanceRadius = branchNodeCircleRadius.identity
+    + leafCircleRadius
+    + branchCircleGap;
+  const radius = Math.max(minimumRadius, adjacentClearanceRadius, parentClearanceRadius);
+  return { radius, distances: Array.from({ length: childCount }, () => radius) };
+}
+
+function mergeGroupedEdges(edges: readonly NetworkVisualizerEdge[]): NetworkVisualizerEdge[] {
+  const merged = new Map<string, NetworkVisualizerEdge>();
+  for (const edge of edges) {
+    if (edge.from === edge.to) continue;
+    const key = `${edge.from}\u0000${edge.to}`;
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, { ...edge, id: `${edge.from}~${edge.to}` });
+      continue;
+    }
+    const currentHops = current.hops ?? Number.POSITIVE_INFINITY;
+    const edgeHops = edge.hops ?? Number.POSITIVE_INFINITY;
+    if (edgeHops < currentHops) {
+      current.hops = edge.hops;
+      current.kind = edge.kind;
+    }
+    current.matched = Boolean(current.matched || edge.matched);
+  }
+  return Array.from(merged.values());
+}
+
+/**
+ * Projects one logical identity into each distinct ingress branch used by its
+ * visible destinations. Expansion remains public-key scoped, while every
+ * occurrence owns only the child destinations reached through its interface
+ * and immediate transport path. This preserves a recursive tree layout without
+ * losing the fact that one identity can be reachable through several paths.
+ */
+function groupNetworkVisualizerIdentities(
+  sourceNodes: readonly NetworkVisualizerNode[],
+  sourceEdges: readonly NetworkVisualizerEdge[],
+  routes: readonly VisualizerPath[],
+  inventory: readonly KnownDestinationEntry[],
+  query: string,
+  highlightActive: boolean,
+  expandedIdentityPublicKeys: ReadonlySet<string>,
+): { nodes: NetworkVisualizerNode[]; edges: NetworkVisualizerEdge[] } {
+  const groups = new Map<string, VisualizerIdentityGroup>();
+  for (const entry of inventory) {
+    if (!entry.publicKey) continue;
+    const current = groups.get(entry.publicKey);
+    if (current) current.identityHash ??= entry.identityHash;
+    else groups.set(entry.publicKey, {
+      publicKey: entry.publicKey,
+      identityHash: entry.identityHash,
+      routes: [],
+    });
+  }
+  for (const route of routes) {
+    if (!route.publicKey) continue;
+    const current = groups.get(route.publicKey);
+    if (current) {
+      current.routes.push(route);
+      current.identityHash ??= route.identityHash;
+    } else {
+      groups.set(route.publicKey, {
+        publicKey: route.publicKey,
+        identityHash: route.identityHash,
+        routes: [route],
+      });
+    }
+  }
+
+  let nodes = sourceNodes.map((node) => ({ ...node }));
+  let edges = sourceEdges.map((edge) => ({ ...edge }));
+  const matchedDestinationIds = new Set(sourceNodes
+    .filter((node) => node.kind === 'destination' && node.matched)
+    .map((node) => node.id));
+  for (const group of Array.from(groups.values()).sort((left, right) => (
+    left.publicKey.localeCompare(right.publicKey)
+  ))) {
+    const destinationIds = Array.from(new Set(group.routes.map((route) => (
+      `destination:${route.path.destinationHash}`
+    )))).sort((left, right) => left.localeCompare(right));
+    const shortestRouteByDestinationId = new Map<string, VisualizerPath>();
+    for (const route of group.routes) {
+      const destinationId = `destination:${route.path.destinationHash}`;
+      const current = shortestRouteByDestinationId.get(destinationId);
+      if (!current || route.path.hops < current.path.hops) {
+        shortestRouteByDestinationId.set(destinationId, route);
+      }
+    }
+    const transportNodes = group.identityHash
+      ? nodes.filter((node) => node.nextHopHash === group.identityHash)
+      : [];
+    if (destinationIds.length < 2 && transportNodes.length === 0) continue;
+
+    const destinationGroup = destinationIds.length >= 2;
+    const expanded = !destinationGroup || expandedIdentityPublicKeys.has(group.publicKey);
+    const transportNodeIds = new Set(transportNodes.map((node) => node.id));
+    const nodesById = new Map(nodes.map((node) => [node.id, node]));
+    const destinationNodesById = new Map(destinationIds.flatMap((destinationId) => {
+      const destination = nodesById.get(destinationId);
+      return destination ? [[destinationId, destination] as const] : [];
+    }));
+    const occurrencesByIngressId = new Map<string, VisualizerIdentityOccurrence>();
+    const ensureOccurrence = (ingressId: string): VisualizerIdentityOccurrence => {
+      const current = occurrencesByIngressId.get(ingressId);
+      if (current) return current;
+      const occurrence: VisualizerIdentityOccurrence = {
+        id: identityOccurrenceId(group.publicKey, ingressId),
+        ingressId,
+        destinationIds: new Set(),
+        routes: [],
+        transportNodes: [],
+      };
+      occurrencesByIngressId.set(ingressId, occurrence);
+      return occurrence;
+    };
+    for (const transportNode of transportNodes) {
+      ensureOccurrence(transportNode.id).transportNodes.push(transportNode);
+    }
+    for (const [destinationId, route] of shortestRouteByDestinationId) {
+      const routeIngressId = routeIngressNodeId(route);
+      const colocatedTransportNode = transportNodes.find((transportNode) => (
+        transportNode.interfaceId === route.interface.id
+        && (routeIngressId === `interface:${route.interface.id}`
+          || routeIngressId === transportNode.id)
+      ));
+      const occurrence = ensureOccurrence(colocatedTransportNode?.id ?? routeIngressId);
+      occurrence.destinationIds.add(destinationId);
+      occurrence.routes.push(route);
+    }
+    const occurrences = Array.from(occurrencesByIngressId.values()).sort((left, right) => (
+      left.ingressId.localeCompare(right.ingressId)
+    ));
+    const occurrenceIdByTransportNodeId = new Map(occurrences.flatMap((occurrence) => (
+      occurrence.transportNodes.map((transportNode) => [transportNode.id, occurrence.id] as const)
+    )));
+    const occurrenceIdByDestinationId = new Map(occurrences.flatMap((occurrence) => (
+      Array.from(occurrence.destinationIds, (destinationId) => [destinationId, occurrence.id] as const)
+    )));
+    const remapTransportNodeId = (nodeId: string): string => (
+      occurrenceIdByTransportNodeId.get(nodeId) ?? nodeId
+    );
+    const destinationIdSet = new Set(destinationIds);
+    const mappedEdges = edges.map((edge) => ({
+      ...edge,
+      from: remapTransportNodeId(edge.from),
+      to: remapTransportNodeId(edge.to),
+    }));
+    const incomingDestinationEdges = mappedEdges.filter((edge) => destinationIdSet.has(edge.to));
+    edges = mappedEdges.filter((edge) => !destinationIdSet.has(edge.to));
+    for (const incoming of incomingDestinationEdges) {
+      const occurrenceId = occurrenceIdByDestinationId.get(incoming.to);
+      if (!occurrenceId || incoming.from === occurrenceId) continue;
+      edges.push({
+        ...incoming,
+        id: `${incoming.from}~${occurrenceId}`,
+        to: occurrenceId,
+      });
+    }
+
+    const identityLabel = abbreviatedHash(group.identityHash ?? group.publicKey);
+    const identityQueryMatches = query.length > 0 && (
+      group.publicKey.toLowerCase().includes(query)
+      || group.identityHash?.toLowerCase().includes(query)
+      || identityLabel.toLowerCase().includes(query)
+    );
+    nodes = nodes.filter((node) => (
+      !transportNodeIds.has(node.id)
+      && !destinationIdSet.has(node.id)
+    ));
+    for (const occurrence of occurrences) {
+      const incomingSourceIds = Array.from(new Set(edges
+        .filter((edge) => edge.to === occurrence.id)
+        .map((edge) => edge.from)
+        .filter((nodeId) => nodeId !== occurrence.id)));
+      const occurrenceDestinationIds = Array.from(occurrence.destinationIds).sort((left, right) => (
+        left.localeCompare(right)
+      ));
+      const sourcePosition = averageNodePosition(incomingSourceIds, nodesById);
+      const destinationPosition = averageNodePosition(occurrenceDestinationIds, nodesById);
+      const transportPosition = averageNodePosition(
+        occurrence.transportNodes.map((node) => node.id),
+        nodesById,
+      );
+      const children = identityChildLayout(occurrenceDestinationIds.length);
+      const fallbackAngle = stableIdentityAngle(`${group.publicKey}:${occurrence.ingressId}`);
+      let outwardAngle = fallbackAngle;
+      if (sourcePosition && destinationPosition) {
+        const differenceX = destinationPosition.x - sourcePosition.x;
+        const differenceY = destinationPosition.y - sourcePosition.y;
+        if (Math.hypot(differenceX, differenceY) > .001) {
+          outwardAngle = Math.atan2(differenceY, differenceX);
+        }
+      } else if (transportPosition && sourcePosition) {
+        outwardAngle = Math.atan2(
+          transportPosition.y - sourcePosition.y,
+          transportPosition.x - sourcePosition.x,
+        );
+      }
+      const identityPosition = transportPosition
+        ?? (sourcePosition
+          ? pointFrom(sourcePosition, outwardAngle, children.radius + 90)
+          : destinationPosition ?? pointOnCircle(outwardAngle, children.radius + 145));
+      const identityMatches = Boolean(highlightActive && (
+        identityQueryMatches
+        || (destinationGroup && expanded && query.length === 0)
+        || occurrence.routes.some((route) => matchedDestinationIds.has(
+          `destination:${route.path.destinationHash}`,
+        ))
+        || occurrence.transportNodes.some((node) => node.matched)
+      ));
+      nodes.push({
+        id: occurrence.id,
+        kind: 'identity',
+        label: identityLabel,
+        publicKey: group.publicKey,
+        identityHash: group.identityHash,
+        ...(occurrence.transportNodes.length > 0 && group.identityHash
+          ? { nextHopHash: group.identityHash }
+          : {}),
+        ...(destinationGroup ? {
+          destinationCount: destinationIds.length,
+          expanded,
+        } : {}),
+        x: identityPosition.x,
+        y: identityPosition.y,
+        matched: identityMatches,
+      });
+      if (!expanded) continue;
+      for (const [index, destinationId] of occurrenceDestinationIds.entries()) {
+        const destination = destinationNodesById.get(destinationId);
+        if (!destination) continue;
+        const shortestRoute = shortestRouteByDestinationId.get(destinationId);
+        const angle = childBranchAngle(outwardAngle, index, occurrenceDestinationIds.length);
+        const position = pointFrom(identityPosition, angle, children.distances[index]);
+        destination.x = position.x;
+        destination.y = position.y;
+        nodes.push(destination);
+        edges.push({
+          id: `${occurrence.id}~${destinationId}`,
+          from: occurrence.id,
+          to: destinationId,
+          kind: 'direct',
+          hops: shortestRoute?.path.hops,
+          showHopLabel: false,
+          matched: destination.matched,
+        });
+      }
+    }
+  }
+
+  return { nodes, edges: mergeGroupedEdges(edges) };
 }
 
 function graphBounds(nodes: readonly NetworkVisualizerNode[]): NetworkVisualizerBounds {
@@ -478,6 +950,8 @@ function searchablePath(path: VisualizerPath): string {
     path.path.nextHop,
     path.label,
     path.fullDestinationName,
+    path.publicKey,
+    path.identityHash,
     path.interface.id,
     path.interface.name,
     path.interface.type,
@@ -491,6 +965,11 @@ function pathKey(path: VisualizerPath): string {
 
 export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): NetworkVisualizerGraph {
   const inventory = input.destinationInventory ?? [];
+  const inventoryByHash = new Map(inventory.map((entry) => [entry.destinationHash, entry]));
+  const destinationsByHash = new Map(input.destinations.map((entry) => [
+    entry.destinationHash,
+    entry,
+  ]));
   const inventoryHashes = new Set(inventory.map((entry) => entry.destinationHash));
   const presentationEntries: KnownDestinationEntry[] = [
     ...inventory,
@@ -524,33 +1003,80 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
     const interfaceEntry = interfacesById.get(path.interfaceId ?? 'unknown');
     if (!interfaceEntry || (input.maximumHops !== undefined && path.hops > input.maximumHops)) return [];
     const presentation = destinationPresentations.get(path.destinationHash);
+    const inventoryEntry = inventoryByHash.get(path.destinationHash);
     return [{
       path,
       interface: interfaceEntry,
-      label: destinationLabel(path.destinationHash, presentation),
+      label: destinationLabel(
+        path.destinationHash,
+        presentation,
+        destinationsByHash.get(path.destinationHash),
+      ),
       fullDestinationName: presentation?.fullDestinationName,
+      publicKey: inventoryEntry?.publicKey,
+      identityHash: inventoryEntry?.identityHash,
     }];
   });
 
   const query = input.search?.trim().toLowerCase() ?? '';
+  const pathLimit = Math.max(1, input.pathLimit ?? networkVisualizerPathLimit);
+  const knownDestinationHashesByPublicKey = new Map<string, Set<string>>();
+  for (const entry of preparedPaths) {
+    if (!entry.publicKey) continue;
+    const hashes = knownDestinationHashesByPublicKey.get(entry.publicKey) ?? new Set<string>();
+    hashes.add(entry.path.destinationHash);
+    knownDestinationHashesByPublicKey.set(entry.publicKey, hashes);
+  }
+  const requestedExpandedIdentityPublicKeys = new Set(input.groupByIdentity
+    ? Array.from(input.expandedIdentityPublicKeys ?? []).filter((publicKey) => (
+      (knownDestinationHashesByPublicKey.get(publicKey)?.size ?? 0) >= 2
+    ))
+    : []);
   const localMatches = query.length > 0 && [
     input.identity?.displayName,
     input.identity?.identityHashHex,
   ].filter(Boolean).some((value) => value!.toLowerCase().includes(query));
-  const pathMatches = (entry: VisualizerPath): boolean => (
+  const queryMatchesPath = (entry: VisualizerPath): boolean => (
     query.length > 0 && (localMatches || searchablePath(entry).includes(query))
   );
+  const requestedIdentityMatchesPath = (entry: VisualizerPath): boolean => (
+    query.length === 0
+    && Boolean(entry.publicKey && requestedExpandedIdentityPublicKeys.has(entry.publicKey))
+  );
+  const sortMatchesPath = (entry: VisualizerPath): boolean => (
+    queryMatchesPath(entry) || requestedIdentityMatchesPath(entry)
+  );
   const sortedPaths = preparedPaths.sort((left, right) => (
-    (query ? Number(pathMatches(right)) - Number(pathMatches(left)) : 0)
+    ((query.length > 0 || requestedExpandedIdentityPublicKeys.size > 0)
+      ? Number(sortMatchesPath(right)) - Number(sortMatchesPath(left))
+      : 0)
     || left.interface.name.localeCompare(right.interface.name)
     || (left.path.nextHop ?? '').localeCompare(right.path.nextHop ?? '')
     || left.path.hops - right.path.hops
     || left.label.localeCompare(right.label)
     || left.path.destinationHash.localeCompare(right.path.destinationHash)
   ));
-  const pathLimit = Math.max(1, input.pathLimit ?? networkVisualizerPathLimit);
   const visiblePaths = sortedPaths.slice(0, pathLimit);
+  const visibleDestinationHashesByPublicKey = new Map<string, Set<string>>();
+  for (const entry of visiblePaths) {
+    if (!entry.publicKey) continue;
+    const hashes = visibleDestinationHashesByPublicKey.get(entry.publicKey) ?? new Set<string>();
+    hashes.add(entry.path.destinationHash);
+    visibleDestinationHashesByPublicKey.set(entry.publicKey, hashes);
+  }
+  const expandedIdentityPublicKeys = new Set(Array.from(requestedExpandedIdentityPublicKeys)
+    .filter((publicKey) => (visibleDestinationHashesByPublicKey.get(publicKey)?.size ?? 0) >= 2));
+  const identityHighlightActive = query.length === 0 && expandedIdentityPublicKeys.size > 0;
+  const highlightActive = query.length > 0 || identityHighlightActive;
+  const identityMatchesPath = (entry: VisualizerPath): boolean => (
+    identityHighlightActive
+    && Boolean(entry.publicKey && expandedIdentityPublicKeys.has(entry.publicKey))
+  );
+  const pathMatches = (entry: VisualizerPath): boolean => (
+    queryMatchesPath(entry) || identityMatchesPath(entry)
+  );
   const matchedPaths = visiblePaths.filter(pathMatches);
+  const queryMatchedPaths = visiblePaths.filter(queryMatchesPath);
   const matchedPathKeys = new Set(matchedPaths.map(pathKey));
   const matchedInterfaceIds = new Set(matchedPaths.map((entry) => entry.interface.id));
   const highlightedInterfaceIds = new Set(matchedInterfaceIds);
@@ -590,18 +1116,25 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
         .sort((left, right) => left.localeCompare(right)));
     }
   }
-  const { radii: orbitRadii, edgeScales: orbitEdgeScales } = cachedBranchOrbitLayout(branchChildren);
+  const {
+    radii: orbitRadii,
+    edgeScales: orbitEdgeScales,
+    edgeLengths: orbitEdgeLengths,
+  } = cachedBranchOrbitLayout(branchChildren);
 
   let nodes: NetworkVisualizerNode[] = [{
     id: 'local',
     kind: 'local',
-    label: input.identity?.displayName ?? '',
+    label: input.identity?.displayName.trim()
+      || (input.identity?.identityHashHex
+        ? abbreviatedHash(input.identity.identityHashHex)
+        : ''),
     identityHash: input.identity?.identityHashHex,
     x: center.x,
     y: center.y,
-    matched: Boolean(query && (localMatches || matchedPaths.length > 0)),
+    matched: Boolean(highlightActive && (localMatches || matchedPaths.length > 0)),
   }];
-  const edges: NetworkVisualizerEdge[] = [];
+  let edges: NetworkVisualizerEdge[] = [];
   const seedPositions = new Map<string, { x: number; y: number }>([['local', center]]);
   const branchAngles = new Map<string, number>();
   for (const [index, entry] of interfaces.entries()) {
@@ -609,7 +1142,7 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
     const nodeId = `interface:${entry.id}`;
     const position = pointOnCircle(
       angle,
-      branchEdgeLength('local', nodeId, orbitRadii, orbitEdgeScales),
+      branchEdgeLength('local', nodeId, orbitRadii, orbitEdgeScales, orbitEdgeLengths),
     );
     seedPositions.set(nodeId, position);
     branchAngles.set(nodeId, angle);
@@ -623,14 +1156,14 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
       interfaceState: entry.state,
       x: position.x,
       y: position.y,
-      matched: Boolean(query && highlightedInterfaceIds.has(entry.id)),
+      matched: Boolean(highlightActive && highlightedInterfaceIds.has(entry.id)),
     });
     edges.push({
       id: `local~interface:${entry.id}`,
       from: 'local',
       to: nodeId,
       kind: 'interface',
-      matched: Boolean(query && highlightedInterfaceIds.has(entry.id)),
+      matched: Boolean(highlightActive && highlightedInterfaceIds.has(entry.id)),
     });
   }
 
@@ -700,7 +1233,13 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
       const hopPosition = pointFrom(
         interfacePosition,
         angle,
-        branchEdgeLength(interfaceNodeId, nodeId, orbitRadii, orbitEdgeScales),
+        branchEdgeLength(
+          interfaceNodeId,
+          nodeId,
+          orbitRadii,
+          orbitEdgeScales,
+          orbitEdgeLengths,
+        ),
       );
       seedPositions.set(nodeId, hopPosition);
       branchAngles.set(nodeId, angle);
@@ -714,14 +1253,14 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
         interfaceName: first.interface.name,
         x: hopPosition.x,
         y: hopPosition.y,
-        matched: Boolean(query && routes.some((route) => matchedPathKeys.has(pathKey(route)))),
+        matched: Boolean(highlightActive && routes.some((route) => matchedPathKeys.has(pathKey(route)))),
       });
       edges.push({
         id: `${interfaceNodeId}~next-hop:${id}`,
         from: interfaceNodeId,
         to: nodeId,
         kind: 'route',
-        matched: Boolean(query && routes.some((route) => matchedPathKeys.has(pathKey(route)))),
+        matched: Boolean(highlightActive && routes.some((route) => matchedPathKeys.has(pathKey(route)))),
       });
     }
   }
@@ -741,7 +1280,7 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
       const destinationPosition = pointFrom(
         parentPosition,
         angle,
-        branchEdgeLength(from, destinationId, orbitRadii, orbitEdgeScales),
+        branchEdgeLength(from, destinationId, orbitRadii, orbitEdgeScales, orbitEdgeLengths),
       );
       seedPositions.set(destinationId, destinationPosition);
       branchAngles.set(destinationId, angle);
@@ -756,27 +1295,46 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
         fullDestinationName: route.fullDestinationName,
         x: destinationPosition.x,
         y: destinationPosition.y,
-        matched: Boolean(query && matchedPathKeys.has(pathKey(route))),
+        matched: Boolean(highlightActive && matchedPathKeys.has(pathKey(route))),
       });
       edges.push({
         id: `${from}~${destinationId}`,
         from,
         to: destinationId,
-        kind: route.path.hops <= 1 ? 'direct' : 'route',
+        // Hop count describes route length, not identity ownership. A two-hop
+        // path still traverses an immediate transport node and must remain a
+        // routed (dashed) edge. Only destinations reached directly from an
+        // interface are solid here; proven identity membership is projected
+        // separately by groupNetworkVisualizerIdentities().
+        kind: from.startsWith('interface:') ? 'direct' : 'route',
         hops: route.path.hops,
-        matched: Boolean(query && matchedPathKeys.has(pathKey(route))),
+        matched: Boolean(highlightActive && matchedPathKeys.has(pathKey(route))),
       });
     }
   }
 
-  nodes = cachedSettledLayout(nodes, edges);
+  if (input.groupByIdentity) {
+    const grouped = groupNetworkVisualizerIdentities(
+      nodes,
+      edges,
+      visiblePaths,
+      inventory,
+      query,
+      highlightActive,
+      expandedIdentityPublicKeys,
+    );
+    nodes = recursivelyArrangeTopology(grouped.nodes, grouped.edges);
+    edges = grouped.edges;
+  } else {
+    nodes = cachedSettledLayout(nodes, edges);
+  }
 
   return {
     nodes,
     edges,
     pathCount: visiblePaths.length,
     hiddenPathCount: Math.max(0, sortedPaths.length - visiblePaths.length),
-    matchedPathCount: matchedPaths.length,
+    matchedPathCount: queryMatchedPaths.length,
     bounds: graphBounds(nodes),
   };
 }

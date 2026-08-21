@@ -40,6 +40,8 @@
   import { toast } from '../../lib/notifications/toasts';
   import {
     buildNetworkFlowElements,
+    preserveExpandedIdentityNodePositions,
+    preserveIdentityToggleNodePositions,
     preserveNetworkFlowNodePositions,
     type RetivumFlowEdge,
     type RetivumFlowNode,
@@ -65,6 +67,19 @@
     interfaceId: string;
     displayName: string;
     enabled: boolean;
+    destinationHashes: string[];
+    x: number;
+    y: number;
+    autofocus: boolean;
+    guardOpeningRelease: boolean;
+  }
+
+  interface IdentityActions {
+    publicKey: string;
+    identityHash?: string;
+    displayName: string;
+    destinationHashes: string[];
+    probeSourceHash?: string;
     x: number;
     y: number;
     autofocus: boolean;
@@ -86,6 +101,18 @@
     destinationHashes: string[];
   }
 
+  interface IdentityPathRemoval {
+    publicKey: string;
+    displayName: string;
+    destinationHashes: string[];
+  }
+
+  interface InterfacePathRemoval {
+    interfaceId: string;
+    displayName: string;
+    destinationHashes: string[];
+  }
+
   interface InterfaceRemoval {
     interfaceId: string;
     displayName: string;
@@ -93,23 +120,43 @@
 
   const defaultMaximumHops = 5;
   const minimumGraphZoom = .05;
+  const identityToggleDurationMs = 240;
   const settingsRepository = new BrowserSettingsRepository();
 
   let search = $state('');
   let maximumHops = $state<number | undefined>(defaultMaximumHops);
+  let groupByIdentity = $state(false);
+  let expandedIdentityPublicKeys = $state.raw<ReadonlySet<string>>(new Set());
   let destinationActions = $state<DestinationActions>();
+  let identityActions = $state<IdentityActions>();
   let nextHopActions = $state<NextHopActions>();
   let interfaceActions = $state<InterfaceActions>();
   let interfaceRemoval = $state<InterfaceRemoval>();
+  let interfacePathRemoval = $state<InterfacePathRemoval>();
+  let identityPathRemoval = $state<IdentityPathRemoval>();
   let nextHopPathRemoval = $state<NextHopPathRemoval>();
   let interfaceOperationBusyId = $state<string>();
+  let droppingInterfaceId = $state<string>();
   let droppingNextHopHash = $state<string>();
+  let droppingIdentityPublicKey = $state<string>();
   let droppingPathHashes = $state<string[]>([]);
   let flowNodes = $state.raw<RetivumFlowNode[]>([]);
   let flowEdges = $state.raw<RetivumFlowEdge[]>([]);
   let compactViewport = $state(false);
   let synchronizedTopologyRevision = '';
   let synchronizedSearch = '';
+  let pendingIdentityToggle: { publicKey: string; expanding: boolean } | undefined;
+  let pendingIdentityCollapseAll = false;
+  let identityAnimationTimer: number | undefined;
+  let identityToggleBusy = false;
+  let identityCollapseAllInProgress = false;
+  let pageElement: HTMLDivElement;
+  let pointerGesture: {
+    pointerId: number;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  } | undefined;
   const manuallyPositionedNodeIds = new Set<string>();
 
   const nodeTypes: NodeTypes = { network: NetworkFlowNode };
@@ -127,7 +174,18 @@
     const update = (): void => { compactViewport = query.matches; };
     update();
     query.addEventListener('change', update);
-    return () => query.removeEventListener('change', update);
+    window.addEventListener('keydown', handleGlobalKeydown, true);
+    pageElement.addEventListener('pointerdown', handlePagePointerDown, true);
+    pageElement.addEventListener('pointermove', handlePagePointerMove, true);
+    pageElement.addEventListener('click', handlePageClick, true);
+    return () => {
+      query.removeEventListener('change', update);
+      window.removeEventListener('keydown', handleGlobalKeydown, true);
+      pageElement.removeEventListener('pointerdown', handlePagePointerDown, true);
+      pageElement.removeEventListener('pointermove', handlePagePointerMove, true);
+      pageElement.removeEventListener('click', handlePageClick, true);
+      stopIdentityAnimation();
+    };
   });
 
   const graph = $derived(buildNetworkVisualizerGraph({
@@ -140,10 +198,15 @@
     contacts: $chatContacts,
     search,
     maximumHops,
+    groupByIdentity,
+    expandedIdentityPublicKeys,
   }));
   const interfaceCount = $derived(graph.nodes.filter((node) => node.kind === 'interface').length);
-  const nextHopCount = $derived(graph.nodes.filter((node) => node.kind === 'nextHop').length);
+  const nextHopCount = $derived(graph.nodes.filter((node) => node.nextHopHash).length);
   const searchActive = $derived(search.trim().length > 0);
+  const graphHighlightActive = $derived(
+    searchActive || graph.nodes.some((node) => node.kind === 'identity' && node.expanded),
+  );
   const routeFilterActive = $derived(
     maximumHops !== undefined && $pathTableEntries.some((path) => path.hops > maximumHops!),
   );
@@ -168,6 +231,27 @@
   });
 
   $effect(() => {
+    if (expandedIdentityPublicKeys.size === 0) return;
+    const expandablePublicKeys = new Set(graph.nodes.flatMap((node) => (
+      node.kind === 'identity'
+      && node.expanded
+      && node.destinationCount !== undefined
+      && node.publicKey
+        ? [node.publicKey]
+        : []
+    )));
+    const retainedPublicKeys = new Set(Array.from(expandedIdentityPublicKeys).filter((publicKey) => (
+      expandablePublicKeys.has(publicKey)
+    )));
+    if (retainedPublicKeys.size === expandedIdentityPublicKeys.size) return;
+    stopIdentityAnimation();
+    if (pendingIdentityToggle && !expandablePublicKeys.has(
+      pendingIdentityToggle.publicKey,
+    )) pendingIdentityToggle = undefined;
+    expandedIdentityPublicKeys = retainedPublicKeys;
+  });
+
+  $effect(() => {
     const revision = topologyRevision;
     const currentSearch = search;
     const searchChanged = currentSearch !== synchronizedSearch;
@@ -188,6 +272,9 @@
     if (destinationActions && !graph.nodes.some((node) => (
       node.destinationHash === destinationActions?.destinationHash
     ))) destinationActions = undefined;
+    if (identityActions && !graph.nodes.some((node) => (
+      node.kind === 'identity' && node.publicKey === identityActions?.publicKey
+    ))) identityActions = undefined;
     if (nextHopActions && !graph.nodes.some((node) => (
       node.nextHopHash === nextHopActions?.nextHopHash
     ))) nextHopActions = undefined;
@@ -198,6 +285,37 @@
 
   function setSearch(value: string): void {
     search = value;
+  }
+
+  function handleGlobalKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') collapseAllIdentityGroups();
+  }
+
+  function handlePagePointerDown(event: PointerEvent): void {
+    if (event.isPrimary === false || event.button !== 0) return;
+    pointerGesture = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      moved: false,
+    };
+  }
+
+  function handlePagePointerMove(event: PointerEvent): void {
+    if (!pointerGesture || pointerGesture.pointerId !== event.pointerId) return;
+    if (Math.hypot(
+      event.clientX - pointerGesture.startX,
+      event.clientY - pointerGesture.startY,
+    ) >= 5) pointerGesture.moved = true;
+  }
+
+  function handlePageClick(event: MouseEvent): void {
+    const moved = pointerGesture?.moved ?? false;
+    pointerGesture = undefined;
+    if (moved) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('.network-flow-node.search-match')) return;
+    collapseAllIdentityGroups();
   }
 
   function handleSearchKeydown(event: KeyboardEvent & { currentTarget: HTMLInputElement }): void {
@@ -218,12 +336,17 @@
   }
 
   function resetArrangement(): void {
+    stopIdentityAnimation();
     manuallyPositionedNodeIds.clear();
+    pendingIdentityToggle = undefined;
+    pendingIdentityCollapseAll = false;
+    expandedIdentityPublicKeys = new Set();
     const elements = buildNetworkFlowElements(graph, {
       ariaLabel: nodeAriaLabel,
       label: clippedLabel,
       onopen: openNodeActions,
-      searchActive,
+      ontoggle: toggleIdentityGroup,
+      searchActive: graphHighlightActive,
     });
     flowNodes = elements.nodes;
     flowEdges = elements.edges;
@@ -234,12 +357,65 @@
       ariaLabel: nodeAriaLabel,
       label: clippedLabel,
       onopen: openNodeActions,
-      searchActive,
+      ontoggle: toggleIdentityGroup,
+      searchActive: graphHighlightActive,
     });
     const currentNodes = untrack(() => flowNodes);
-    flowNodes = preserveNetworkFlowNodePositions(
+    const collapseAll = pendingIdentityCollapseAll;
+    pendingIdentityCollapseAll = false;
+    if (collapseAll) {
+      flowNodes = preserveNetworkFlowNodePositions(elements.nodes, currentNodes);
+      flowEdges = elements.edges;
+      identityToggleBusy = false;
+      return;
+    }
+    const identityToggle = pendingIdentityToggle;
+    pendingIdentityToggle = undefined;
+    if (identityToggle) {
+      const identityIds = identityNodeIdsForPublicKey(identityToggle.publicKey);
+      const localizedNodes = preserveIdentityToggleNodePositions(
+        elements.nodes,
+        currentNodes,
+        elements.edges,
+        identityIds,
+      );
+      flowEdges = elements.edges;
+      if (identityToggle.expanding) {
+        const currentIds = new Set(currentNodes.map((node) => node.id));
+        const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+        const insertedDestinationIdentityIds = new Map(elements.edges
+          .filter((edge) => (
+            identityIds.has(edge.source)
+            && !currentIds.has(edge.target)
+          ))
+          .map((edge) => [edge.target, edge.source] as const));
+        const animationStart = localizedNodes.map((node) => {
+          const identityId = insertedDestinationIdentityIds.get(node.id);
+          const identityPosition = identityId ? currentById.get(identityId)?.position : undefined;
+          return identityPosition
+            ? { ...node, position: { ...identityPosition } }
+            : node;
+        });
+        animateFlowNodePositions(animationStart, localizedNodes, () => {
+          identityToggleBusy = false;
+        });
+      } else {
+        flowNodes = localizedNodes;
+        identityToggleBusy = false;
+      }
+      return;
+    }
+    const expandedIdentityNodeIds = new Set(graph.nodes
+      .filter((node) => (
+        node.kind === 'identity'
+        && Boolean(node.publicKey && expandedIdentityPublicKeys.has(node.publicKey))
+      ))
+      .map((node) => node.id));
+    flowNodes = preserveExpandedIdentityNodePositions(
       elements.nodes,
       currentNodes,
+      elements.edges,
+      expandedIdentityNodeIds,
       manuallyPositionedNodeIds,
     );
     flowEdges = elements.edges;
@@ -247,6 +423,141 @@
     for (const nodeId of manuallyPositionedNodeIds) {
       if (!retainedIds.has(nodeId)) manuallyPositionedNodeIds.delete(nodeId);
     }
+  }
+
+  function cancelIdentityAnimationTimer(): void {
+    if (identityAnimationTimer === undefined) return;
+    window.clearTimeout(identityAnimationTimer);
+    identityAnimationTimer = undefined;
+  }
+
+  function stopIdentityAnimation(): void {
+    cancelIdentityAnimationTimer();
+    identityToggleBusy = false;
+    identityCollapseAllInProgress = false;
+  }
+
+  function animateFlowNodePositions(
+    startNodes: readonly RetivumFlowNode[],
+    targetNodes: readonly RetivumFlowNode[],
+    oncomplete: () => void,
+  ): void {
+    cancelIdentityAnimationTimer();
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || identityToggleDurationMs <= 0) {
+      flowNodes = [...targetNodes];
+      oncomplete();
+      return;
+    }
+    const startPositions = new Map(startNodes.map((node) => [node.id, node.position]));
+    flowNodes = [...startNodes];
+    const frameIntervalMs = 16;
+    let elapsedMs = 0;
+    const step = (): void => {
+      elapsedMs += frameIntervalMs;
+      const progress = Math.min(1, elapsedMs / identityToggleDurationMs);
+      const eased = 1 - (1 - progress) ** 3;
+      flowNodes = targetNodes.map((node) => {
+        const start = startPositions.get(node.id) ?? node.position;
+        return {
+          ...node,
+          position: {
+            x: start.x + (node.position.x - start.x) * eased,
+            y: start.y + (node.position.y - start.y) * eased,
+          },
+        };
+      });
+      if (progress < 1) {
+        identityAnimationTimer = window.setTimeout(step, frameIntervalMs);
+        return;
+      }
+      identityAnimationTimer = undefined;
+      flowNodes = [...targetNodes];
+      oncomplete();
+    };
+    identityAnimationTimer = window.setTimeout(step, frameIntervalMs);
+  }
+
+  function identityNodeIdsForPublicKey(publicKey: string): Set<string> {
+    return new Set(graph.nodes
+      .filter((node) => node.kind === 'identity' && node.publicKey === publicKey)
+      .map((node) => node.id));
+  }
+
+  function animateIdentityCollapse(publicKey: string, oncomplete: () => void): void {
+    const currentNodes = untrack(() => flowNodes);
+    const currentEdges = untrack(() => flowEdges);
+    const identityIds = identityNodeIdsForPublicKey(publicKey);
+    if (identityIds.size === 0) {
+      oncomplete();
+      return;
+    }
+    const nodesById = new Map(currentNodes.map((entry) => [entry.id, entry]));
+    const childIdentityIds = new Map<string, string>();
+    const identityAnimationZIndexes = new Map<string, number>();
+    for (const edge of currentEdges) {
+      if (!identityIds.has(edge.source) || nodesById.get(edge.target)?.data.kind !== 'destination') continue;
+      childIdentityIds.set(edge.target, edge.source);
+      identityAnimationZIndexes.set(edge.source, Math.max(
+        identityAnimationZIndexes.get(edge.source) ?? nodesById.get(edge.source)?.zIndex ?? 0,
+        (nodesById.get(edge.target)?.zIndex ?? 0) + 1,
+      ));
+    }
+    const collapseStartNodes = currentNodes.map((entry) => {
+      const zIndex = identityAnimationZIndexes.get(entry.id);
+      return zIndex === undefined ? entry : { ...entry, zIndex };
+    });
+    const collapsedNodes = collapseStartNodes.map((entry) => {
+      const identityId = childIdentityIds.get(entry.id);
+      const identity = identityId ? nodesById.get(identityId) : undefined;
+      return identity ? { ...entry, position: { ...identity.position } } : entry;
+    });
+    animateFlowNodePositions(collapseStartNodes, collapsedNodes, oncomplete);
+  }
+
+  function collapseAllIdentityGroups(): void {
+    if (expandedIdentityPublicKeys.size === 0 || identityCollapseAllInProgress) return;
+    const identityIds = new Set(graph.nodes
+      .filter((node) => (
+        node.kind === 'identity'
+        && Boolean(node.publicKey && expandedIdentityPublicKeys.has(node.publicKey))
+      ))
+      .map((node) => node.id));
+    const currentNodes = untrack(() => flowNodes);
+    const currentEdges = untrack(() => flowEdges);
+    const nodesById = new Map(currentNodes.map((node) => [node.id, node]));
+    const childIdentityIds = new Map<string, string>();
+    const identityAnimationZIndexes = new Map<string, number>();
+    for (const edge of currentEdges) {
+      if (!identityIds.has(edge.source) || nodesById.get(edge.target)?.data.kind !== 'destination') continue;
+      childIdentityIds.set(edge.target, edge.source);
+      identityAnimationZIndexes.set(edge.source, Math.max(
+        identityAnimationZIndexes.get(edge.source) ?? nodesById.get(edge.source)?.zIndex ?? 0,
+        (nodesById.get(edge.target)?.zIndex ?? 0) + 1,
+      ));
+    }
+    const finish = (): void => {
+      identityCollapseAllInProgress = false;
+      pendingIdentityToggle = undefined;
+      pendingIdentityCollapseAll = true;
+      expandedIdentityPublicKeys = new Set();
+    };
+    if (childIdentityIds.size === 0) {
+      finish();
+      return;
+    }
+    identityCollapseAllInProgress = true;
+    identityToggleBusy = true;
+    const collapseStartNodes = currentNodes.map((node) => {
+      const zIndex = identityAnimationZIndexes.get(node.id);
+      return zIndex === undefined ? node : { ...node, zIndex };
+    });
+    const collapsedNodes = collapseStartNodes.map((node) => {
+      const identityId = childIdentityIds.get(node.id);
+      const identity = identityId ? nodesById.get(identityId) : undefined;
+      return identity ? { ...node, position: { ...identity.position } } : node;
+    });
+    animateFlowNodePositions(collapseStartNodes, collapsedNodes, finish);
   }
 
   function rememberManualNodePositions(nodes: readonly RetivumFlowNode[]): void {
@@ -258,7 +569,8 @@
       ariaLabel: nodeAriaLabel,
       label: clippedLabel,
       onopen: openNodeActions,
-      searchActive,
+      ontoggle: toggleIdentityGroup,
+      searchActive: graphHighlightActive,
     });
     const currentNodes = untrack(() => flowNodes);
     flowNodes = preserveNetworkFlowNodePositions(elements.nodes, currentNodes);
@@ -288,6 +600,22 @@
     if (node.kind === 'nextHop') {
       return $t('networkVisualizer.node.nextHopAria', { name: nodeLabel(node) });
     }
+    if (node.kind === 'identity') {
+      if (node.destinationCount !== undefined) {
+        return $t(node.nextHopHash
+          ? 'networkVisualizer.node.identityGroupTransportAria'
+          : 'networkVisualizer.node.identityGroupAria', {
+          name: nodeLabel(node),
+          count: node.destinationCount,
+          state: $t(node.expanded
+            ? 'networkVisualizer.node.groupExpanded'
+            : 'networkVisualizer.node.groupCollapsed'),
+        });
+      }
+      return $t(node.nextHopHash
+        ? 'networkVisualizer.node.identityTransportAria'
+        : 'networkVisualizer.node.identityAria', { name: nodeLabel(node) });
+    }
     if (node.kind === 'interface' && node.interfaceId) {
       return $t('networkVisualizer.node.interfaceAria', { name: nodeLabel(node) });
     }
@@ -297,13 +625,70 @@
     });
   }
 
+  function setGroupByIdentity(enabled: boolean): void {
+    stopIdentityAnimation();
+    manuallyPositionedNodeIds.clear();
+    pendingIdentityCollapseAll = false;
+    expandedIdentityPublicKeys = new Set();
+    groupByIdentity = enabled;
+  }
+
+  function toggleIdentityGroup(node: NetworkVisualizerNode): void {
+    if (node.kind !== 'identity'
+      || !node.publicKey
+      || node.destinationCount === undefined) return;
+    if (identityCollapseAllInProgress) {
+      stopIdentityAnimation();
+      pendingIdentityCollapseAll = false;
+      expandedIdentityPublicKeys = new Set();
+    }
+    if (identityToggleBusy) stopIdentityAnimation();
+    const expanded = new Set(expandedIdentityPublicKeys);
+    identityToggleBusy = true;
+    if (expanded.has(node.publicKey)) {
+      animateIdentityCollapse(node.publicKey, () => {
+        expanded.delete(node.publicKey!);
+        pendingIdentityToggle = { publicKey: node.publicKey!, expanding: false };
+        expandedIdentityPublicKeys = expanded;
+      });
+      return;
+    }
+    expanded.add(node.publicKey);
+    pendingIdentityToggle = { publicKey: node.publicKey, expanding: true };
+    expandedIdentityPublicKeys = expanded;
+  }
+
   function openNodeActions(
     node: NetworkVisualizerNode,
     clientX: number,
     clientY: number,
     method: ContextMenuOpenMethod,
   ): void {
+    if (node.kind === 'identity' && node.publicKey && !node.nextHopHash) {
+      const destinationHashSet = new Set($remoteDestinationInventory
+        .filter((entry) => entry.publicKey === node.publicKey)
+        .map((entry) => entry.destinationHash));
+      const destinationHashes = Array.from(new Set($pathTableEntries
+        .filter((entry) => destinationHashSet.has(entry.destinationHash))
+        .map((entry) => entry.destinationHash)));
+      destinationActions = undefined;
+      nextHopActions = undefined;
+      interfaceActions = undefined;
+      identityActions = {
+        publicKey: node.publicKey,
+        identityHash: node.identityHash,
+        displayName: nodeLabel(node),
+        destinationHashes,
+        probeSourceHash: node.identityHash ?? destinationHashes[0],
+        x: clientX,
+        y: clientY,
+        autofocus: method === 'keyboard',
+        guardOpeningRelease: method === 'longpress',
+      };
+      return;
+    }
     if (node.destinationHash) {
+      identityActions = undefined;
       interfaceActions = undefined;
       nextHopActions = undefined;
       destinationActions = {
@@ -317,8 +702,9 @@
       };
       return;
     }
-    if (node.kind === 'nextHop' && node.nextHopHash) {
+    if (node.nextHopHash) {
       destinationActions = undefined;
+      identityActions = undefined;
       interfaceActions = undefined;
       nextHopActions = {
         nextHopHash: node.nextHopHash,
@@ -334,11 +720,15 @@
     const config = $interfaceConfigurations.find((entry) => entry.id === node.interfaceId);
     if (!config) return;
     destinationActions = undefined;
+    identityActions = undefined;
     nextHopActions = undefined;
     interfaceActions = {
       interfaceId: config.id,
       displayName: config.name,
       enabled: config.enabled,
+      destinationHashes: Array.from(new Set($pathTableEntries
+        .filter((entry) => entry.interfaceId === config.id)
+        .map((entry) => entry.destinationHash))),
       x: clientX,
       y: clientY,
       autofocus: method === 'keyboard',
@@ -352,9 +742,15 @@
     else toast.error('common.copyFailed');
   }
 
-  async function copyNextHopHash(nextHopHash: string): Promise<void> {
+  async function copyTransportIdentityHash(nextHopHash: string): Promise<void> {
     nextHopActions = undefined;
     if (await copyText(nextHopHash)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
+  async function copyIdentityHash(identityHash: string): Promise<void> {
+    identityActions = undefined;
+    if (await copyText(identityHash)) toast.success('common.copied');
     else toast.error('common.copyFailed');
   }
 
@@ -373,6 +769,17 @@
     nextHopActions = undefined;
     showDestinationProbeActivity({
       destinationHash: actions.nextHopHash,
+      displayName: actions.displayName,
+      fullDestinationName: 'rnstransport.probe',
+      timeoutMs: probeTimeoutMsForPath(),
+    });
+  }
+
+  function probeIdentity(actions: IdentityActions): void {
+    if (!actions.probeSourceHash) return;
+    identityActions = undefined;
+    showDestinationProbeActivity({
+      destinationHash: actions.probeSourceHash,
       displayName: actions.displayName,
       fullDestinationName: 'rnstransport.probe',
       timeoutMs: probeTimeoutMsForPath(),
@@ -412,6 +819,88 @@
       displayName: actions.displayName,
       destinationHashes,
     };
+  }
+
+  function requestIdentityPathRemoval(actions: IdentityActions): void {
+    identityActions = undefined;
+    if (!actions.destinationHashes.length) return;
+    identityPathRemoval = {
+      publicKey: actions.publicKey,
+      displayName: actions.displayName,
+      destinationHashes: actions.destinationHashes,
+    };
+  }
+
+  async function dropIdentityPaths(removal: IdentityPathRemoval): Promise<void> {
+    if (droppingIdentityPublicKey) return;
+    droppingIdentityPublicKey = removal.publicKey;
+    droppingPathHashes = Array.from(new Set([
+      ...droppingPathHashes,
+      ...removal.destinationHashes,
+    ]));
+    let dropped = 0;
+    try {
+      const result = await reticulumRuntime.dropDestinationPaths(removal.destinationHashes);
+      dropped = result.count;
+      if (result.ok && dropped === removal.destinationHashes.length) {
+        toast.success('networkVisualizer.identityDrop.success', { count: dropped });
+      } else if (dropped > 0) {
+        toast.error('networkVisualizer.identityDrop.partial', {
+          dropped,
+          count: removal.destinationHashes.length,
+        });
+      } else {
+        toast.error('networkVisualizer.identityDrop.failed');
+      }
+    } catch {
+      toast.error('networkVisualizer.identityDrop.failed');
+    } finally {
+      const completed = new Set(removal.destinationHashes);
+      droppingPathHashes = droppingPathHashes.filter((hash) => !completed.has(hash));
+      droppingIdentityPublicKey = undefined;
+      identityPathRemoval = undefined;
+    }
+  }
+
+  function requestInterfacePathRemoval(actions: InterfaceActions): void {
+    interfaceActions = undefined;
+    if (!actions.destinationHashes.length) return;
+    interfacePathRemoval = {
+      interfaceId: actions.interfaceId,
+      displayName: actions.displayName,
+      destinationHashes: actions.destinationHashes,
+    };
+  }
+
+  async function dropInterfacePaths(removal: InterfacePathRemoval): Promise<void> {
+    if (droppingInterfaceId) return;
+    droppingInterfaceId = removal.interfaceId;
+    droppingPathHashes = Array.from(new Set([
+      ...droppingPathHashes,
+      ...removal.destinationHashes,
+    ]));
+    let dropped = 0;
+    try {
+      const result = await reticulumRuntime.dropDestinationPaths(removal.destinationHashes);
+      dropped = result.count;
+      if (result.ok && dropped === removal.destinationHashes.length) {
+        toast.success('networkVisualizer.interfaceDrop.success', { count: dropped });
+      } else if (dropped > 0) {
+        toast.error('networkVisualizer.interfaceDrop.partial', {
+          dropped,
+          count: removal.destinationHashes.length,
+        });
+      } else {
+        toast.error('networkVisualizer.interfaceDrop.failed');
+      }
+    } catch {
+      toast.error('networkVisualizer.interfaceDrop.failed');
+    } finally {
+      const completed = new Set(removal.destinationHashes);
+      droppingPathHashes = droppingPathHashes.filter((hash) => !completed.has(hash));
+      droppingInterfaceId = undefined;
+      interfacePathRemoval = undefined;
+    }
   }
 
   async function dropPathsViaNextHop(removal: NextHopPathRemoval): Promise<void> {
@@ -509,7 +998,7 @@
   }
 </script>
 
-<div class="page network-visualizer-page">
+<div class="page network-visualizer-page" bind:this={pageElement}>
   <header class="network-visualizer-header">
     <button class="button secondary compact network-visualizer-back" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} /><span>{$t('networkVisualizer.backToTools')}</span>
@@ -551,13 +1040,21 @@
             onblur={restoreDefaultMaximumHops}
           />
         </label>
+        <label class="network-visualizer-identity-filter">
+          <input
+            type="checkbox"
+            checked={groupByIdentity}
+            onchange={(event) => setGroupByIdentity(event.currentTarget.checked)}
+            aria-label={$t('networkVisualizer.groupByIdentity')}
+          />
+          <span>{$t('networkVisualizer.groupByIdentity')}</span>
+        </label>
       </section>
     </div>
     <div class="network-visualizer-legend" aria-label={$t('networkVisualizer.legend.label')}>
       <span>
         <i class="local" aria-hidden="true"><Icon name="identity" size={12} /></i>
-        <span class="legend-label full">{$t('networkVisualizer.node.local')}</span>
-        <span class="legend-label compact">{$t('networkVisualizer.node.local.short')}</span>
+        <span class="legend-label">{$t('networkVisualizer.node.identity')}</span>
       </span>
       <span>
         <i class="interface" aria-hidden="true"><Icon name="interface" size={12} /></i>
@@ -565,8 +1062,7 @@
       </span>
       <span>
         <i class="next-hop" aria-hidden="true"><Icon name="route" size={12} /></i>
-        <span class="legend-label full">{$t('networkVisualizer.node.nextHop')}</span>
-        <span class="legend-label compact">{$t('networkVisualizer.node.nextHop.short')}</span>
+        <span class="legend-label">{$t('networkVisualizer.node.nextHop')}</span>
       </span>
       <span>
         <i class="destination" aria-hidden="true"><Icon name="identity" size={12} /></i>
@@ -590,6 +1086,7 @@
       {fitViewOptions}
       minZoom={minimumGraphZoom}
       maxZoom={2.5}
+      zIndexMode="manual"
       nodesDraggable
       nodesConnectable={false}
       elementsSelectable={false}
@@ -656,6 +1153,44 @@
   </section>
 </div>
 
+{#if identityActions}
+  {@const actions = identityActions}
+  <ContextMenu
+    x={actions.x}
+    y={actions.y}
+    autofocus={actions.autofocus}
+    guardOpeningRelease={actions.guardOpeningRelease}
+    label={$t('networkVisualizer.identityContextMenu.label')}
+    closeLabel={$t('networkVisualizer.identityContextMenu.close')}
+    onclose={() => { identityActions = undefined; }}
+  >
+    <button
+      role="menuitem"
+      disabled={!actions.identityHash}
+      onclick={() => { if (actions.identityHash) void copyIdentityHash(actions.identityHash); }}
+    >
+      <Icon name="copy" size={17} />{$t('networkVisualizer.identityContextMenu.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={$runtimeStatus !== 'online'
+        || !actions.probeSourceHash
+        || $pendingProbeDestinationHashes.has(actions.probeSourceHash)}
+      onclick={() => { probeIdentity(actions); }}
+    >
+      <Icon name="probe" size={17} />{$t('networkVisualizer.identityContextMenu.probe')}
+    </button>
+    <button
+      class="danger"
+      role="menuitem"
+      disabled={!actions.destinationHashes.length || droppingIdentityPublicKey !== undefined}
+      onclick={() => { requestIdentityPathRemoval(actions); }}
+    >
+      <Icon name="route-off" size={17} />{$t('networkVisualizer.identityContextMenu.dropPaths')}
+    </button>
+  </ContextMenu>
+{/if}
+
 {#if destinationActions}
   {@const actions = destinationActions}
   <ContextMenu
@@ -713,9 +1248,9 @@
   >
     <button
       role="menuitem"
-      onclick={() => { void copyNextHopHash(actions.nextHopHash); }}
+      onclick={() => { void copyTransportIdentityHash(actions.nextHopHash); }}
     >
-      <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+      <Icon name="copy" size={17} />{$t('networkVisualizer.nextHopContextMenu.copyIdentityHash')}
     </button>
     <button
       role="menuitem"
@@ -723,7 +1258,7 @@
         || $pendingProbeDestinationHashes.has(actions.nextHopHash)}
       onclick={() => { probeNextHop(actions); }}
     >
-      <Icon name="probe" size={17} />{$t('chat.destination.actions.probe')}
+      <Icon name="probe" size={17} />{$t('networkVisualizer.nextHopContextMenu.probe')}
     </button>
     <button
       class="danger"
@@ -749,7 +1284,7 @@
   >
     <button
       role="menuitem"
-      disabled={interfaceOperationBusyId !== undefined}
+      disabled={interfaceOperationBusyId !== undefined || droppingInterfaceId !== undefined}
       onclick={() => { void toggleInterface(actions); }}
     >
       <Icon name={actions.enabled ? 'block' : 'check'} size={17} />
@@ -758,12 +1293,56 @@
     <button
       class="danger"
       role="menuitem"
-      disabled={interfaceOperationBusyId !== undefined}
+      disabled={!actions.destinationHashes.length
+        || droppingInterfaceId !== undefined
+        || interfaceOperationBusyId !== undefined}
+      onclick={() => { requestInterfacePathRemoval(actions); }}
+    >
+      <Icon name="route-off" size={17} />{$t('networkVisualizer.interfaceContextMenu.dropPaths')}
+    </button>
+    <button
+      class="danger"
+      role="menuitem"
+      disabled={interfaceOperationBusyId !== undefined || droppingInterfaceId !== undefined}
       onclick={() => { requestInterfaceRemoval(actions); }}
     >
       <Icon name="trash" size={17} />{$t('networkVisualizer.interfaceContextMenu.remove')}
     </button>
   </ContextMenu>
+{/if}
+
+{#if interfacePathRemoval}
+  {@const removal = interfacePathRemoval}
+  <ConfirmationDialog
+    titleId="network-visualizer-drop-interface-paths-title"
+    title={$t('networkVisualizer.interfaceDrop.title')}
+    description={$t('networkVisualizer.interfaceDrop.description', {
+      count: removal.destinationHashes.length,
+      name: removal.displayName,
+    })}
+    icon="route-off"
+    tone="danger"
+    confirmLabel={$t('networkVisualizer.interfaceDrop.confirm')}
+    oncancel={() => { interfacePathRemoval = undefined; }}
+    onconfirm={() => dropInterfacePaths(removal)}
+  />
+{/if}
+
+{#if identityPathRemoval}
+  {@const removal = identityPathRemoval}
+  <ConfirmationDialog
+    titleId="network-visualizer-drop-identity-paths-title"
+    title={$t('networkVisualizer.identityDrop.title')}
+    description={$t('networkVisualizer.identityDrop.description', {
+      count: removal.destinationHashes.length,
+      name: removal.displayName,
+    })}
+    icon="route-off"
+    tone="danger"
+    confirmLabel={$t('networkVisualizer.identityDrop.confirm')}
+    oncancel={() => { identityPathRemoval = undefined; }}
+    onconfirm={() => dropIdentityPaths(removal)}
+  />
 {/if}
 
 {#if nextHopPathRemoval}
@@ -805,13 +1384,15 @@
   .network-visualizer-header-copy h1 { margin: 0; font-size: 1.16rem; line-height: 1.25; }
   .network-visualizer-header-copy p { margin: 0; color: var(--text-muted); font-size: .72rem; line-height: 1.4; }
   .network-visualizer-panel { position: relative; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--surface-1) 88%, var(--bg)); box-shadow: var(--shadow); }
-  .network-visualizer-topbar { position: absolute; z-index: 4; max-width: 560px; inset: 12px 78px auto 12px; pointer-events: none; }
+  .network-visualizer-topbar { position: absolute; z-index: 4; max-width: 720px; inset: 12px 78px auto 12px; pointer-events: none; }
   .network-visualizer-topbar > * { pointer-events: auto; }
-  .network-visualizer-toolbar { display: grid; min-width: 0; grid-template-columns: minmax(180px, 1fr) auto; align-items: center; gap: 8px; }
+  .network-visualizer-toolbar { display: grid; min-width: 0; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: center; gap: 8px; }
   .network-visualizer-search { min-width: 0; margin: 0; }
   .network-visualizer-search button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--text-subtle); background: transparent; }
   .network-visualizer-hop-filter { display: flex; height: 42px; align-items: center; gap: 7px; padding-inline: 10px 6px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-muted); background: color-mix(in srgb, var(--surface-2) 92%, transparent); font-size: .62rem; font-weight: 700; backdrop-filter: blur(12px); white-space: nowrap; }
   .network-visualizer-hop-filter input { width: 48px; height: 30px; padding: 0 4px; border: 0; border-radius: 6px; color: var(--text); background: var(--surface-3); text-align: center; }
+  .network-visualizer-identity-filter { display: flex; height: 42px; align-items: center; gap: 7px; padding-inline: 10px; border: 1px solid var(--border); border-radius: 9px; color: var(--text-muted); background: color-mix(in srgb, var(--surface-2) 92%, transparent); font-size: .62rem; font-weight: 700; backdrop-filter: blur(12px); cursor: pointer; white-space: nowrap; }
+  .network-visualizer-identity-filter input { width: 16px; height: 16px; accent-color: var(--accent); }
   .network-visualizer-bottom-bar { position: absolute; z-index: 3; inset: auto 12px 12px; pointer-events: none; }
   .network-visualizer-summary { display: flex; min-width: 0; flex-wrap: wrap-reverse; align-items: center; gap: 8px; }
   .network-visualizer-summary-counts { display: flex; width: max-content; max-width: 100%; flex: none; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -822,10 +1403,9 @@
   .network-visualizer-summary span { color: var(--text-muted); font-size: .66rem; font-weight: 650; }
   .network-visualizer-summary p { max-width: 100%; flex: none; margin: 0; color: var(--warning); font-size: .68rem; }
   :global(.network-visualizer-flow) { width: 100%; height: 100%; --xy-background-color: transparent; }
-  .network-visualizer-legend { position: absolute; z-index: 2; display: flex; width: fit-content; max-width: 560px; flex-wrap: wrap; gap: 8px 13px; inset-block-start: 66px; inset-inline-start: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-2) 90%, transparent); backdrop-filter: blur(12px); pointer-events: none; }
+  .network-visualizer-legend { position: absolute; z-index: 2; display: flex; width: fit-content; max-width: 720px; flex-wrap: wrap; gap: 8px 13px; inset-block-start: 66px; inset-inline-start: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: color-mix(in srgb, var(--surface-2) 90%, transparent); backdrop-filter: blur(12px); pointer-events: none; }
   .network-visualizer-legend > span { display: inline-flex; min-width: 0; align-items: center; gap: 6px; color: var(--text-muted); font-size: .62rem; font-weight: 650; white-space: nowrap; }
   .network-visualizer-legend .legend-label { min-width: 0; }
-  .network-visualizer-legend .legend-label.compact { display: none; }
   .network-visualizer-legend i { display: grid; width: 22px; height: 22px; place-items: center; border: 2px solid color-mix(in srgb, currentColor 72%, var(--surface-1)); border-radius: 50%; color: var(--surface-1); background: var(--text-subtle); }
   .network-visualizer-legend i.local { color: #fff; background: #4385e7; }
   .network-visualizer-legend i.interface { color: var(--accent-ink); background: var(--accent); }
@@ -864,15 +1444,15 @@
     .network-visualizer-back { width: 38px; min-height: 38px; padding: 0; }
     .network-visualizer-header-copy h1 { font-size: 1.05rem; }
     .network-visualizer-header-copy p { font-size: .66rem; }
-    .network-visualizer-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+    .network-visualizer-toolbar { grid-template-columns: minmax(0, 1fr) auto auto; }
     .network-visualizer-hop-filter span { display: none; }
     .network-visualizer-hop-filter { padding-inline: 5px; }
+    .network-visualizer-identity-filter { padding-inline: 9px; }
+    .network-visualizer-identity-filter span { display: none; }
     .network-visualizer-legend { max-width: calc(100% - 79px); gap: 5px 9px; inset: 58px auto auto 9px; padding: 6px 7px; }
     .network-visualizer-legend > span { gap: 4px; overflow: hidden; font-size: .55rem; line-height: 1.1; }
     .network-visualizer-legend i { width: 20px; height: 20px; flex: none; }
     .network-visualizer-legend .legend-label { overflow: hidden; text-overflow: ellipsis; }
-    .network-visualizer-legend .legend-label.full { display: none; }
-    .network-visualizer-legend .legend-label.compact { display: block; }
     .network-visualizer-bottom-bar { inset: auto 9px 9px; }
     .network-visualizer-summary { gap: 5px; }
     .network-visualizer-summary-counts { gap: 5px; }

@@ -911,6 +911,7 @@ function emitPathManagementSnapshot(
   const knownByHash = new Map<string, {
     destinationHash: string;
     publicKey?: string;
+    identityHash?: string;
     lastAnnouncedAt?: string;
     fullDestinationName?: RegisteredFullDestinationName;
   }>();
@@ -924,7 +925,10 @@ function emitPathManagementSnapshot(
       : undefined;
     knownByHash.set(hash, {
       destinationHash: hash,
-      ...(publicKey?.byteLength === 64 ? { publicKey: bytesToHex(publicKey) } : {}),
+      ...(publicKey?.byteLength === 64 ? {
+        publicKey: bytesToHex(publicKey),
+        identityHash: bytesToHex(ReticulumNode.truncatedHash(publicKey)),
+      } : {}),
       ...(fullDestinationName ? { fullDestinationName } : {}),
     });
   }
@@ -946,6 +950,7 @@ function emitPathManagementSnapshot(
       ...current,
       destinationHash,
       publicKey: bytesToHex(publicKey),
+      identityHash: bytesToHex(ReticulumNode.truncatedHash(publicKey)),
       ...(fullDestinationName ? { fullDestinationName } : {}),
     });
   }

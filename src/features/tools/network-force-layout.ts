@@ -36,6 +36,7 @@ const repulsionCellSize = 180;
 const nodeMass: Record<NetworkVisualizerNodeKind, number> = {
   local: 4,
   interface: 2.5,
+  identity: 1.35,
   nextHop: 1,
   destination: 1,
 };
@@ -43,6 +44,7 @@ const nodeMass: Record<NetworkVisualizerNodeKind, number> = {
 const badgeRadius: Record<NetworkVisualizerNodeKind, number> = {
   local: 38,
   interface: 31,
+  identity: 27,
   nextHop: 27,
   destination: 27,
 };
@@ -50,6 +52,7 @@ const badgeRadius: Record<NetworkVisualizerNodeKind, number> = {
 const nodeAnchorStrength: Record<NetworkVisualizerNodeKind, number> = {
   local: 0,
   interface: .12,
+  identity: .1,
   nextHop: .1,
   destination: .08,
 };

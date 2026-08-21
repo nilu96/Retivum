@@ -161,6 +161,7 @@ export interface PathTableEntry {
 export interface KnownDestinationEntry {
   destinationHash: string;
   publicKey?: string;
+  identityHash?: string;
   lastAnnouncedAt?: string;
   fullDestinationName?: KnownFullDestinationName;
 }

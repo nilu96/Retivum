@@ -17,6 +17,10 @@ export interface NetworkFlowLabelPlacement {
 export interface NetworkFlowNodeData extends Record<string, unknown> {
   actionable: boolean;
   ariaLabel: string;
+  contextActionable: boolean;
+  destinationCount?: number;
+  expandable: boolean;
+  expanded: boolean;
   icon: IconName;
   interfaceType?: NetworkVisualizerNode['interfaceType'];
   interfaceState?: NetworkVisualizerNode['interfaceState'];
@@ -25,7 +29,9 @@ export interface NetworkFlowNodeData extends Record<string, unknown> {
   labelPlacement: NetworkFlowLabelPlacement;
   matched: boolean;
   onopen: (x: number, y: number, method: ContextMenuOpenMethod) => void;
+  ontoggle: () => void;
   searchActive: boolean;
+  transportNode: boolean;
 }
 
 export interface NetworkFlowEdgeData extends Record<string, unknown> {
@@ -41,6 +47,7 @@ export interface NetworkFlowAdapterOptions {
   ariaLabel: (node: NetworkVisualizerNode) => string;
   label: (node: NetworkVisualizerNode) => string;
   onopen: (node: NetworkVisualizerNode, x: number, y: number, method: ContextMenuOpenMethod) => void;
+  ontoggle?: (node: NetworkVisualizerNode) => void;
   searchActive: boolean;
 }
 
@@ -52,9 +59,14 @@ interface NodeDimensions {
 const nodeDimensions: Record<NetworkVisualizerNodeKind, NodeDimensions> = {
   local: { width: 76, height: 76 },
   interface: { width: 62, height: 62 },
+  identity: { width: 54, height: 54 },
   nextHop: { width: 54, height: 54 },
   destination: { width: 54, height: 54 },
 };
+const dimmedConnectionZIndex = 0;
+const regularNodeZIndex = 10;
+const highlightedConnectionZIndex = 20;
+const highlightedNodeZIndex = 30;
 
 function nodeLabelPlacement(node: NetworkVisualizerNode): NetworkFlowLabelPlacement {
   if (node.kind === 'local') return { x: 0, y: 58, anchor: 'middle' };
@@ -64,6 +76,8 @@ function nodeLabelPlacement(node: NetworkVisualizerNode): NetworkFlowLabelPlacem
 
 function nodeIcon(node: NetworkVisualizerNode): IconName {
   if (node.kind === 'local') return 'identity';
+  if (node.nextHopHash) return 'route';
+  if (node.kind === 'identity') return 'identity';
   if (node.kind === 'nextHop') return 'route';
   if (node.kind === 'destination') {
     if (node.fullDestinationName === 'lxmf.delivery' || node.fullDestinationName === 'lxmf.propagation') {
@@ -115,6 +129,15 @@ export function buildNetworkFlowElements(
   const nodeIds = new Set(graph.nodes.map((node) => node.id));
   const nodes = graph.nodes.map((node): RetivumFlowNode => {
     const dimensions = nodeDimensions[node.kind];
+    const contextActionable = Boolean(
+      (node.kind === 'destination' && node.destinationHash)
+      || (node.kind === 'identity' && node.publicKey)
+      || node.nextHopHash
+      || (node.kind === 'interface' && node.interfaceId)
+    );
+    const expandable = node.kind === 'identity'
+      && Boolean(node.publicKey)
+      && (node.destinationCount ?? 0) >= 2;
     return {
       id: node.id,
       type: 'network',
@@ -122,13 +145,16 @@ export function buildNetworkFlowElements(
         x: node.x - dimensions.width / 2,
         y: node.y - dimensions.height / 2,
       },
+      zIndex: options.searchActive && node.matched
+        ? highlightedNodeZIndex
+        : regularNodeZIndex,
       data: {
-        actionable: Boolean(
-          (node.kind === 'destination' && node.destinationHash)
-          || (node.kind === 'nextHop' && node.nextHopHash)
-          || (node.kind === 'interface' && node.interfaceId)
-        ),
+        actionable: contextActionable || expandable,
         ariaLabel: options.ariaLabel(node),
+        contextActionable,
+        destinationCount: node.destinationCount,
+        expandable,
+        expanded: Boolean(node.expanded),
         icon: nodeIcon(node),
         interfaceType: node.interfaceType,
         interfaceState: node.interfaceState,
@@ -137,7 +163,9 @@ export function buildNetworkFlowElements(
         labelPlacement: nodeLabelPlacement(node),
         matched: Boolean(node.matched),
         onopen: (x, y, method) => options.onopen(node, x, y, method),
+        ontoggle: () => options.ontoggle?.(node),
         searchActive: options.searchActive,
+        transportNode: Boolean(node.nextHopHash),
       },
       draggable: true,
       selectable: false,
@@ -157,7 +185,12 @@ export function buildNetworkFlowElements(
       target: edge.to,
       sourceHandle: 'source-center',
       targetHandle: 'target-center',
-      label: edge.hops && edge.hops > 2 ? String(edge.hops) : undefined,
+      zIndex: options.searchActive && edge.matched
+        ? highlightedConnectionZIndex
+        : dimmedConnectionZIndex,
+      label: edge.showHopLabel !== false && edge.hops && edge.hops >= 2
+        ? String(edge.hops)
+        : undefined,
       labelStyle: edgeLabelStyle(edge, options.searchActive),
       class: edgeClass(edge, options.searchActive),
       data: {
@@ -185,6 +218,107 @@ export function preserveNetworkFlowNodePositions(
   return nextNodes.map((node) => {
     const position = currentPositions.get(node.id);
     return position ? { ...node, position: { ...position } } : node;
+  });
+}
+
+/**
+ * Pins expanded identities while adapting their visible destination orbits to
+ * path-table updates. A newly discovered highlighted child redistributes every
+ * automatically positioned sibling around the pinned identity. Manually
+ * positioned nodes remain fixed, and unhighlighted additions do not move
+ * existing children.
+ */
+export function preserveExpandedIdentityNodePositions(
+  nextNodes: readonly RetivumFlowNode[],
+  currentNodes: readonly RetivumFlowNode[],
+  nextEdges: readonly RetivumFlowEdge[],
+  identityIds: ReadonlySet<string>,
+  additionalPinnedNodeIds: ReadonlySet<string> = new Set(),
+): RetivumFlowNode[] {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  const nextById = new Map(nextNodes.map((node) => [node.id, node]));
+  const pinnedNodeIds = new Set(additionalPinnedNodeIds);
+  const translatedChildIdentityIds = new Map<string, string>();
+
+  for (const identityId of identityIds) {
+    pinnedNodeIds.add(identityId);
+    const childIds = nextEdges
+      .filter((edge) => (
+        edge.source === identityId
+        && nextById.get(edge.target)?.data.kind === 'destination'
+      ))
+      .map((edge) => edge.target);
+    const redistributeAutomaticChildren = childIds.some((childId) => (
+      !currentById.has(childId) && nextById.get(childId)?.data.matched
+    ));
+    for (const childId of childIds) {
+      if (!currentById.has(childId) || (redistributeAutomaticChildren && !pinnedNodeIds.has(childId))) {
+        translatedChildIdentityIds.set(childId, identityId);
+      } else {
+        pinnedNodeIds.add(childId);
+      }
+    }
+  }
+
+  return nextNodes.map((node) => {
+    const current = currentById.get(node.id);
+    if (current && pinnedNodeIds.has(node.id)) {
+      return { ...node, position: { ...current.position } };
+    }
+    const identityId = translatedChildIdentityIds.get(node.id);
+    if (!identityId) return node;
+    const currentIdentity = currentById.get(identityId);
+    const nextIdentity = nextById.get(identityId);
+    if (!currentIdentity || !nextIdentity) return node;
+    return {
+      ...node,
+      position: {
+        x: node.position.x + currentIdentity.position.x - nextIdentity.position.x,
+        y: node.position.y + currentIdentity.position.y - nextIdentity.position.y,
+      },
+    };
+  });
+}
+
+/**
+ * Keeps a logical identity expansion local to all of its visible occurrences.
+ * Existing nodes stay exactly where the user currently sees them, while newly
+ * inserted destination children retain their computed orbit translated to the
+ * matching occurrence's current position. A later explicit Fit network action
+ * can still restore the complete collision-safe automatic arrangement.
+ */
+export function preserveIdentityToggleNodePositions(
+  nextNodes: readonly RetivumFlowNode[],
+  currentNodes: readonly RetivumFlowNode[],
+  nextEdges: readonly RetivumFlowEdge[],
+  identityIds: ReadonlySet<string>,
+): RetivumFlowNode[] {
+  const currentById = new Map(currentNodes.map((node) => [node.id, node]));
+  const nextById = new Map(nextNodes.map((node) => [node.id, node]));
+  const insertedChildIdentityIds = new Map<string, string>();
+  for (const identityId of identityIds) {
+    for (const edge of nextEdges) {
+      if (edge.source === identityId && !currentById.has(edge.target)) {
+        insertedChildIdentityIds.set(edge.target, identityId);
+      }
+    }
+  }
+
+  return nextNodes.map((node) => {
+    const current = currentById.get(node.id);
+    if (current) return { ...node, position: { ...current.position } };
+    const identityId = insertedChildIdentityIds.get(node.id);
+    if (!identityId) return node;
+    const currentIdentity = currentById.get(identityId);
+    const nextIdentity = nextById.get(identityId);
+    if (!currentIdentity || !nextIdentity) return node;
+    return {
+      ...node,
+      position: {
+        x: node.position.x + currentIdentity.position.x - nextIdentity.position.x,
+        y: node.position.y + currentIdentity.position.y - nextIdentity.position.y,
+      },
+    };
   });
 }
 
