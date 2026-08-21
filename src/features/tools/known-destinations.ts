@@ -39,6 +39,7 @@ export interface KnownDestinationPresentation {
 export interface KnownDestinationGroup {
   id: string;
   publicKey?: string;
+  identityHash?: string;
   entries: KnownDestinationEntry[];
 }
 
@@ -61,10 +62,14 @@ export function groupKnownDestinationsByIdentity(
   for (const entry of sorted) {
     const id = entry.publicKey ? `identity:${entry.publicKey}` : `destination:${entry.destinationHash}`;
     const current = groups.get(id);
-    if (current) current.entries.push(entry);
+    if (current) {
+      current.entries.push(entry);
+      current.identityHash ??= entry.identityHash;
+    }
     else groups.set(id, {
       id,
       publicKey: entry.publicKey,
+      identityHash: entry.identityHash,
       entries: [entry],
     });
   }

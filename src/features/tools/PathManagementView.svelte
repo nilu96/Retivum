@@ -68,7 +68,7 @@
     local: boolean;
     identityGroupStart: boolean;
     identityGroupCount: number;
-    identityPublicKey?: string;
+    identityHash?: string;
     identityGroupPosition?: 'first' | 'middle' | 'last';
     localSectionStart: boolean;
   }
@@ -147,7 +147,7 @@
         local: false,
         identityGroupStart: grouped && index === 0,
         identityGroupCount: group.entries.length,
-        identityPublicKey: group.publicKey,
+        identityHash: group.identityHash,
         identityGroupPosition: grouped
           ? index === 0
             ? 'first' as const
@@ -163,7 +163,7 @@
       local: true,
       identityGroupStart: false,
       identityGroupCount: 1,
-      identityPublicKey: undefined,
+      identityHash: undefined,
       identityGroupPosition: undefined,
       localSectionStart: index === 0,
     })),
@@ -271,10 +271,6 @@
   function interfaceType(interfaceId: string | undefined): string {
     const type = $statusDetails?.interfaces.find((item) => item.id === interfaceId)?.type;
     return type ? $t(`status.interface.type.${type}`) : $t('pathManagement.entry.unknown');
-  }
-
-  function shortPublicKey(value: string): string {
-    return `${value.slice(0, 12)}…${value.slice(-8)}`;
   }
 
   function applicationLabel(application: KnownDestinationApplication): string {
@@ -687,10 +683,10 @@
             {#each displayedKnownDestinations as row (row.entry.destinationHash)}
               {@const entry = row.entry}
               {@const presentation = destinationPresentations.get(entry.destinationHash)}
-              {#if row.identityGroupStart && row.identityPublicKey}
+              {#if row.identityGroupStart}
                 <li class="known-destination-section-heading identity-group">
                   <span>{$t('pathManagement.destination.identityGroup', { count: row.identityGroupCount })}</span>
-                  <code>{shortPublicKey(row.identityPublicKey)}</code>
+                  <code>{row.identityHash ?? $t('pathManagement.entry.unknown')}</code>
                 </li>
               {/if}
               {#if row.localSectionStart}

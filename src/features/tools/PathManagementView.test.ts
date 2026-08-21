@@ -1035,6 +1035,7 @@ describe('PathManagementView', () => {
 
   it('sorts by last announce, groups shared identities, and separates local destinations', async () => {
     const sharedPublicKey = 'a'.repeat(128);
+    const sharedIdentityHash = 'c'.repeat(32);
     const newestDestination = '5'.repeat(32);
     const groupedDestination = '6'.repeat(32);
     const localPropagationDestination = 'e'.repeat(32);
@@ -1043,6 +1044,7 @@ describe('PathManagementView', () => {
       {
         destinationHash: knownDestination,
         publicKey: sharedPublicKey,
+        identityHash: sharedIdentityHash,
         lastAnnouncedAt: '2026-07-21T10:00:00.000Z',
       },
       {
@@ -1053,6 +1055,7 @@ describe('PathManagementView', () => {
       {
         destinationHash: groupedDestination,
         publicKey: sharedPublicKey,
+        identityHash: sharedIdentityHash,
         lastAnnouncedAt: '2026-07-22T10:00:00.000Z',
       },
     ], [
@@ -1100,7 +1103,7 @@ describe('PathManagementView', () => {
     await fireEvent.click(screen.getByLabelText('Group by identity'));
     const identityGroupHeading = screen.getByText('Shared identity (2)').closest('li');
     expect(identityGroupHeading).toHaveClass('known-destination-section-heading', 'identity-group');
-    expect(identityGroupHeading?.querySelector('code')).toHaveTextContent('aaaaaaaaaaaa…aaaaaaaa');
+    expect(identityGroupHeading?.querySelector('code')).toHaveTextContent(sharedIdentityHash);
     expect(screen.getByText('Local destinations')).toBeInTheDocument();
     expect(screen.getByText(groupedDestination).closest('li'))
       .toHaveClass('identity-group-entry', 'identity-group-entry-first');

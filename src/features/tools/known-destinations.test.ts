@@ -141,6 +141,7 @@ describe('knownDestinationPresentations', () => {
       {
         destinationHash: '1'.repeat(32),
         publicKey: sharedPublicKey,
+        identityHash: 'c'.repeat(32),
         lastAnnouncedAt: '2026-07-21T10:00:00.000Z',
       },
       {
@@ -151,6 +152,7 @@ describe('knownDestinationPresentations', () => {
       {
         destinationHash: '3'.repeat(32),
         publicKey: sharedPublicKey,
+        identityHash: 'c'.repeat(32),
         lastAnnouncedAt: '2026-07-22T10:00:00.000Z',
       },
     ], true);
@@ -159,5 +161,6 @@ describe('knownDestinationPresentations', () => {
       ['2'.repeat(32)],
       ['3'.repeat(32), '1'.repeat(32)],
     ]);
+    expect(groups[1]?.identityHash).toBe('c'.repeat(32));
   });
 });
