@@ -304,6 +304,18 @@
     else toast.error('common.copyFailed');
   }
 
+  function identityHashForDestination(destination: string): string | undefined {
+    return $remoteDestinationInventory.find((entry) => (
+      entry.destinationHash === destination
+    ))?.identityHash;
+  }
+
+  async function copyIdentityHash(identityHash: string): Promise<void> {
+    entryActions = undefined;
+    if (await copyText(identityHash)) toast.success('common.copied');
+    else toast.error('common.copyFailed');
+  }
+
   function probeDestination(destination: string): void {
     const presentation = destinationPresentations.get(destination);
     if (!presentation?.fullDestinationName) return;
@@ -821,6 +833,7 @@
 
 {#if entryActions}
   {@const actions = entryActions}
+  {@const identityHash = identityHashForDestination(actions.destinationHash)}
   <ContextMenu
     x={actions.x}
     y={actions.y}
@@ -835,6 +848,13 @@
       onclick={() => { void copyDestinationHash(actions.destinationHash); }}
     >
       <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      disabled={!identityHash}
+      onclick={() => { if (identityHash) void copyIdentityHash(identityHash); }}
+    >
+      <Icon name="copy" size={17} />{$t('pathManagement.contextMenu.copyIdentityHash')}
     </button>
     <button
       role="menuitem"

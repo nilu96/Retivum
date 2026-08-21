@@ -845,6 +845,7 @@ describe('PathManagementView', () => {
         .toHaveAttribute('aria-haspopup', 'menu');
       await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
       expect(screen.getByRole('menuitem', { name: 'Show known destination' })).toBeDisabled();
+      expect(screen.getByRole('menuitem', { name: 'Copy identity hash' })).toBeDisabled();
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenLastCalledWith(pathDestination);
 
@@ -857,6 +858,46 @@ describe('PathManagementView', () => {
       expect(screen.getByRole('menuitem', { name: 'Show path' })).toBeDisabled();
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenLastCalledWith(knownDestination);
+    } finally {
+      if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+  });
+
+  it('copies the verified identity hash from path and known-destination actions', async () => {
+    const identityHash = '9'.repeat(32);
+    const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    pathTableEntries.set([{
+      destinationHash: knownDestination,
+      hops: 2,
+      nextHop: '3'.repeat(32),
+      interfaceId: 'interface-1',
+    }]);
+    setInventories([{
+      destinationHash: knownDestination,
+      identityHash,
+      publicKey: '4'.repeat(128),
+      lastAnnouncedAt: '2026-07-23T10:00:00.000Z',
+    }]);
+
+    try {
+      render(PathManagementView);
+      const pathEntry = screen.getByText(knownDestination).closest('li');
+      await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy identity hash' }));
+      expect(writeText).toHaveBeenLastCalledWith(identityHash);
+
+      await fireEvent.click(screen.getByRole('tab', { name: /Known destinations/ }));
+      const destinationEntry = screen.getByText(knownDestination).closest('li');
+      await fireEvent.contextMenu(destinationEntry!, { clientX: 120, clientY: 120 });
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy identity hash' }));
+      expect(writeText).toHaveBeenLastCalledWith(identityHash);
+      expect(writeText).toHaveBeenCalledTimes(2);
     } finally {
       if (clipboardDescriptor) Object.defineProperty(navigator, 'clipboard', clipboardDescriptor);
       else Reflect.deleteProperty(navigator, 'clipboard');
@@ -898,6 +939,7 @@ describe('PathManagementView', () => {
     await fireEvent.contextMenu(pathEntry!, { clientX: 100, clientY: 100 });
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
       'Copy destination hash',
+      'Copy identity hash',
       'Show known destination',
       'Probe destination',
     ]);
