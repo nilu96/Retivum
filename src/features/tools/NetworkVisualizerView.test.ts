@@ -19,6 +19,7 @@ import { clearProbeHistory } from '../../infrastructure/reticulum/probe-history'
 import { clearDestinationPathRequestCooldowns } from '../../infrastructure/reticulum/path-request-operations';
 import { clearToasts } from '../../lib/notifications/toasts';
 import NetworkVisualizerView from './NetworkVisualizerView.svelte';
+import { resetNetworkVisualizerRuntimeSettings } from './network-visualizer-runtime-settings';
 
 const destinationHash = 'a'.repeat(32);
 const nextHopHash = 'b'.repeat(32);
@@ -68,6 +69,7 @@ describe('NetworkVisualizerView', () => {
     clearProbeHistory();
     clearDestinationPathRequestCooldowns();
     clearToasts();
+    resetNetworkVisualizerRuntimeSettings();
     activeIdentity.set({
       id: 'identity-1',
       displayName: 'Nora',
@@ -888,6 +890,19 @@ describe('NetworkVisualizerView', () => {
 
     await fireEvent.blur(maximumHops);
     expect(maximumHops).toHaveValue(5);
+  });
+
+  it('keeps grouping and maximum hops when the tool is closed and reopened', async () => {
+    const firstView = render(NetworkVisualizerView);
+
+    await fireEvent.input(screen.getByLabelText('Maximum hops'), { target: { value: '2' } });
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    firstView.unmount();
+
+    render(NetworkVisualizerView);
+
+    expect(screen.getByLabelText('Maximum hops')).toHaveValue(2);
+    expect(screen.getByRole('checkbox', { name: 'Group by identity' })).toBeChecked();
   });
 
   it('uses Svelte Flow for pan, wheel, pinch and resetting the arrangement', async () => {

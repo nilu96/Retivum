@@ -49,6 +49,11 @@
   import NetworkFlowNode from './NetworkFlowNode.svelte';
   import NetworkFlowFitControl from './NetworkFlowFitControl.svelte';
   import {
+    defaultNetworkVisualizerMaximumHops,
+    networkVisualizerGroupByIdentity,
+    networkVisualizerMaximumHops,
+  } from './network-visualizer-runtime-settings';
+  import {
     buildNetworkVisualizerGraph,
     type NetworkVisualizerNode,
   } from './network-visualizer';
@@ -118,14 +123,11 @@
     displayName: string;
   }
 
-  const defaultMaximumHops = 5;
   const minimumGraphZoom = .05;
   const identityToggleDurationMs = 240;
   const settingsRepository = new BrowserSettingsRepository();
 
   let search = $state('');
-  let maximumHops = $state<number | undefined>(defaultMaximumHops);
-  let groupByIdentity = $state(false);
   let expandedIdentityPublicKeys = $state.raw<ReadonlySet<string>>(new Set());
   let destinationActions = $state<DestinationActions>();
   let identityActions = $state<IdentityActions>();
@@ -197,8 +199,8 @@
     destinationInventory: $remoteDestinationInventory,
     contacts: $chatContacts,
     search,
-    maximumHops,
-    groupByIdentity,
+    maximumHops: $networkVisualizerMaximumHops,
+    groupByIdentity: $networkVisualizerGroupByIdentity,
     expandedIdentityPublicKeys,
   }));
   const interfaceCount = $derived(graph.nodes.filter((node) => node.kind === 'interface').length);
@@ -208,7 +210,8 @@
     searchActive || graph.nodes.some((node) => node.kind === 'identity' && node.expanded),
   );
   const routeFilterActive = $derived(
-    maximumHops !== undefined && $pathTableEntries.some((path) => path.hops > maximumHops!),
+    $networkVisualizerMaximumHops !== undefined
+      && $pathTableEntries.some((path) => path.hops > $networkVisualizerMaximumHops!),
   );
   const initialFitReady = $derived($pathTableReady || $runtimeStatus === 'error');
   const layoutRevision = $derived(graph.nodes.map((node) => (
@@ -326,13 +329,15 @@
 
   function setMaximumHops(value: string): void {
     const parsed = Number(value);
-    maximumHops = value === '' || !Number.isFinite(parsed)
+    networkVisualizerMaximumHops.set(value === '' || !Number.isFinite(parsed)
       ? undefined
-      : Math.max(1, Math.min(128, Math.round(parsed)));
+      : Math.max(1, Math.min(128, Math.round(parsed))));
   }
 
   function restoreDefaultMaximumHops(): void {
-    if (maximumHops === undefined) maximumHops = defaultMaximumHops;
+    if ($networkVisualizerMaximumHops === undefined) {
+      networkVisualizerMaximumHops.set(defaultNetworkVisualizerMaximumHops);
+    }
   }
 
   function resetArrangement(): void {
@@ -630,7 +635,7 @@
     manuallyPositionedNodeIds.clear();
     pendingIdentityCollapseAll = false;
     expandedIdentityPublicKeys = new Set();
-    groupByIdentity = enabled;
+    networkVisualizerGroupByIdentity.set(enabled);
   }
 
   function toggleIdentityGroup(node: NetworkVisualizerNode): void {
@@ -1035,7 +1040,7 @@
             max="128"
             step="1"
             inputmode="numeric"
-            value={maximumHops ?? ''}
+            value={$networkVisualizerMaximumHops ?? ''}
             oninput={(event) => setMaximumHops(event.currentTarget.value)}
             onblur={restoreDefaultMaximumHops}
           />
@@ -1043,7 +1048,7 @@
         <label class="network-visualizer-identity-filter">
           <input
             type="checkbox"
-            checked={groupByIdentity}
+            checked={$networkVisualizerGroupByIdentity}
             onchange={(event) => setGroupByIdentity(event.currentTarget.checked)}
             aria-label={$t('networkVisualizer.groupByIdentity')}
           />
