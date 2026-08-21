@@ -710,7 +710,6 @@
   "networkVisualizer.node.identityAria": "Identity: {name}. Open identity actions.",
   "networkVisualizer.node.identityTransportAria": "Transport identity: {name}. Open transport-node actions.",
   "networkVisualizer.node.identityGroupAria": "Identity: {name}. {count} destinations, {state}. Activate to toggle destinations; open the context menu for identity actions.",
-  "networkVisualizer.node.identityGroupTransportAria": "Transport identity: {name}. {count} destinations, {state}. Activate to toggle destinations; open the context menu for transport-node actions.",
   "networkVisualizer.node.groupExpanded": "expanded",
   "networkVisualizer.node.groupCollapsed": "collapsed",
   "networkVisualizer.node.nextHopAria": "Transport node: {name}. Open transport-node actions.",

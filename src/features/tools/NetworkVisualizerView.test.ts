@@ -529,6 +529,9 @@ describe('NetworkVisualizerView', () => {
     const transportIdentity = await screen.findByRole('button', {
       name: `Transport identity: ${nextHopHash.slice(0, 8)}…${nextHopHash.slice(-6)}. Open transport-node actions.`,
     });
+    expect(transportIdentity).not.toHaveAttribute('aria-expanded');
+    expect(transportIdentity.querySelector('.network-flow-count')).not.toBeInTheDocument();
+    expect(screen.getByText('Field station')).toBeInTheDocument();
     await fireEvent.contextMenu(transportIdentity, { clientX: 140, clientY: 180 });
 
     expect(screen.getByRole('menu', { name: 'Transport-node actions' })).toBeInTheDocument();
@@ -536,6 +539,149 @@ describe('NetworkVisualizerView', () => {
     expect(screen.getByRole('menuitem', { name: 'Probe transport node' })).toBeInTheDocument();
     expect(screen.getByRole('menuitem', { name: 'Drop all paths via transport node' }))
       .toBeInTheDocument();
+  });
+
+  it('renders another occurrence of a transport identity as an expandable identity', async () => {
+    const secondInterface: InterfaceConfig = {
+      ...websocket,
+      id: 'websocket-2',
+      name: 'Field relay',
+    };
+    const routedIdentityDestinationHash = 'e'.repeat(32);
+    const routedViaHash = '7'.repeat(32);
+    const transportIdentityDestinationHashes = ['8'.repeat(32), '9'.repeat(32)];
+    const publicKey = 'f'.repeat(128);
+    interfaceConfigurations.set([websocket, secondInterface]);
+    interfaceStatuses.set({
+      [websocket.id]: 'online',
+      [secondInterface.id]: 'online',
+    });
+    pathTableEntries.set([
+      { destinationHash, nextHop: nextHopHash, interfaceId: websocket.id, hops: 3 },
+      {
+        destinationHash: routedIdentityDestinationHash,
+        nextHop: routedViaHash,
+        interfaceId: secondInterface.id,
+        hops: 2,
+      },
+      ...transportIdentityDestinationHashes.map((identityDestinationHash) => ({
+        destinationHash: identityDestinationHash,
+        interfaceId: websocket.id,
+        hops: 1,
+      })),
+    ]);
+    remoteDestinationInventory.set([
+      routedIdentityDestinationHash,
+      ...transportIdentityDestinationHashes,
+    ].map((identityDestinationHash) => ({
+      destinationHash: identityDestinationHash,
+      publicKey,
+      identityHash: nextHopHash,
+    })));
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      {
+        destinationHash: routedIdentityDestinationHash,
+        displayName: 'Workshop',
+        fullDestinationName: 'lxmf.delivery',
+      },
+      {
+        destinationHash: transportIdentityDestinationHashes[0],
+        displayName: 'Local delivery',
+        fullDestinationName: 'lxmf.delivery',
+      },
+      {
+        destinationHash: transportIdentityDestinationHashes[1],
+        displayName: 'Local NomadNet',
+        fullDestinationName: 'nomadnetwork.node',
+      },
+    ]);
+    render(NetworkVisualizerView);
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    const transportOccurrence = await screen.findByRole('button', {
+      name: `Transport identity: ${nextHopHash.slice(0, 8)}…${nextHopHash.slice(-6)}. Open transport-node actions.`,
+    });
+    const identityOccurrence = screen.getByRole('button', {
+      name: `Identity: ${nextHopHash.slice(0, 8)}…${nextHopHash.slice(-6)}. 3 destinations, collapsed. Activate to toggle destinations; open the context menu for identity actions.`,
+    });
+
+    expect(transportOccurrence).toHaveClass('next-hop');
+    expect(transportOccurrence).not.toHaveAttribute('aria-expanded');
+    expect(transportOccurrence.querySelector('.network-flow-count')).not.toBeInTheDocument();
+    expect(identityOccurrence).toHaveClass('identity');
+    expect(identityOccurrence).not.toHaveClass('next-hop');
+    expect(identityOccurrence).toHaveAttribute('aria-expanded', 'false');
+    expect(identityOccurrence).toHaveTextContent('3');
+    expect(screen.getByText('Field station')).toBeInTheDocument();
+    expect(screen.getByText('Local delivery')).toBeInTheDocument();
+    expect(screen.getByText('Local NomadNet')).toBeInTheDocument();
+    expect(screen.queryByText('Workshop')).not.toBeInTheDocument();
+
+    await fireEvent.click(identityOccurrence);
+
+    expect(await screen.findByText('Workshop')).toBeInTheDocument();
+    expect(screen.getByText('Field station')).toBeInTheDocument();
+    expect(screen.getByText('Local delivery')).toBeInTheDocument();
+    expect(screen.getByText('Local NomadNet')).toBeInTheDocument();
+    const expandedIdentityOccurrence = screen.getByRole('button', {
+      name: /3 destinations, expanded/,
+    });
+    expect(expandedIdentityOccurrence)
+      .toHaveAttribute('aria-expanded', 'true');
+
+    await fireEvent.click(expandedIdentityOccurrence);
+
+    await waitFor(() => expect(screen.queryByText('Workshop')).not.toBeInTheDocument());
+    expect(screen.getByText('Field station')).toBeInTheDocument();
+    expect(screen.getByText('Local delivery')).toBeInTheDocument();
+    expect(screen.getByText('Local NomadNet')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /3 destinations, collapsed/ }))
+      .toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('renders a known transport identity directly below every interface as transport', async () => {
+    const secondInterface: InterfaceConfig = {
+      ...websocket,
+      id: 'websocket-2',
+      name: 'Field relay',
+    };
+    const ownedDestinationHash = 'e'.repeat(32);
+    const publicKey = 'f'.repeat(128);
+    interfaceConfigurations.set([websocket, secondInterface]);
+    interfaceStatuses.set({
+      [websocket.id]: 'online',
+      [secondInterface.id]: 'online',
+    });
+    pathTableEntries.set([
+      { destinationHash, nextHop: nextHopHash, interfaceId: websocket.id, hops: 3 },
+      { destinationHash: ownedDestinationHash, interfaceId: secondInterface.id, hops: 1 },
+    ]);
+    remoteDestinationInventory.set([{
+      destinationHash: ownedDestinationHash,
+      publicKey,
+      identityHash: nextHopHash,
+    }]);
+    knownDestinations.set([
+      { destinationHash, displayName: 'Field station', fullDestinationName: 'nomadnetwork.node' },
+      { destinationHash: ownedDestinationHash, displayName: 'Workshop', fullDestinationName: 'lxmf.delivery' },
+    ]);
+    render(NetworkVisualizerView);
+
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Group by identity' }));
+    const transportOccurrences = await screen.findAllByRole('button', {
+      name: `Transport identity: ${nextHopHash.slice(0, 8)}…${nextHopHash.slice(-6)}. Open transport-node actions.`,
+    });
+
+    expect(transportOccurrences).toHaveLength(2);
+    expect(transportOccurrences.every((node) => node.classList.contains('next-hop'))).toBe(true);
+    expect(transportOccurrences.every((node) => !node.hasAttribute('aria-expanded'))).toBe(true);
+    expect(transportOccurrences.every((node) => (
+      node.querySelector('.network-flow-count') === null
+    ))).toBe(true);
+    expect(screen.getByText('Field station')).toBeInTheDocument();
+    expect(screen.getByText('Workshop')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /One destination/ })).not.toBeInTheDocument();
   });
 
   it('probes a destination from the shared destination action', async () => {

@@ -413,6 +413,7 @@
     const expandedIdentityNodeIds = new Set(graph.nodes
       .filter((node) => (
         node.kind === 'identity'
+        && node.destinationCount !== undefined
         && Boolean(node.publicKey && expandedIdentityPublicKeys.has(node.publicKey))
       ))
       .map((node) => node.id));
@@ -485,7 +486,11 @@
 
   function identityNodeIdsForPublicKey(publicKey: string): Set<string> {
     return new Set(graph.nodes
-      .filter((node) => node.kind === 'identity' && node.publicKey === publicKey)
+      .filter((node) => (
+        node.kind === 'identity'
+        && node.destinationCount !== undefined
+        && node.publicKey === publicKey
+      ))
       .map((node) => node.id));
   }
 
@@ -525,6 +530,7 @@
     const identityIds = new Set(graph.nodes
       .filter((node) => (
         node.kind === 'identity'
+        && node.destinationCount !== undefined
         && Boolean(node.publicKey && expandedIdentityPublicKeys.has(node.publicKey))
       ))
       .map((node) => node.id));
@@ -607,9 +613,7 @@
     }
     if (node.kind === 'identity') {
       if (node.destinationCount !== undefined) {
-        return $t(node.nextHopHash
-          ? 'networkVisualizer.node.identityGroupTransportAria'
-          : 'networkVisualizer.node.identityGroupAria', {
+        return $t('networkVisualizer.node.identityGroupAria', {
           name: nodeLabel(node),
           count: node.destinationCount,
           state: $t(node.expanded

@@ -707,8 +707,11 @@ function mergeGroupedEdges(edges: readonly NetworkVisualizerEdge[]): NetworkVisu
  * Projects one logical identity into each distinct ingress branch used by its
  * visible destinations. Expansion remains public-key scoped, while every
  * occurrence owns only the child destinations reached through its interface
- * and immediate transport path. This preserves a recursive tree layout without
- * losing the fact that one identity can be reachable through several paths.
+ * and immediate transport path. An occurrence which replaces a real next-hop
+ * node remains an always-expanded transport node; other occurrences of the
+ * same public identity remain ordinary collapsible identities. This preserves
+ * a recursive tree layout without conflating an identity's roles on different
+ * paths.
  */
 function groupNetworkVisualizerIdentities(
   sourceNodes: readonly NetworkVisualizerNode[],
@@ -768,12 +771,6 @@ function groupNetworkVisualizerIdentities(
       ? nodes.filter((node) => node.nextHopHash === group.identityHash)
       : [];
     if (destinationIds.length < 2 && transportNodes.length === 0) continue;
-    const transportIdentityHash = transportNodes.length > 0
-      ? group.identityHash
-      : undefined;
-
-    const destinationGroup = destinationIds.length >= 2;
-    const expanded = !destinationGroup || expandedIdentityPublicKeys.has(group.publicKey);
     const transportNodeIds = new Set(transportNodes.map((node) => node.id));
     const nodesById = new Map(nodes.map((node) => [node.id, node]));
     const destinationNodesById = new Map(destinationIds.flatMap((destinationId) => {
@@ -811,23 +808,35 @@ function groupNetworkVisualizerIdentities(
     const occurrences = Array.from(occurrencesByIngressId.values()).sort((left, right) => (
       left.ingressId.localeCompare(right.ingressId)
     ));
+    const isTransportOccurrence = (occurrence: VisualizerIdentityOccurrence): boolean => (
+      occurrence.transportNodes.length > 0
+      || (transportNodes.length > 0 && occurrence.ingressId.startsWith('interface:'))
+    );
+    const groupedDestinationIdSet = new Set(occurrences.flatMap((occurrence) => (
+      destinationIds.length >= 2 || isTransportOccurrence(occurrence)
+        ? Array.from(occurrence.destinationIds)
+        : []
+    )));
     const occurrenceIdByTransportNodeId = new Map(occurrences.flatMap((occurrence) => (
       occurrence.transportNodes.map((transportNode) => [transportNode.id, occurrence.id] as const)
     )));
     const occurrenceIdByDestinationId = new Map(occurrences.flatMap((occurrence) => (
-      Array.from(occurrence.destinationIds, (destinationId) => [destinationId, occurrence.id] as const)
+      Array.from(occurrence.destinationIds)
+        .filter((destinationId) => groupedDestinationIdSet.has(destinationId))
+        .map((destinationId) => [destinationId, occurrence.id] as const)
     )));
     const remapTransportNodeId = (nodeId: string): string => (
       occurrenceIdByTransportNodeId.get(nodeId) ?? nodeId
     );
-    const destinationIdSet = new Set(destinationIds);
     const mappedEdges = edges.map((edge) => ({
       ...edge,
       from: remapTransportNodeId(edge.from),
       to: remapTransportNodeId(edge.to),
     }));
-    const incomingDestinationEdges = mappedEdges.filter((edge) => destinationIdSet.has(edge.to));
-    edges = mappedEdges.filter((edge) => !destinationIdSet.has(edge.to));
+    const incomingDestinationEdges = mappedEdges.filter((edge) => (
+      groupedDestinationIdSet.has(edge.to)
+    ));
+    edges = mappedEdges.filter((edge) => !groupedDestinationIdSet.has(edge.to));
     for (const incoming of incomingDestinationEdges) {
       const occurrenceId = occurrenceIdByDestinationId.get(incoming.to);
       if (!occurrenceId || incoming.from === occurrenceId) continue;
@@ -846,16 +855,22 @@ function groupNetworkVisualizerIdentities(
     );
     nodes = nodes.filter((node) => (
       !transportNodeIds.has(node.id)
-      && !destinationIdSet.has(node.id)
+      && !groupedDestinationIdSet.has(node.id)
     ));
     for (const occurrence of occurrences) {
       const incomingSourceIds = Array.from(new Set(edges
         .filter((edge) => edge.to === occurrence.id)
         .map((edge) => edge.from)
         .filter((nodeId) => nodeId !== occurrence.id)));
-      const occurrenceDestinationIds = Array.from(occurrence.destinationIds).sort((left, right) => (
-        left.localeCompare(right)
-      ));
+      const occurrenceDestinationIds = Array.from(occurrence.destinationIds)
+        .filter((destinationId) => groupedDestinationIdSet.has(destinationId))
+        .sort((left, right) => left.localeCompare(right));
+      const transportOccurrence = isTransportOccurrence(occurrence);
+      const identityOccurrence = !transportOccurrence && occurrenceDestinationIds.length > 0;
+      if (!transportOccurrence && !identityOccurrence) continue;
+      const occurrenceExpanded = transportOccurrence
+        || !identityOccurrence
+        || expandedIdentityPublicKeys.has(group.publicKey);
       const sourcePosition = averageNodePosition(incomingSourceIds, nodesById);
       const destinationPosition = averageNodePosition(occurrenceDestinationIds, nodesById);
       const transportPosition = averageNodePosition(
@@ -883,7 +898,7 @@ function groupNetworkVisualizerIdentities(
           : destinationPosition ?? pointOnCircle(outwardAngle, children.radius + 145));
       const identityMatches = Boolean(highlightActive && (
         identityQueryMatches
-        || (destinationGroup && expanded && query.length === 0)
+        || (identityOccurrence && occurrenceExpanded && query.length === 0)
         || occurrence.routes.some((route) => matchedDestinationIds.has(
           `destination:${route.path.destinationHash}`,
         ))
@@ -895,18 +910,18 @@ function groupNetworkVisualizerIdentities(
         label: identityLabel,
         publicKey: group.publicKey,
         identityHash: group.identityHash,
-        ...(transportIdentityHash
-          ? { nextHopHash: transportIdentityHash }
+        ...(transportOccurrence && group.identityHash
+          ? { nextHopHash: group.identityHash }
           : {}),
-        ...(destinationGroup ? {
+        ...(identityOccurrence ? {
           destinationCount: destinationIds.length,
-          expanded,
+          expanded: occurrenceExpanded,
         } : {}),
         x: identityPosition.x,
         y: identityPosition.y,
         matched: identityMatches,
       });
-      if (!expanded) continue;
+      if (!occurrenceExpanded) continue;
       for (const [index, destinationId] of occurrenceDestinationIds.entries()) {
         const destination = destinationNodesById.get(destinationId);
         if (!destination) continue;
@@ -1024,6 +1039,19 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
   const query = input.search?.trim().toLowerCase() ?? '';
   const pathLimit = Math.max(1, input.pathLimit ?? networkVisualizerPathLimit);
   const knownDestinationHashesByPublicKey = new Map<string, Set<string>>();
+  const identityHashByPublicKey = new Map(inventory.flatMap((entry) => (
+    entry.publicKey && entry.identityHash
+      ? [[entry.publicKey, entry.identityHash] as const]
+      : []
+  )));
+  const publicKeyHasTransportPath = (
+    publicKey: string,
+    paths: readonly VisualizerPath[],
+  ): boolean => {
+    const identityHash = identityHashByPublicKey.get(publicKey);
+    return identityHash !== undefined
+      && paths.some((entry) => entry.path.nextHop === identityHash);
+  };
   for (const entry of preparedPaths) {
     if (!entry.publicKey) continue;
     const hashes = knownDestinationHashesByPublicKey.get(entry.publicKey) ?? new Set<string>();
@@ -1033,6 +1061,7 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
   const requestedExpandedIdentityPublicKeys = new Set(input.groupByIdentity
     ? Array.from(input.expandedIdentityPublicKeys ?? []).filter((publicKey) => (
       (knownDestinationHashesByPublicKey.get(publicKey)?.size ?? 0) >= 2
+      || publicKeyHasTransportPath(publicKey, preparedPaths)
     ))
     : []);
   const localMatches = query.length > 0 && [
@@ -1068,7 +1097,10 @@ export function buildNetworkVisualizerGraph(input: NetworkVisualizerInput): Netw
     visibleDestinationHashesByPublicKey.set(entry.publicKey, hashes);
   }
   const expandedIdentityPublicKeys = new Set(Array.from(requestedExpandedIdentityPublicKeys)
-    .filter((publicKey) => (visibleDestinationHashesByPublicKey.get(publicKey)?.size ?? 0) >= 2));
+    .filter((publicKey) => (
+      (visibleDestinationHashesByPublicKey.get(publicKey)?.size ?? 0) >= 2
+      || publicKeyHasTransportPath(publicKey, visiblePaths)
+    )));
   const identityHighlightActive = query.length === 0 && expandedIdentityPublicKeys.size > 0;
   const highlightActive = query.length > 0 || identityHighlightActive;
   const identityMatchesPath = (entry: VisualizerPath): boolean => (
