@@ -17,6 +17,7 @@
   } from './features/onboarding/onboarding';
   import ProbeView from './features/tools/ProbeView.svelte';
   import PathManagementView from './features/tools/PathManagementView.svelte';
+  import DestinationHashView from './features/tools/DestinationHashView.svelte';
   import NetworkVisualizerView from './features/tools/NetworkVisualizerView.svelte';
   import DevicePicker from './lib/components/DevicePicker.svelte';
   import DesktopBluetoothPairing from './lib/components/DesktopBluetoothPairing.svelte';
@@ -110,6 +111,8 @@
       <ProbeView />
     {:else if $route === 'path-management'}
       <PathManagementView />
+    {:else if $route === 'destination-hash'}
+      <DestinationHashView />
     {:else if $route === 'network-visualizer'}
       <NetworkVisualizerView />
     {:else if $route === 'status'}

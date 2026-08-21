@@ -1,18 +1,19 @@
 import { writable } from 'svelte/store';
 
-export type AppRoute = 'chat' | 'nomadnet' | 'tools' | 'settings' | 'logs' | 'path-management' | 'network-visualizer' | 'provisioning' | 'rnode-maintenance' | 'probe' | 'status';
+export type AppRoute = 'chat' | 'nomadnet' | 'tools' | 'settings' | 'logs' | 'path-management' | 'destination-hash' | 'network-visualizer' | 'provisioning' | 'rnode-maintenance' | 'probe' | 'status';
 export type AppNavigationLayer = {
   kind: 'chatConversation';
   destinationHash: string;
 };
 
 const defaultRoute: AppRoute = 'chat';
-const knownRoutes = new Set<AppRoute>(['chat', 'nomadnet', 'tools', 'settings', 'logs', 'path-management', 'network-visualizer', 'provisioning', 'rnode-maintenance', 'probe', 'status']);
+const knownRoutes = new Set<AppRoute>(['chat', 'nomadnet', 'tools', 'settings', 'logs', 'path-management', 'destination-hash', 'network-visualizer', 'provisioning', 'rnode-maintenance', 'probe', 'status']);
 const navigationStateKey = 'retivumNavigation';
 const navigationStateVersion = 1;
 const logicalParentRoutes: Partial<Record<AppRoute, AppRoute>> = {
   logs: 'tools',
   'path-management': 'tools',
+  'destination-hash': 'tools',
   'network-visualizer': 'tools',
   provisioning: 'tools',
   'rnode-maintenance': 'tools',

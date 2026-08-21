@@ -5,7 +5,7 @@
   import Icon, { type IconName } from '../../lib/components/Icon.svelte';
 
   interface ToolDefinition {
-    id: 'provisioning' | 'rnodeMaintenance' | 'logs' | 'pathTable' | 'networkVisualizer' | 'probe' | 'status';
+    id: 'provisioning' | 'rnodeMaintenance' | 'logs' | 'pathTable' | 'destinationHash' | 'networkVisualizer' | 'probe' | 'status';
     title: MessageKey;
     description: MessageKey;
     icon: IconName;
@@ -63,6 +63,14 @@
       icon: 'radio',
       available: true,
       route: 'provisioning',
+    },
+    {
+      id: 'destinationHash',
+      title: 'tools.destinationHash.title',
+      description: 'tools.destinationHash.description',
+      icon: 'fingerprint',
+      available: true,
+      route: 'destination-hash',
     },
     {
       id: 'logs',

@@ -10,6 +10,7 @@ describe('ToolsView', () => {
     expect(screen.getByRole('heading', { name: 'Network visualizer' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Reticulum logs' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Path management' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Destination hash generator' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Probing' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Status details' })).toBeInTheDocument();
     expect(screen.queryByText('Coming soon')).not.toBeInTheDocument();
@@ -19,6 +20,7 @@ describe('ToolsView', () => {
       'Status details',
       'Probing',
       'Remote provisioning',
+      'Destination hash generator',
       'Reticulum logs',
     ]);
   });
@@ -63,5 +65,12 @@ describe('ToolsView', () => {
 
     await fireEvent.click(screen.getByRole('button', { name: /Path management/ }));
     expect(window.location.hash).toBe('#/path-management');
+  });
+
+  it('opens the destination hash generator', async () => {
+    render(ToolsView);
+
+    await fireEvent.click(screen.getByRole('button', { name: /Destination hash generator/ }));
+    expect(window.location.hash).toBe('#/destination-hash');
   });
 });
