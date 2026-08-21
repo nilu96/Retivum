@@ -33,6 +33,8 @@
   --page-width-small: 900px;
   --page-width-medium: 1050px;
   --page-width-large: 1320px;
+  --directory-scroll-fade: 12px;
+  --directory-inline-inset: 14px;
   --radius-sm: 8px;
   --radius-md: 13px;
   --radius-lg: 18px;
@@ -400,10 +402,10 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .chat-sync-progress-value { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset .18s linear; }
 .mobile-conversation-sync-button { display: none; flex: none; }
 @keyframes chat-sync-spin { to { transform: rotate(360deg); } }
-.scope-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-inline: 18px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
+.scope-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; margin-inline: var(--directory-inline-inset); padding: 3px; border-radius: 10px; background: var(--surface-2); }
 .scope-tabs button { min-height: 35px; padding-inline: 5px; border: 0; border-radius: 8px; background: transparent; color: var(--text-muted); font-size: .78rem; font-weight: 650; transition: color .15s ease, background-color .15s ease, box-shadow .15s ease; }
 .scope-tabs button.active { color: var(--text); background: color-mix(in srgb, var(--accent-soft) 55%, var(--surface-3)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent), 0 1px 5px rgba(0,0,0,.12); }
-.search-field { display: flex; align-items: center; gap: 9px; margin: 13px 18px 0; padding-inline: 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-subtle); background: var(--surface-2); }
+.search-field { display: flex; align-items: center; gap: 9px; margin: 13px var(--directory-inline-inset) 0; padding-inline: 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-subtle); background: var(--surface-2); }
 .search-field:focus-within { border-color: var(--accent); }
 .search-field > svg { flex: none; }
 .search-field input { width: 100%; min-width: 0; min-height: 40px; padding: 0; border: 0; outline: 0; color: var(--text); background: transparent; }
@@ -411,7 +413,13 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .search-field input::-webkit-search-cancel-button { display: none; -webkit-appearance: none; appearance: none; }
 .search-clear-button { display: inline-grid; width: 28px; height: 28px; flex: none; place-items: center; padding: 0; border: 0; border-radius: 7px; color: var(--text-subtle); background: transparent; }
 .overview-content { display: grid; min-height: 0; place-items: center; padding: 28px 20px; overflow: auto; }
-.overview-content.has-items { align-content: start; place-items: stretch; padding: 13px 12px; }
+.overview-content.has-items,
+.nomad-directory-content,
+.provisioning-directory-content {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--directory-scroll-fade), #000 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--directory-scroll-fade), #000 100%);
+}
+.overview-content.has-items { align-content: start; place-items: stretch; padding: var(--directory-scroll-fade) var(--directory-inline-inset) 13px; }
 .chat-directory-list { display: grid; width: 100%; gap: 7px; }
 .chat-directory-row { display: grid; width: 100%; min-width: 0; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px; border: 1px solid transparent; border-radius: 11px; color: var(--text); background: transparent; text-align: start; }
 @media (hover: hover) and (pointer: fine) {
@@ -598,7 +606,7 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .nomad-page-error > .empty-state { width: 100%; }
 .nomad-directory { display: grid; height: 100%; min-height: 0; grid-column: 1; grid-row: 3; grid-template-rows: auto auto minmax(0, 1fr); overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
 .nomad-directory .scope-tabs { grid-template-columns: repeat(2, 1fr); }
-.nomad-directory-content { display: grid; min-height: 0; align-content: start; padding: 14px; overflow: auto; overscroll-behavior: contain; }
+.nomad-directory-content { display: grid; min-height: 0; align-content: start; padding: var(--directory-scroll-fade) var(--directory-inline-inset) 14px; overflow: auto; overscroll-behavior: contain; }
 .nomad-directory-content > .empty-state { align-self: center; margin: auto; }
 .nomad-destination-list { display: grid; width: 100%; gap: 7px; }
 .nomad-destination, .nomad-bookmark-row { width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); }
@@ -693,7 +701,8 @@ button.tool-card { width: 100%; cursor: pointer; transition: border-color .15s e
 .provisioning-section-icon { color: var(--text-muted); background: transparent; }
 .provisioning-section-navigation button.active .provisioning-section-icon { color: var(--accent-strong); }
 .provisioning-directory { display: grid; height: 100%; min-height: 0; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; padding-block: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-1); }
-.provisioning-directory-content { display: grid; min-height: 0; align-content: start; gap: 20px; padding: 14px; overflow: auto; }
+.provisioning-directory > .search-field { margin-block-start: 0; }
+.provisioning-directory-content { --directory-scroll-fade: 20px; display: grid; min-height: 0; align-content: start; gap: 20px; padding: var(--directory-scroll-fade) var(--directory-inline-inset) 14px; overflow: auto; }
 .provisioning-directory-content.empty { place-content: center; }
 .provisioning-directory-content > .empty-state { align-self: center; margin: auto; }
 .provisioning-directory-section { display: grid; gap: 8px; }
@@ -1616,8 +1625,8 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .chat-workspace { display: block; height: 100%; min-height: 0; overflow: hidden; }
   .chat-overview { height: 100%; min-height: 0; border: 0; }
   .chat-header { padding: 23px 17px 17px; }
-  .scope-tabs { margin-inline: 14px; }
-  .search-field { margin-inline: 14px; }
+  .scope-tabs { margin-inline: var(--directory-inline-inset); }
+  .search-field { margin-inline: var(--directory-inline-inset); }
   .trust-note { margin-inline: 14px; }
   .chat-workspace.conversation-selected .chat-overview { display: none; }
   .conversation-detail { height: 100%; min-height: 0; overflow: hidden; }
@@ -1763,7 +1772,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   }
   .nomad-directory .scope-tabs { margin-inline: 0; }
   .nomad-directory .search-field { margin: 10px 0 0; }
-  .nomad-directory-content { min-height: 0; max-height: none; padding: 12px 0 0; overflow: visible; overscroll-behavior: auto; }
+  .nomad-directory-content { min-height: 0; max-height: none; padding: var(--directory-scroll-fade) 0 0; overflow: visible; overscroll-behavior: auto; }
   .nomad-canvas { min-height: 390px; grid-column: 1; grid-row: auto; }
   .nomad-canvas.page-loaded { overflow: visible; }
   .settings-header { margin-block-end: 23px; }
