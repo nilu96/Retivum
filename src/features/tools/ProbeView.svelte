@@ -158,9 +158,9 @@
     };
   }
 
-  async function copyHistoryDestinationHash(destination: string): Promise<void> {
+  async function copyHistoryValue(value: string): Promise<void> {
     historyActions = undefined;
-    if (await copyText(destination)) toast.success('common.copied');
+    if (await copyText(value)) toast.success('common.copied');
     else toast.error('common.copyFailed');
   }
 
@@ -442,16 +442,22 @@
   >
     <button
       role="menuitem"
-      onclick={() => { void copyHistoryDestinationHash(historyActions!.entry.destinationHash); }}
+      onclick={() => { void copyHistoryValue(historyActions!.entry.destinationHash); }}
     >
       <Icon name="copy" size={17} />{$t('chat.destination.actions.copyHash')}
+    </button>
+    <button
+      role="menuitem"
+      onclick={() => { void copyHistoryValue(historyActions!.entry.fullDestinationName); }}
+    >
+      <Icon name="copy" size={17} />{$t('probe.history.actions.copyAspectName')}
     </button>
     <button
       role="menuitem"
       disabled={$pendingProbeDestinationHashes.has(historyActions.entry.destinationHash)}
       onclick={() => { repeatHistoryProbe(historyActions!.entry); }}
     >
-      <Icon name="probe" size={17} />{$t('probe.history.actions.repeat')}
+      <Icon name="sync" size={17} />{$t('probe.history.actions.repeat')}
     </button>
   </ContextMenu>
 {/if}

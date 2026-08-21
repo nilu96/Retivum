@@ -1111,6 +1111,7 @@
   "probe.history.errorCode": "Error code: {code}",
   "probe.history.actions.label": "Probe history actions",
   "probe.history.actions.close": "Close probe history actions",
+  "probe.history.actions.copyAspectName": "Copy aspect name",
   "probe.history.actions.repeat": "Repeat probe",
   "tools.status.title": "Status details",
   "tools.status.description": "View every interface and the number of active links, with an option to close all links.",

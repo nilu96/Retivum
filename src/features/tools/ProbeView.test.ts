@@ -190,7 +190,7 @@ describe('ProbeView', () => {
     expect(screen.getByRole('status')).toHaveTextContent('The cached path was dropped.');
   });
 
-  it('copies and repeats a completed probe from its history context menu', async () => {
+  it('copies the destination hash and aspect name and repeats a completed history probe', async () => {
     const destination = 'b'.repeat(32);
     const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
     const writeText = vi.fn().mockResolvedValue(undefined);
@@ -227,8 +227,13 @@ describe('ProbeView', () => {
       await fireEvent.contextMenu(contextTrigger, { clientX: 100, clientY: 100 });
       expect(screen.getAllByRole('menuitem').map((item) => item.textContent?.trim())).toEqual([
         'Copy destination hash',
+        'Copy aspect name',
         'Repeat probe',
       ]);
+      await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy aspect name' }));
+      expect(writeText).toHaveBeenCalledWith('lxmf.delivery');
+
+      await fireEvent.contextMenu(contextTrigger, { clientX: 100, clientY: 100 });
       await fireEvent.click(screen.getByRole('menuitem', { name: 'Copy destination hash' }));
       expect(writeText).toHaveBeenCalledWith(destination);
 
