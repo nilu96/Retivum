@@ -124,7 +124,7 @@
   }
 </script>
 
-<div class="page destination-hash-page" bind:this={page}>
+<div class="page page-small destination-hash-page" bind:this={page}>
   <header class="page-header provisioning-header destination-hash-header">
     <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('destinationHash.backToTools')}
@@ -317,7 +317,6 @@
 <style>
   .destination-hash-page {
     display: grid;
-    max-width: 900px;
     min-width: 0;
     align-content: start;
     gap: 26px;

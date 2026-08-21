@@ -754,7 +754,7 @@
   }
 </script>
 
-<div class="page provisioning-page">
+<div class="page page-medium provisioning-page">
   <header class="page-header provisioning-header">
     <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('provisioning.backToTools')}

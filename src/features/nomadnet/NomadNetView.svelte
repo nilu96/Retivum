@@ -1178,7 +1178,7 @@
 
 <svelte:window onkeydown={handleViewKeydown} />
 
-<div class="page nomad-page">
+<div class="page page-large nomad-page">
   <header class="page-header nomad-header">
     <div>
       <p class="eyebrow">{$t('app.name')}</p>

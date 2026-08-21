@@ -83,7 +83,7 @@
   ];
 </script>
 
-<div class="page tools-page">
+<div class="page page-medium tools-page">
   <header class="page-header tools-header">
     <div>
       <p class="eyebrow">{$t('app.name')}</p>

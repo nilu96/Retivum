@@ -53,7 +53,7 @@
   }
 </script>
 
-<div class="page status-details-page" bind:this={page}>
+<div class="page page-medium status-details-page" bind:this={page}>
   <header class="page-header provisioning-header status-details-header">
     <button class="button secondary compact provisioning-back-button" type="button" onclick={() => navigateBack('tools')}>
       <Icon name="arrow-left" size={16} />{$t('status.backToTools')}

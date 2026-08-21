@@ -434,7 +434,7 @@
   }
 </script>
 
-<div class="page settings-page">
+<div class="page page-medium settings-page">
   <header class="page-header settings-header">
     <div>
       <p class="eyebrow">{$t('app.name')}</p>
