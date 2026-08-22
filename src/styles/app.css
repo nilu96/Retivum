@@ -1664,10 +1664,12 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   .nomad-mobile-browser.expanded {
     max-height: calc(
       100dvh
-      - env(safe-area-inset-top, 0px)
+      - var(
+        --nomad-mobile-browser-viewport-top,
+        calc(env(safe-area-inset-top, 0px) + 10px)
+      )
       - env(safe-area-inset-bottom, 0px)
       - var(--bottom-nav-height)
-      - 10px
       - var(--mobile-page-bottom-inset)
     );
     overflow: hidden;
@@ -1730,14 +1732,14 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     gap: 12px;
     padding: 12px 5px 5px;
   }
-  .nomad-mobile-browser.expanded.stuck .nomad-browser-panel:not(.scrollable) { overflow: visible; }
-  .nomad-mobile-browser.expanded.stuck .nomad-browser-panel.scrollable {
+  .nomad-mobile-browser.expanded .nomad-browser-panel:not(.scrollable) { overflow: visible; }
+  .nomad-mobile-browser.expanded .nomad-browser-panel.scrollable {
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: none;
     -webkit-overflow-scrolling: touch;
   }
-  .nomad-mobile-browser.expanded.stuck .nomad-browser-panel.scrollable::-webkit-scrollbar {
+  .nomad-mobile-browser.expanded .nomad-browser-panel.scrollable::-webkit-scrollbar {
     display: none;
   }
   .nomad-address {

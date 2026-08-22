@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick, untrack } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { slide } from 'svelte/transition';
   import { createDateFormatter, locale, t, type MessageKey } from '../../i18n';
   import {
@@ -116,8 +116,6 @@
   let mobileBrowserElement = $state<HTMLElement>();
   let mobileToolbarStuck = $state(false);
   let mobileToolbarAtStickyEdge = $state(false);
-  let mobileToolbarScrollTakeoverActive = $state(false);
-  let mobileToolbarDocumentLockY: number | undefined;
   let mobileToolbarStickyBoundaryY: number | undefined;
   let mobileToolbarViewportAnchorTop: number | undefined;
   let mobileToolbarViewportOffset = 0;
@@ -232,6 +230,7 @@
       }
       mobileCanvasElement?.classList.remove('nomad-toolbar-viewport-anchor');
       mobileCanvasElement?.style.removeProperty('--nomad-toolbar-viewport-offset');
+      mobileBrowserElement?.style.removeProperty('--nomad-mobile-browser-viewport-top');
       document.documentElement.classList.remove(mobileToolbarViewportPreservationClass);
       mobileQuery?.removeEventListener('change', updateMobileViewport);
       motionQuery?.removeEventListener('change', updateMotionPreference);
@@ -438,9 +437,6 @@
         <= (mobileToolbarStickyBoundaryY ?? window.scrollY) + 1;
     }
     directoryExpanded = expanded;
-    if (expanded && mobileToolbarStuck) {
-      mobileToolbarDocumentLockY = window.scrollY;
-    }
   }
 
   function resetPageViewport(): void {
@@ -462,8 +458,6 @@
     if (mobilePanelElement) mobilePanelElement.scrollTop = 0;
     mobileToolbarStuck = false;
     mobileToolbarAtStickyEdge = false;
-    mobileToolbarScrollTakeoverActive = false;
-    mobileToolbarDocumentLockY = undefined;
     mobileToolbarStickyBoundaryY = undefined;
     if (mobileViewport) window.scrollTo(0, 0);
   }
@@ -533,7 +527,6 @@
       minimumScrollY,
       currentScrollY - mobileToolbarViewportOffset,
     );
-    const intendedScrollDelta = targetScrollY - currentScrollY;
     canvas?.classList.remove('nomad-toolbar-viewport-anchor');
     canvas?.style.removeProperty('--nomad-toolbar-viewport-offset');
     window.scrollTo(window.scrollX, targetScrollY);
@@ -543,8 +536,6 @@
         window.scrollTo(window.scrollX, Math.max(minimumScrollY, targetScrollY + residual));
       }
     }
-    mobileToolbarDocumentLockY = (mobileToolbarDocumentLockY ?? currentScrollY)
-      + intendedScrollDelta;
     preservingMobileToolbarViewport = false;
     mobileToolbarViewportAnchorTop = undefined;
     mobileToolbarViewportOffset = 0;
@@ -559,9 +550,8 @@
     if (!mobileViewport || !active || !mobileBrowserElement) {
       mobileToolbarStuck = false;
       mobileToolbarAtStickyEdge = false;
-      mobileToolbarScrollTakeoverActive = false;
-      mobileToolbarDocumentLockY = undefined;
       mobileToolbarStickyBoundaryY = undefined;
+      mobileBrowserElement?.style.removeProperty('--nomad-mobile-browser-viewport-top');
       return;
     }
     // Mobile overlays lock the body with fixed positioning. Ignore the
@@ -571,43 +561,27 @@
     const stickyTop = Number.parseFloat(getComputedStyle(mobileBrowserElement).top);
     const resolvedStickyTop = Number.isFinite(stickyTop) ? stickyTop : 0;
     const toolbarTop = mobileBrowserElement.getBoundingClientRect().top;
+    mobileBrowserElement.style.setProperty(
+      '--nomad-mobile-browser-viewport-top',
+      `${Math.max(resolvedStickyTop, toolbarTop)}px`,
+    );
     const stuck = window.scrollY > 0 && toolbarTop <= resolvedStickyTop + 1;
     if (!stuck) {
       mobileToolbarStuck = false;
       mobileToolbarAtStickyEdge = false;
-      mobileToolbarScrollTakeoverActive = false;
-      mobileToolbarDocumentLockY = window.scrollY + Math.max(0, toolbarTop - resolvedStickyTop);
-      mobileToolbarStickyBoundaryY = undefined;
+      mobileToolbarStickyBoundaryY = window.scrollY + Math.max(0, toolbarTop - resolvedStickyTop);
       return;
     }
 
     const enteringStickyState = !mobileToolbarStuck;
     mobileToolbarStuck = true;
-    if (mobileToolbarDocumentLockY === undefined) {
-      mobileToolbarDocumentLockY = window.scrollY;
-    }
     if (enteringStickyState) {
       mobileToolbarAtStickyEdge = true;
-      mobileToolbarStickyBoundaryY = mobileToolbarDocumentLockY;
-      mobileToolbarScrollTakeoverActive = directoryExpanded && mobilePanelScrollable;
+      mobileToolbarStickyBoundaryY ??= window.scrollY;
     } else {
       mobileToolbarAtStickyEdge = window.scrollY
         <= (mobileToolbarStickyBoundaryY ?? window.scrollY) + 1;
     }
-    if (
-      !mobileToolbarScrollTakeoverActive
-      || !directoryExpanded
-      || !mobilePanelScrollable
-      || window.scrollY <= mobileToolbarDocumentLockY
-    ) {
-      return;
-    }
-
-    const transferredDistance = window.scrollY - mobileToolbarDocumentLockY;
-    if (mobilePanelElement) {
-      mobilePanelElement.scrollTop += transferredDistance;
-    }
-    window.scrollTo(window.scrollX, mobileToolbarDocumentLockY);
   }
 
   function updateMobilePanelScrollability(): void {
@@ -617,11 +591,6 @@
       return;
     }
     const scrollable = panel.scrollHeight > panel.clientHeight + 1;
-    const wasScrollable = untrack(() => mobilePanelScrollable);
-    if (scrollable && !wasScrollable && mobileToolbarStuck) {
-      mobileToolbarDocumentLockY = window.scrollY;
-      mobileToolbarScrollTakeoverActive = true;
-    }
     mobilePanelScrollable = scrollable;
   }
 
@@ -1223,7 +1192,6 @@
     class:expanded={directoryExpanded}
     class:stuck={mobileToolbarStuck}
     class:at-sticky-edge={mobileToolbarAtStickyEdge}
-    class:scroll-takeover={mobileToolbarScrollTakeoverActive}
     bind:this={mobileBrowserElement}
   >
     {#if mobileViewport}

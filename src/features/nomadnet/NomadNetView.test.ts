@@ -142,7 +142,6 @@ describe('NomadNetView', () => {
     await fireEvent.scroll(window);
     await waitFor(() => expect(browser).toHaveClass('stuck'));
     expect(browser).toHaveClass('at-sticky-edge');
-    expect(browser).not.toHaveClass('scroll-takeover');
 
     scrollY.mockReturnValue(160);
     await fireEvent.scroll(window);
@@ -445,7 +444,7 @@ describe('NomadNetView', () => {
     await waitFor(() => expect(panel).not.toHaveClass('scrollable'));
   });
 
-  it('hands continued page scrolling to an overflowing panel when the toolbar locks', async () => {
+  it('keeps an overflowing expanded panel as the native scroller across the sticky boundary', async () => {
     useMobileViewport();
     setNomadDestinations([{
       destinationHash: 'a'.repeat(32),
@@ -456,10 +455,8 @@ describe('NomadNetView', () => {
 
     const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
     const panel = container.querySelector<HTMLElement>('.nomad-browser-panel')!;
-    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
     let scrollY = 0;
     vi.spyOn(window, 'scrollY', 'get').mockImplementation(() => scrollY);
-    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(0);
     const scrollTo = vi.mocked(window.scrollTo);
     vi.spyOn(browser, 'getBoundingClientRect').mockImplementation(() => ({
       x: 0,
@@ -485,6 +482,7 @@ describe('NomadNetView', () => {
       target: { value: 'missing' },
     });
     await waitFor(() => expect(panel).toHaveClass('scrollable'));
+    expect(browser).not.toHaveClass('stuck');
 
     scrollY = 90;
     await fireEvent.scroll(window);
@@ -494,22 +492,19 @@ describe('NomadNetView', () => {
     await fireEvent.scroll(window);
     await waitFor(() => expect(browser).toHaveClass('stuck'));
     expect(browser).toHaveClass('at-sticky-edge');
-    expect(browser).toHaveClass('scroll-takeover');
-    expect(scrollTo).toHaveBeenLastCalledWith(0, 100);
-    expect(panel.scrollTop).toBe(20);
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(panel.scrollTop).toBe(0);
 
-    await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
-    scrollY = 140;
+    // Repeated document/visual-viewport notifications must not transfer the
+    // same distance into the panel or create a corrective scroll loop.
     await fireEvent.scroll(window);
-    expect(browser).toHaveClass('stuck');
-    expect(browser).not.toHaveClass('at-sticky-edge');
-    expect(browser).toHaveClass('scroll-takeover');
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(panel.scrollTop).toBe(0);
 
     scrollY = 90;
     await fireEvent.scroll(window);
     await waitFor(() => expect(browser).not.toHaveClass('stuck'));
-    expect(browser).not.toHaveClass('at-sticky-edge');
-    expect(browser).not.toHaveClass('scroll-takeover');
+    expect(panel).toHaveClass('scrollable');
   });
 
   it('does not redefine the sticky edge when a compact pill expands', async () => {
@@ -556,7 +551,6 @@ describe('NomadNetView', () => {
       heardAt: '2026-07-16T10:00:00.000Z',
     }]);
     await waitFor(() => expect(panel).toHaveClass('scrollable'));
-    expect(browser).toHaveClass('scroll-takeover');
     expect(browser).not.toHaveClass('at-sticky-edge');
 
     await fireEvent.click(within(toolbar).getByRole('button', { name: 'Hide destination list' }));
