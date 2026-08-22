@@ -170,6 +170,20 @@ describe('NomadNetView', () => {
     const panelScrollTo = vi.fn();
     Object.defineProperty(panel, 'scrollTo', { configurable: true, value: panelScrollTo });
     panel.scrollTop = 180;
+    browser.style.top = '18px';
+    vi.spyOn(browser, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 118,
+      top: 118,
+      right: 320,
+      bottom: 418,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(30);
+    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(7);
 
     await fireEvent.click(positionButton);
     expect(panelScrollTo).toHaveBeenCalledWith({
@@ -177,13 +191,51 @@ describe('NomadNetView', () => {
       left: 0,
       behavior: 'auto',
     });
-    expect(window.scrollTo).not.toHaveBeenCalled();
+    expect(window.scrollTo).toHaveBeenCalledWith({
+      top: 130,
+      left: 7,
+      behavior: 'auto',
+    });
 
     panelScrollTo.mockClear();
+    vi.mocked(window.scrollTo).mockClear();
     await fireEvent.click(panelToggle);
     expect(browser).not.toHaveClass('expanded');
     expect(toolbar.querySelector('.nomad-toolbar-position-button')).not.toBeInTheDocument();
     expect(panelScrollTo).not.toHaveBeenCalled();
+    expect(window.scrollTo).not.toHaveBeenCalled();
+  });
+
+  it('moves the expanded mobile toolbar to its sticky boundary when selecting either scope', async () => {
+    useMobileViewport();
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    browser.style.top = '18px';
+    vi.spyOn(browser, 'getBoundingClientRect').mockReturnValue({
+      x: 0,
+      y: 118,
+      top: 118,
+      right: 320,
+      bottom: 418,
+      left: 0,
+      width: 320,
+      height: 300,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(30);
+    vi.spyOn(window, 'scrollX', 'get').mockReturnValue(7);
+
+    for (const scopeName of ['Bookmarks', 'Announces']) {
+      vi.mocked(window.scrollTo).mockClear();
+      await fireEvent.click(screen.getByRole('tab', { name: scopeName }));
+      expect(screen.getByRole('tab', { name: scopeName })).toHaveAttribute('aria-selected', 'true');
+      expect(window.scrollTo).toHaveBeenCalledWith({
+        top: 130,
+        left: 7,
+        behavior: 'auto',
+      });
+    }
   });
 
   it('expands the mobile toolbar when returning to the empty address state', async () => {

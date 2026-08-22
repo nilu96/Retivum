@@ -434,11 +434,29 @@
       !mobileViewport
       || !directoryExpanded
       || !mobilePanelElement
+      || !mobileBrowserElement
     ) return;
+    const behavior = reducedMotion ? 'auto' : 'smooth';
     mobilePanelElement.scrollTo({
       top: 0,
       left: 0,
-      behavior: reducedMotion ? 'auto' : 'smooth',
+      behavior,
+    });
+    scrollExpandedMobileToolbarToStickyTop();
+  }
+
+  function scrollExpandedMobileToolbarToStickyTop(): void {
+    if (!mobileViewport || !directoryExpanded || !mobileBrowserElement) return;
+    const behavior = reducedMotion ? 'auto' : 'smooth';
+    const stickyTop = Number.parseFloat(getComputedStyle(mobileBrowserElement).top);
+    const resolvedStickyTop = Number.isFinite(stickyTop) ? stickyTop : 0;
+    const distanceToStickyTop = mobileBrowserElement.getBoundingClientRect().top
+      - resolvedStickyTop;
+    if (distanceToStickyTop <= 1) return;
+    window.scrollTo({
+      top: window.scrollY + distanceToStickyTop,
+      left: window.scrollX,
+      behavior,
     });
   }
 
@@ -476,6 +494,7 @@
   }
 
   function selectDirectoryScope(nextScope: NomadDirectoryScope): void {
+    scrollExpandedMobileToolbarToStickyTop();
     if (scope !== nextScope || query) {
       beginMobileToolbarViewportPreservation();
     }
