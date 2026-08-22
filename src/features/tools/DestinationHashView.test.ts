@@ -16,6 +16,18 @@ describe('DestinationHashView', () => {
     vi.restoreAllMocks();
   });
 
+  it('offers to scroll the destination hash generator back to the top', async () => {
+    const main = document.createElement('main');
+    Object.defineProperty(main, 'scrollTo', { configurable: true, value: vi.fn() });
+    document.body.append(main);
+    render(DestinationHashView, { target: main });
+
+    main.scrollTop = 120;
+    await fireEvent.scroll(main);
+    expect(await screen.findByRole('button', { name: 'Scroll to top' })).toHaveClass('page-scroll-top');
+    main.remove();
+  });
+
   it('offers only classified aspect names while allowing custom input', async () => {
     render(DestinationHashView);
 
