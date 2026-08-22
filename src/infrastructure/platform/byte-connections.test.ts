@@ -113,6 +113,7 @@ describe('Electron TCP byte connection', () => {
 
 describe('Capacitor TCP byte connection', () => {
   afterEach(() => {
+    capacitorPlatform.name = 'android';
     window.retivumDesktopSockets = undefined;
     window.retivumMobileSockets = undefined;
     tcpClient.createConnection.mockReset();
@@ -185,6 +186,26 @@ describe('Capacitor TCP byte connection', () => {
 
     await expect(socket.isConnected?.()).resolves.toBe(false);
     expect(connection.isConnected).toHaveBeenCalledOnce();
+    await socket.close();
+  });
+
+  it('reconnects iOS TCP without invoking the blocking native health check', async () => {
+    capacitorPlatform.name = 'ios';
+    const connection = {
+      addListener: vi.fn().mockResolvedValue({ remove: vi.fn().mockResolvedValue(undefined) }),
+      connect: vi.fn().mockResolvedValue({ error: false, connected: true }),
+      startRead: vi.fn().mockResolvedValue({ error: false, reading: true }),
+      write: vi.fn(),
+      isConnected: vi.fn().mockResolvedValue({ error: false, connected: true }),
+      destroy: vi.fn().mockResolvedValue(undefined),
+    };
+    tcpClient.createConnection.mockReturnValue(connection);
+    const socket = createTcpByteConnection(createTcpInterfaceDraft('capacitor-ios-resume'));
+
+    await socket.open(vi.fn(), vi.fn());
+
+    await expect(socket.isConnected?.()).resolves.toBe(false);
+    expect(connection.isConnected).not.toHaveBeenCalled();
     await socket.close();
   });
 });

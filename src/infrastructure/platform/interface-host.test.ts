@@ -6,23 +6,29 @@ const transport = vi.hoisted(() => {
   let rejectFirstOpen: ((error: Error) => void) | undefined;
   let releaseBlockedWrite: (() => void) | undefined;
   let releaseBlockedClose: (() => void) | undefined;
+  let releaseBlockedHealthCheck: (() => void) | undefined;
   let blockNextWrite = false;
   let blockNextClose = false;
+  let blockNextHealthCheck = false;
   let failFirstWhenClosed = false;
   return {
     events: [] as string[],
     connectionCount: 0,
     connected: true,
+    healthChecks: 0,
     reset() {
       this.events = [];
       this.connectionCount = 0;
       this.connected = true;
+      this.healthChecks = 0;
       releaseFirstOpen = undefined;
       rejectFirstOpen = undefined;
       releaseBlockedWrite = undefined;
       releaseBlockedClose = undefined;
+      releaseBlockedHealthCheck = undefined;
       blockNextWrite = false;
       blockNextClose = false;
+      blockNextHealthCheck = false;
       failFirstWhenClosed = false;
     },
     releaseFirst() {
@@ -34,6 +40,9 @@ const transport = vi.hoisted(() => {
     blockClose() {
       blockNextClose = true;
     },
+    blockHealthCheck() {
+      blockNextHealthCheck = true;
+    },
     failOpeningConnectionWhenClosed() {
       failFirstWhenClosed = true;
     },
@@ -42,6 +51,9 @@ const transport = vi.hoisted(() => {
     },
     releaseClose() {
       releaseBlockedClose?.();
+    },
+    releaseHealthCheck() {
+      releaseBlockedHealthCheck?.();
     },
     create() {
       const number = ++this.connectionCount;
@@ -78,7 +90,14 @@ const transport = vi.hoisted(() => {
             else releaseFirstOpen?.();
           }
         },
-        async isConnected() { return transport.connected; },
+        async isConnected() {
+          transport.healthChecks += 1;
+          if (blockNextHealthCheck) {
+            blockNextHealthCheck = false;
+            await new Promise<void>((resolve) => { releaseBlockedHealthCheck = resolve; });
+          }
+          return transport.connected;
+        },
       };
     },
   };
@@ -227,6 +246,41 @@ describe('platform interface lifecycle', () => {
       type: 'platformInterfaceState',
       state: 'offline',
     }));
+  });
+
+  it('does not probe a TCP interface while its native connection is opening', async () => {
+    const config = createTcpInterfaceDraft('tcp-opening-resume');
+    const host = new PlatformInterfaceHost(() => undefined, () => undefined);
+
+    const opening = host.open(config);
+    await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
+
+    await host.resume();
+    expect(transport.healthChecks).toBe(0);
+
+    transport.releaseFirst();
+    await opening;
+    await host.resume();
+    expect(transport.healthChecks).toBe(1);
+  });
+
+  it('deduplicates overlapping TCP resume health checks', async () => {
+    const config = createTcpInterfaceDraft('tcp-overlapping-resume');
+    const host = new PlatformInterfaceHost(() => undefined, () => undefined);
+    const opening = host.open(config);
+    await vi.waitFor(() => expect(transport.events).toEqual(['open:1:start']));
+    transport.releaseFirst();
+    await opening;
+
+    transport.blockHealthCheck();
+    const firstResume = host.resume();
+    await vi.waitFor(() => expect(transport.healthChecks).toBe(1));
+    const secondResume = host.resume();
+    await Promise.resolve();
+    expect(transport.healthChecks).toBe(1);
+
+    transport.releaseHealthCheck();
+    await Promise.all([firstResume, secondResume]);
   });
 
   it('passes UDP datagrams without TCP HDLC framing', async () => {

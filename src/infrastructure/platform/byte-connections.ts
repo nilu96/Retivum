@@ -710,6 +710,13 @@ class CapacitorTcpByteConnection implements ByteConnection {
   async isConnected(): Promise<boolean> {
     const connection = this.connection;
     if (!connection || this.closing) return false;
+    // The current iOS plugin performs this health check by synchronously
+    // waiting on its socket queue from UIKit's main queue. An in-flight connect
+    // can therefore freeze the app for the full connection timeout. Returning
+    // false makes the shared resume path rebuild the socket without invoking
+    // that unsafe native method. Android's implementation runs off the UI
+    // thread and can retain the cheaper in-place health check.
+    if (Capacitor.getPlatform() === 'ios') return false;
     const result = await connection.isConnected();
     if (result.error) throw new Error(result.errorMessage ?? 'TCP_CONNECTION_CHECK_FAILED');
     return result.connected;

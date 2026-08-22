@@ -179,7 +179,9 @@ export class PlatformInterfaceHost {
 class TcpHost implements HostedInterface {
   private readonly connection: ByteConnection;
   private readonly deframer = new HdlcDeframer();
+  private opening = false;
   private closing = false;
+  private resumeOperation?: Promise<void>;
 
   constructor(
     private readonly config: TcpInterfaceConfig,
@@ -191,6 +193,7 @@ class TcpHost implements HostedInterface {
 
   async open(): Promise<void> {
     this.closing = false;
+    this.opening = true;
     this.deframer.reset();
     this.log('TCP_CONNECTING', {
       interfaceId: this.config.id,
@@ -220,6 +223,8 @@ class TcpHost implements HostedInterface {
         message: errorMessage(error),
       });
       this.post({ type: 'platformInterfaceState', id: this.config.id, state: 'error', errorCode: 'TCP_CONNECTION_FAILED' });
+    } finally {
+      this.opening = false;
     }
   }
 
@@ -237,9 +242,23 @@ class TcpHost implements HostedInterface {
   }
 
   async resume(): Promise<void> {
-    if (this.closing || !this.connection.isConnected) return;
+    const validateConnection = this.connection.isConnected;
+    if (this.closing || this.opening || !validateConnection) return;
+    if (this.resumeOperation) return this.resumeOperation;
+    const operation = this.checkConnectionAfterResume(validateConnection);
+    this.resumeOperation = operation;
     try {
-      if (await this.connection.isConnected()) return;
+      await operation;
+    } finally {
+      if (this.resumeOperation === operation) this.resumeOperation = undefined;
+    }
+  }
+
+  private async checkConnectionAfterResume(
+    validateConnection: NonNullable<ByteConnection['isConnected']>,
+  ): Promise<void> {
+    try {
+      if (await validateConnection.call(this.connection)) return;
       this.log('TCP_RESUME_STALE', {
         interfaceId: this.config.id,
         host: this.config.connection.host,
@@ -259,6 +278,7 @@ class TcpHost implements HostedInterface {
 
   async close(): Promise<void> {
     this.closing = true;
+    this.opening = false;
     this.deframer.reset();
     await this.connection.close().catch(() => undefined);
   }
