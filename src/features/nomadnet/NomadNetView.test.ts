@@ -158,6 +158,34 @@ describe('NomadNetView', () => {
     expect(browser).not.toHaveClass('expanded');
   });
 
+  it('scrolls expanded toolbar content to the top when tapping header whitespace', async () => {
+    useMobileViewport();
+    const { container } = render(NomadNetView);
+
+    const browser = container.querySelector<HTMLElement>('.nomad-mobile-browser')!;
+    const panel = container.querySelector<HTMLElement>('.nomad-browser-panel')!;
+    const toolbar = await screen.findByRole('navigation', { name: 'NomadNet page controls' });
+    const panelToggle = within(toolbar).getByRole('button', { name: 'Hide destination list' });
+    const positionButton = toolbar.querySelector<HTMLButtonElement>('.nomad-toolbar-position-button')!;
+    const panelScrollTo = vi.fn();
+    Object.defineProperty(panel, 'scrollTo', { configurable: true, value: panelScrollTo });
+    panel.scrollTop = 180;
+
+    await fireEvent.click(positionButton);
+    expect(panelScrollTo).toHaveBeenCalledWith({
+      top: 0,
+      left: 0,
+      behavior: 'auto',
+    });
+    expect(window.scrollTo).not.toHaveBeenCalled();
+
+    panelScrollTo.mockClear();
+    await fireEvent.click(panelToggle);
+    expect(browser).not.toHaveClass('expanded');
+    expect(toolbar.querySelector('.nomad-toolbar-position-button')).not.toBeInTheDocument();
+    expect(panelScrollTo).not.toHaveBeenCalled();
+  });
+
   it('expands the mobile toolbar when returning to the empty address state', async () => {
     useMobileViewport();
     const { rerender } = render(NomadNetView, { active: true });

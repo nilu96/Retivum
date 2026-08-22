@@ -429,6 +429,19 @@
     setDirectoryExpanded(!directoryExpanded);
   }
 
+  function scrollExpandedMobileToolbarContentToTop(): void {
+    if (
+      !mobileViewport
+      || !directoryExpanded
+      || !mobilePanelElement
+    ) return;
+    mobilePanelElement.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: reducedMotion ? 'auto' : 'smooth',
+    });
+  }
+
   function setDirectoryExpanded(expanded: boolean): void {
     if (directoryExpanded === expanded) return;
     beginMobileToolbarViewportPreservation();
@@ -1195,7 +1208,10 @@
     bind:this={mobileBrowserElement}
   >
     {#if mobileViewport}
-      <nav class="nomad-mobile-toolbar" aria-label={$t('nomadnet.page.actions.label')}>
+      <nav
+        class="nomad-mobile-toolbar"
+        aria-label={$t('nomadnet.page.actions.label')}
+      >
         <button
           class="icon-button"
           class:nomad-back-button={!loadingPage}
@@ -1262,6 +1278,15 @@
           })}
           onclick={toggleDirectory}
         ><Icon name="chevron-down" size={19} /></button>
+        {#if directoryExpanded}
+          <button
+            class="nomad-toolbar-position-button"
+            type="button"
+            aria-hidden="true"
+            tabindex="-1"
+            onclick={scrollExpandedMobileToolbarContentToTop}
+          ></button>
+        {/if}
       </nav>
     {/if}
 

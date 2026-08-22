@@ -1675,6 +1675,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     overflow: hidden;
   }
   .nomad-mobile-toolbar {
+    position: relative;
     display: flex;
     min-width: 0;
     min-height: 52px;
@@ -1685,6 +1686,7 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
   }
   .nomad-mobile-toolbar .icon-button {
     position: relative;
+    z-index: 1;
     width: 42px;
     height: 42px;
     flex: 0 1 42px;
@@ -1693,6 +1695,29 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
     border-radius: 50%;
     background: transparent;
     box-shadow: none;
+  }
+  .nomad-toolbar-position-button,
+  .nomad-toolbar-position-button:hover,
+  .nomad-toolbar-position-button:active,
+  .nomad-toolbar-position-button:focus,
+  .nomad-toolbar-position-button:focus-visible {
+    position: absolute;
+    z-index: 0;
+    border: 0;
+    inset: 0;
+    padding: 0;
+    border-radius: inherit;
+    outline: 0;
+    color: transparent;
+    background: transparent;
+    box-shadow: none;
+    filter: none;
+    transform: none;
+    transition: none;
+    cursor: default;
+    -webkit-appearance: none;
+    appearance: none;
+    -webkit-tap-highlight-color: transparent;
   }
   .nomad-mobile-toolbar .nomad-identify-button.identified {
     border-color: transparent;
