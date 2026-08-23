@@ -21,6 +21,7 @@
     contextMenuTrigger,
     type ContextMenuOpenMethod,
   } from '../../lib/actions/contextMenuTrigger';
+  import { keepInputSelectionVisible } from '../../lib/actions/keepInputSelectionVisible';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
   import Icon from '../../lib/components/Icon.svelte';
@@ -172,6 +173,7 @@
         <div class="propagation-node-combobox" bind:this={namePicker}>
           <input
             id="destination-hash-aspect"
+            use:keepInputSelectionVisible
             bind:value={fullDestinationName}
             placeholder={$t('destinationHash.aspectName.placeholder')}
             autocapitalize="none"

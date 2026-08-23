@@ -53,6 +53,7 @@
   import TcpInterfaceEditor from './TcpInterfaceEditor.svelte';
   import UdpInterfaceEditor from './UdpInterfaceEditor.svelte';
   import { copyText } from '../../lib/clipboard';
+  import { keepInputSelectionVisible } from '../../lib/actions/keepInputSelectionVisible';
   import { toast } from '../../lib/notifications/toasts';
 
   const repository = new BrowserSettingsRepository();
@@ -669,6 +670,7 @@
           <div class="propagation-node-combobox" bind:this={propagationNodePicker}>
             <input
               id="preferred-propagation-node"
+              use:keepInputSelectionVisible
               bind:value={propagationNodeDraft}
               placeholder={$t('settings.lxmf.propagationNode.placeholder')}
               autocapitalize="none"

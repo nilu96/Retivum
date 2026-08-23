@@ -23,6 +23,7 @@
     contextMenuTrigger,
     type ContextMenuOpenMethod,
   } from '../../lib/actions/contextMenuTrigger';
+  import { keepInputSelectionVisible } from '../../lib/actions/keepInputSelectionVisible';
   import { copyText } from '../../lib/clipboard';
   import ContextMenu from '../../lib/components/ContextMenu.svelte';
   import EmptyState from '../../lib/components/EmptyState.svelte';
@@ -220,6 +221,7 @@
         <div class="propagation-node-combobox" bind:this={destinationPicker}>
           <input
             id="probe-destination"
+            use:keepInputSelectionVisible
             bind:value={destinationHash}
             placeholder={$t('probe.destination.placeholder')}
             autocapitalize="none"
@@ -269,6 +271,7 @@
         <div class="propagation-node-combobox probe-name-combobox" bind:this={namePicker}>
           <input
             id="probe-destination-name"
+            use:keepInputSelectionVisible
             bind:value={fullDestinationName}
             autocapitalize="none"
             autocomplete="off"
