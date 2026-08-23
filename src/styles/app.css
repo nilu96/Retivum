@@ -841,13 +841,33 @@ input[role='switch']:checked::after { translate: 17px 0; background: var(--accen
 .field select option { color: var(--text); background: var(--surface-2); }
 .field select:disabled { background-color: var(--surface-1); }
 .field input[aria-invalid='true'] { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
-.propagation-node-combobox { --combobox-toggle-size: 40px; position: relative; }
-.field .propagation-node-combobox > input { padding-inline-end: calc(var(--combobox-toggle-size) + 12px); font-family: "SFMono-Regular", Consolas, monospace; }
+.propagation-node-combobox {
+  --combobox-toggle-size: 40px;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--combobox-toggle-size);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  transition: border-color .15s ease, background-color .15s ease, box-shadow .15s ease;
+}
+.field .propagation-node-combobox > input {
+  min-width: 0;
+  min-height: var(--combobox-toggle-size);
+  padding-inline: 11px;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  background: transparent;
+  box-shadow: none;
+  font-family: "SFMono-Regular", Consolas, monospace;
+}
+.field .propagation-node-combobox > input:focus,
+.field .propagation-node-combobox > input[aria-invalid='true'] { border: 0; box-shadow: none; }
+.propagation-node-combobox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.propagation-node-combobox:has(> input[aria-invalid='true']) { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
 .propagation-node-menu-toggle {
-  position: absolute;
+  position: static;
   z-index: 2;
-  inset-block-start: 1px;
-  inset-inline-end: 1px;
   display: grid;
   width: var(--combobox-toggle-size);
   height: var(--combobox-toggle-size);
